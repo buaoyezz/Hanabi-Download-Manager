@@ -1,0 +1,4 @@
+requests>=2.25.1
+PySide6>=6.3.0
+pywin32>=228;platform_system=="Windows"
+websockets>=10.4 
