@@ -128,7 +128,6 @@ class FontManager:
         self._load_fonts_sync()
     
     def _load_fonts_sync(self):
-        """同步加载字体"""
         log.info("开始同步加载字体")
         font_db = QFontDatabase()
         fonts_to_load = [
@@ -246,7 +245,7 @@ class FontManager:
     def _create_optimized_font(self, is_bold=False):
         font = QFont()
         
-        # 设置字体族优先级
+        # 优先级
         # 如果自定义字体已被加载，使用实际的注册名称
         if hasattr(self, 'loaded_families') and self.loaded_families:
             # 确保使用正确加载的字体名称
