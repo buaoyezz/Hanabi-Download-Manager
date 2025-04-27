@@ -8,7 +8,7 @@ from core.font.font_manager import FontManager
 from client.ui.components.customNotify import NotifyManager
 
 class GeneralControlWidget(QWidget):
-    """常规设置页面"""
+   
     settings_applied = Signal(bool, str)  # 成功/失败, 消息
 
     def __init__(self, config_manager, parent=None):
@@ -21,7 +21,7 @@ class GeneralControlWidget(QWidget):
         self.load_config()
 
     def load_config(self):
-        """从配置文件加载设置"""
+        
         try:
             # 界面设置
             ui_config = self.config_manager.get("ui", {})
@@ -53,7 +53,6 @@ class GeneralControlWidget(QWidget):
             self.settings_applied.emit(False, f"加载常规设置失败: {str(e)}")
 
     def setup_ui(self):
-        """设置UI界面"""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
@@ -227,7 +226,7 @@ class GeneralControlWidget(QWidget):
         """)
     
     def clear_cache(self):
-        """清除缓存和历史记录"""
+        
         try:
             # 在实际应用中，这里会实现缓存清理逻辑
             self.notify_manager.show_message("清除缓存", "缓存已成功清除")
@@ -236,7 +235,7 @@ class GeneralControlWidget(QWidget):
             self.settings_applied.emit(False, f"清除缓存失败: {str(e)}")
     
     def reset_all_settings(self):
-        """重置所有设置到默认状态"""
+       
         try:
             # 在实际应用中，这里会实现重置所有设置的逻辑
             self.load_config()  # 重新加载默认配置
@@ -246,7 +245,7 @@ class GeneralControlWidget(QWidget):
             self.settings_applied.emit(False, f"重置所有设置失败: {str(e)}")
     
     def reset_settings(self):
-        """重置当前页面设置"""
+       
         try:
             self.theme_combo.setCurrentIndex(0)  # 深色主题
             self.language_combo.setCurrentIndex(0)  # 简体中文
@@ -260,7 +259,7 @@ class GeneralControlWidget(QWidget):
             self.settings_applied.emit(False, f"重置设置失败: {str(e)}")
     
     def apply_settings(self):
-        """应用设置"""
+       
         try:
             # 收集设置
             theme = "dark" if self.theme_combo.currentIndex() == 0 else "light"
@@ -300,13 +299,13 @@ class GeneralControlWidget(QWidget):
             self.settings_applied.emit(False, f"保存设置失败: {str(e)}")
     
     def _setup_autostart(self):
-        """设置开机自启动"""
+      
         # 此处应根据不同操作系统实现自启动设置
         # 例如Windows下可以写入注册表，Linux下可以创建desktop文件
         # 简单起见，这里只打印一个信息
         print("设置开机自启动")
     
     def _remove_autostart(self):
-        """移除开机自启动"""
+     
         # 此处应根据不同操作系统实现移除自启动设置
         print("移除开机自启动") 
