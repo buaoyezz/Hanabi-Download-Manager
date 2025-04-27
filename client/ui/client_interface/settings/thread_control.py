@@ -43,7 +43,6 @@ class ThreadControlWidget(QWidget):
             print(f"[ERROR] 加载线程设置失败: {str(e)}")
         
     def setup_ui(self):
-        """设置UI组件"""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
@@ -185,11 +184,9 @@ class ThreadControlWidget(QWidget):
         main_layout.addLayout(button_layout)
     
     def reset_settings(self):
-        """重置设置为默认值"""
         self.threads_spinbox.setValue(8)
     
     def apply_settings(self):
-        """应用设置"""
         try:
             # 获取当前设置值
             thread_count = self.threads_spinbox.value()
