@@ -7,8 +7,10 @@ from client.ui.components.customMessagebox import CustomMessageBox
 import requests
 import json
 import os
+import time
 from datetime import datetime
 from PySide6.QtWidgets import QMessageBox
+
 class UpdatePage(QWidget):
     updateFound = Signal(str, str)  # 版本号, 更新内容
     updateError = Signal(str)       # 错误信息
@@ -19,17 +21,102 @@ class UpdatePage(QWidget):
         self.font_manager = FontManager()
         
         # 软件当前版本
-        self.current_version = "1.0.0"
+        self.current_version = "1.0.1"
         
         # 检查更新API地址
         self.api_url = "https://zzbuaoye.dpdns.org"
         
+        # 缓存文件路径
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".hanabi_dm")
+        self.cache_file = os.path.join(self.cache_dir, "update_cache.json")
+        
+        # 确保缓存目录存在
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # 加载缓存的版本信息
+        self.cached_data = self.load_cache()
+        self.has_newer_version = False
+        
         # 初始化UI
         self.setup_ui()
         
+        # 加载上次检查时间
+        self.load_last_check_time()
+        
         # 如果启用了自动检查更新，程序启动后自动检查
         if self.config_manager.get_auto_check_update():
-            QTimer.singleShot(3000, self.check_update)
+            # 如果上次检查距今已超过24小时，则重新检查
+            if self.should_check_again():
+                QTimer.singleShot(3000, self.check_update)
+            else:
+                # 否则直接使用缓存数据
+                self.update_ui_from_cache()
+    
+    def should_check_again(self):
+        last_check = self.cached_data.get("last_check_timestamp", 0)
+        # 24小时 = 86400秒
+        return time.time() - last_check > 86400
+    
+    def load_cache(self):
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+    
+    def save_cache(self, data):
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存缓存失败: {str(e)}")
+    
+    def load_last_check_time(self):
+        last_check = self.cached_data.get("last_check_time", "从未检查")
+        self.last_check_label.setText(f"上次检查：{last_check}")
+    
+    def update_ui_from_cache(self):
+        if not self.cached_data:
+            return
+            
+        # 更新最后检查时间
+        self.load_last_check_time()
+        
+        # 获取版本信息
+        latest = self.cached_data.get("latest", {})
+        if not latest:
+            return
+            
+        # 检查是否有新版本
+        if self.compare_versions(latest.get("version", "0.0.0"), self.current_version) > 0:
+            # 有更新版本
+            self.has_newer_version = True
+            self.status_label.setText(f"发现新版本: {latest['version']}")
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+            
+            # 更新更新日志
+            self.update_release_notes(latest, True)
+        else:
+            # 已经是最新版本
+            self.has_newer_version = False
+            self.status_label.setText("您当前使用的已经是最新版本")
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+            
+            # 显示当前版本的更新日志
+            current_version_info = None
+            
+            # 如果当前版本是最新版本
+            if latest.get("version") == self.current_version:
+                current_version_info = latest
+            # 否则从历史记录中查找
+            elif "history" in self.cached_data and self.current_version in self.cached_data["history"]:
+                current_version_info = self.cached_data["history"][self.current_version]
+            
+            if current_version_info:
+                self.update_release_notes(current_version_info, False)
     
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -47,11 +134,14 @@ class UpdatePage(QWidget):
         
         # 添加图标
         icon_label = QLabel()
-        icon_font = QFont("Material Icons")
-        icon_font.setPixelSize(24)
-        icon_label.setFont(icon_font)
+        self.font_manager.apply_icon_font(icon_label, 24)
         icon_label.setText(self.font_manager.get_icon_text("browser_updated"))
-        icon_label.setStyleSheet("color: #B39DDB; background-color: transparent;")
+        icon_label.setStyleSheet("""
+            QLabel {
+                color: #B39DDB;
+                background-color: transparent;
+            }
+        """)
         title_layout.addWidget(icon_label)
         
         # 标题文本
@@ -133,11 +223,14 @@ class UpdatePage(QWidget):
         
         # 图标
         check_icon = QLabel()
-        icon_font = QFont("Material Icons")
-        icon_font.setPixelSize(16)
-        check_icon.setFont(icon_font)
+        self.font_manager.apply_icon_font(check_icon, 16)
         check_icon.setText(self.font_manager.get_icon_text("refresh"))
-        check_icon.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+        check_icon.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                background-color: transparent;
+            }
+        """)
         button_inner_layout.addWidget(check_icon)
         
         # 文本
@@ -184,11 +277,14 @@ class UpdatePage(QWidget):
         
         # 图标
         auto_icon = QLabel()
-        icon_font = QFont("Material Icons")
-        icon_font.setPixelSize(16)
-        auto_icon.setFont(icon_font)
+        self.font_manager.apply_icon_font(auto_icon, 16)
         auto_icon.setText(self.font_manager.get_icon_text("schedule"))
-        auto_icon.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+        auto_icon.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                background-color: transparent;
+            }
+        """)
         auto_button_layout.addWidget(auto_icon)
         
         # 文本
@@ -221,11 +317,14 @@ class UpdatePage(QWidget):
         log_title_layout = QHBoxLayout()
         
         log_icon = QLabel()
-        icon_font = QFont("Material Icons")
-        icon_font.setPixelSize(24)
-        log_icon.setFont(icon_font)
+        self.font_manager.apply_icon_font(log_icon, 24)
         log_icon.setText(self.font_manager.get_icon_text("history"))
-        log_icon.setStyleSheet("color: #B39DDB; background-color: transparent;")
+        log_icon.setStyleSheet("""
+            QLabel {
+                color: #B39DDB;
+                background-color: transparent;
+            }
+        """)
         log_title_layout.addWidget(log_icon)
         
         log_title = QLabel("更新日志")
@@ -329,19 +428,27 @@ class UpdatePage(QWidget):
                     self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
                     return
                 
+                # 保存缓存和检查时间
+                data["last_check_time"] = now
+                data["last_check_timestamp"] = time.time()
+                self.cached_data = data
+                self.save_cache(data)
+                
                 # 检查是否有新版本
                 if self.compare_versions(latest["version"], self.current_version) > 0:
                     # 有更新版本
+                    self.has_newer_version = True
                     self.status_label.setText(f"发现新版本: {latest['version']}")
                     self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
                     
                     # 更新更新日志
-                    self.update_release_notes(latest)
+                    self.update_release_notes(latest, True)
                     
                     # 发出更新信号
                     self.updateFound.emit(latest["version"], json.dumps(latest))
                 else:
                     # 已经是最新版本
+                    self.has_newer_version = False
                     self.status_label.setText("您当前使用的已经是最新版本")
                     self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
                     
@@ -356,7 +463,7 @@ class UpdatePage(QWidget):
                         current_version_info = data["history"][self.current_version]
                     
                     if current_version_info:
-                        self.update_release_notes(current_version_info)
+                        self.update_release_notes(current_version_info, False)
                     else:
                         # 清除原有内容
                         for i in reversed(range(self.log_layout.count())):
@@ -380,7 +487,7 @@ class UpdatePage(QWidget):
         finally:
             self.check_button.setEnabled(True)
     
-    def update_release_notes(self, latest):
+    def update_release_notes(self, latest, show_download=True):
         # 清除原有内容
         for i in reversed(range(self.log_layout.count())):
             item = self.log_layout.itemAt(i)
@@ -388,7 +495,7 @@ class UpdatePage(QWidget):
                 item.widget().deleteLater()
         
         # 添加新版本信息
-        version_label = QLabel(f"<b>版本 {latest['version']}</b> ({latest['date']})")
+        version_label = QLabel(f"<b>版本 {latest['version']}</b> ({latest.get('date', '')})")
         version_label.setStyleSheet("color: #B39DDB; font-size: 16px; background-color: transparent;")
         self.font_manager.apply_font(version_label)
         self.log_layout.addWidget(version_label)
@@ -414,7 +521,7 @@ class UpdatePage(QWidget):
         self.log_layout.addWidget(changes_label)
         
         # 如果需要强制更新
-        if latest.get("force_update", False):
+        if latest.get("force_update", False) and show_download:
             required_label = QLabel("此版本为必须更新版本，请尽快更新")
             required_label.setStyleSheet("color: #FF9800; font-size: 14px; font-weight: bold; background-color: transparent;")
             self.font_manager.apply_font(required_label)
@@ -429,8 +536,8 @@ class UpdatePage(QWidget):
             self.font_manager.apply_font(size_label)
             self.log_layout.addWidget(size_label)
         
-        # 添加下载按钮
-        if download_info.get("url"):
+        # 仅当有新版本时才显示下载按钮
+        if download_info.get("url") and show_download and self.has_newer_version:
             download_btn = QPushButton()
             download_btn.setStyleSheet("""
                 QPushButton {
@@ -458,11 +565,14 @@ class UpdatePage(QWidget):
             
             # 图标
             download_icon = QLabel()
-            icon_font = QFont("Material Icons")
-            icon_font.setPixelSize(16)
-            download_icon.setFont(icon_font)
+            self.font_manager.apply_icon_font(download_icon, 16)
             download_icon.setText(self.font_manager.get_icon_text("download"))
-            download_icon.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+            download_icon.setStyleSheet("""
+                QLabel {
+                    color: #FFFFFF;
+                    background-color: transparent;
+                }
+            """)
             download_layout.addWidget(download_icon)
             
             # 文本
@@ -471,7 +581,7 @@ class UpdatePage(QWidget):
             self.font_manager.apply_font(download_text)
             download_layout.addWidget(download_text)
             
-            # 检查我又没有放下载链接
+            # 检查下载链接有效性
             url = download_info["url"]
             if url and url not in ["Not Support", "NS", "N", ""]:
                 download_btn.clicked.connect(lambda: self.download_update(url))

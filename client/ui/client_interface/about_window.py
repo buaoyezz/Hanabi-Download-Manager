@@ -109,7 +109,7 @@ class AboutWindow(QWidget):
         header_layout.addStretch(1)
         
         # 版本信息
-        version_label = QLabel("版本 1.0.0 Alpha")
+        version_label = QLabel("版本 1.0.1 Release")
         version_label.setStyleSheet("color: #9E9E9E; font-size: 14px;")
         self.font_manager.apply_font(version_label)
         header_layout.addWidget(version_label)
@@ -268,7 +268,7 @@ class AboutWindow(QWidget):
         update_title_layout.addStretch()
         
         # 版本信息
-        version_info = QLabel("当前版本: 1.0.0")
+        version_info = QLabel("当前版本: 1.0.1")
         version_info.setStyleSheet("color: #9E9E9E; font-size: 14px;")
         self.font_manager.apply_font(version_info)
         update_title_layout.addWidget(version_info)
@@ -485,7 +485,7 @@ class AboutWindow(QWidget):
         main_layout.addLayout(title_layout)
 
         # 版本信息
-        version_label = QLabel("版本 1.0.0")
+        version_label = QLabel("版本 1.0.1")
         version_label.setStyleSheet("font-size: 16px; color: #424242;")
         self.font_manager.apply_font(version_label)
         main_layout.addWidget(version_label, alignment=Qt.AlignCenter)
