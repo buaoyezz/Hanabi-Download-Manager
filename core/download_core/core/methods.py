@@ -139,12 +139,11 @@ def getSystemProxy():
 
 
 def getProxy() -> Optional[str]:
-    """从环境变量获取代理设置"""
     return os.environ.get('HTTP_PROXY') or os.environ.get('HTTPS_PROXY')
 
 
 def getReadableSize(size_bytes: int) -> str:
-    """将字节数转换为人类可读的格式"""
+    # 转换格式
     if size_bytes == 0:
         return "0B"
     
@@ -239,15 +238,13 @@ def _extract_filename_from_headers(head):
 def getLinkInfo(url: str, headers: Dict[str, str], 
                 filename: Optional[str] = None) -> Tuple[str, str, int]:
     """
-    获取下载链接的详细信息，包括文件名和大小
-    
     Args:
         url: 下载链接
         headers: HTTP请求头
         filename: 可选的自定义文件名，如果未提供则从URL或响应头中获取
     
     Returns:
-        Tuple[str, str, int]: (实际URL, 文件名, 文件大小)
+        Tuple[str, str, int]: (URL, 文件名, 文件大小)
     """
     try:
         # 发送HEAD请求获取文件信息
@@ -425,8 +422,6 @@ def isSparseSupported(filePath: str) -> bool:
 
 def createSparseFile(file_path: Union[str, Path], size: Optional[int] = None):
     """
-    创建稀疏文件（大文件但不占用实际磁盘空间）
-    
     Args:
         file_path: 文件路径
         size: 文件大小（字节），如果为None则不预分配

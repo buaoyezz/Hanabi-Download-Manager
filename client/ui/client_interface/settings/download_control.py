@@ -11,7 +11,6 @@ from core.font.font_manager import FontManager
 from pathlib import Path
 
 class DownloadControlWidget(QWidget):
-    """下载控制设置页面，整合线程、网络和文件保存设置"""
     settings_applied = Signal(bool, str)  # 成功/失败, 消息
 
     def __init__(self, config_manager, parent=None):
@@ -24,7 +23,6 @@ class DownloadControlWidget(QWidget):
         self.load_config()
 
     def load_config(self):
-        """从配置文件加载设置"""
         try:
             # 下载设置
             download_config = self.config_manager.get("download", {})
@@ -74,7 +72,7 @@ class DownloadControlWidget(QWidget):
             print(f"[ERROR] 加载下载设置失败: {str(e)}")
 
     def setup_ui(self):
-        """设置UI界面"""
+       
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
@@ -569,7 +567,6 @@ class DownloadControlWidget(QWidget):
         """)
     
     def update_ui_state(self):
-        """更新UI状态"""
         dynamic_enabled = self.dynamic_threads_checkbox.isChecked()
         self.max_threads_spinbox.setEnabled(dynamic_enabled)
         # 默认线程数在非动态时启用，动态时禁用
@@ -578,7 +575,6 @@ class DownloadControlWidget(QWidget):
         self.disable_auto_threads_btn.setEnabled(dynamic_enabled)
     
     def browse_folder(self):
-        """打开文件夹浏览对话框"""
         current_path = self.path_edit.text()
         folder = QFileDialog.getExistingDirectory(
             self, 
@@ -589,7 +585,6 @@ class DownloadControlWidget(QWidget):
             self.path_edit.setText(folder)
     
     def reset_settings(self):
-        """重置设置为默认值"""
         self.max_tasks_spinbox.setValue(5)
         self.thread_count_spinbox.setValue(8)
         self.dynamic_threads_checkbox.setChecked(True)
@@ -608,7 +603,6 @@ class DownloadControlWidget(QWidget):
         self.settings_applied.emit(True, "已重置为默认设置")
     
     def apply_settings(self):
-        """应用设置"""
         try:
             # 获取当前设置值
             max_tasks = self.max_tasks_spinbox.value()
@@ -659,7 +653,7 @@ class DownloadControlWidget(QWidget):
             self.notify_manager.show_message("设置保存失败", f"保存设置时出错: {str(e)}", level="error")
 
     def disable_dynamic_threads(self):
-        """关闭动态自动线程调节"""
+      
         self.dynamic_threads_checkbox.setChecked(False)
         self.update_ui_state()
         

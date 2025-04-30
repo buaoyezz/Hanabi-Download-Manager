@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 class ConfigManager:
-    """配置管理器，负责保存和加载用户设置"""
     
     _instance = None
     _config = None
@@ -16,7 +15,6 @@ class ConfigManager:
         return cls._instance
     
     def _init_config(self):
-        """初始化配置"""
         # 默认配置
         self._config = {
             "download": {
@@ -72,7 +70,6 @@ class ConfigManager:
         logging.info(f"配置初始化完成，线程数: {self._config['download']['thread_count']}")
     
     def _get_config_path(self):
-        """获取配置文件路径"""
         config_dir = Path.home() / ".hanabidownloadmanager"
         # 确保目录存在
         config_dir.mkdir(exist_ok=True)
@@ -95,9 +92,8 @@ class ConfigManager:
                 print(f"加载配置失败: {e}")
     
     def _merge_config(self, loaded_config):
-        """合并加载的配置与默认配置"""
         def merge_dict(default_dict, loaded_dict):
-            """递归合并字典"""
+          
             for key, value in loaded_dict.items():
                 if key in default_dict and isinstance(default_dict[key], dict) and isinstance(value, dict):
                     merge_dict(default_dict[key], value)
@@ -115,7 +111,6 @@ class ConfigManager:
                 self._config[section] = values
     
     def save_config(self):
-        """保存配置到文件"""
         config_path = self._get_config_path()
         try:
             with open(config_path, "w", encoding="utf-8") as f:
@@ -130,14 +125,13 @@ class ConfigManager:
             return False
     
     def get(self, section, default=None):
-        """获取整个配置部分"""
         try:
             return self._config[section]
         except (KeyError, TypeError):
             return default if default is not None else {}
     
     def get_setting(self, section, key, default=None):
-        """获取设置值"""
+       
         try:
             if "." in key:
                 # 支持嵌套获取，如 "proxy.enabled"
@@ -152,7 +146,7 @@ class ConfigManager:
             return default
     
     def set_setting(self, section, key, value):
-        """设置值"""
+        
         try:
             if "." in key:
                 # 支持嵌套设置，如 "proxy.enabled"
@@ -171,13 +165,11 @@ class ConfigManager:
             return False
     
     def get_download_thread_count(self):
-        """获取下载线程数"""
         thread_count = self.get_setting("download", "thread_count", 8)
         logging.info(f"获取下载线程数: {thread_count}")
         return thread_count
     
     def set_download_thread_count(self, count):
-        """设置下载线程数"""
         # 确保线程数在合理范围内
         max_count = self.get_setting("download", "max_thread_count", 32)
         count = max(1, min(count, max_count))  # 限制在1-max_count之间
@@ -189,33 +181,27 @@ class ConfigManager:
         return success
     
     def get_dynamic_threads(self):
-        """获取是否启用动态线程"""
         return self.get_setting("download", "dynamic_threads", True)
     
     def set_dynamic_threads(self, enabled):
-        """设置是否启用动态线程"""
         success = self.set_setting("download", "dynamic_threads", bool(enabled))
         if success:
             self.save_config()
         return success
     
     def get_save_path(self):
-        """获取保存路径"""
         return self.get_setting("download", "save_path", str(Path.home() / "Downloads"))
     
     def set_save_path(self, path):
-        """设置保存路径"""
         success = self.set_setting("download", "save_path", path)
         if success:
             self.save_config()
         return success
     
     def get_max_tasks(self):
-        """获取最大任务数"""
         return self.get_setting("download", "max_tasks", 5)
     
     def set_max_tasks(self, count):
-        """设置最大任务数"""
         count = max(1, min(20, count))  # 限制在1-20之间
         success = self.set_setting("download", "max_tasks", count)
         if success:
@@ -223,11 +209,9 @@ class ConfigManager:
         return success
     
     def get_auto_check_update(self):
-        """获取是否自动检查更新"""
         return self.get_setting("startup", "check_update", True)
     
     def set_auto_check_update(self, enabled):
-        """设置是否自动检查更新"""
         success = self.set_setting("startup", "check_update", bool(enabled))
         if success:
             self.save_config()

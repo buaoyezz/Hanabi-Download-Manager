@@ -35,7 +35,7 @@ class TransferManager(QThread):
     def __init__(self, url, headers, maxThreads: int = 8, savePath:str=None, filename:str=None, 
                  dynamicThreads:bool=False, fileSize:int=-1, parent=None):
         """
-        SOME DESCRIPTION
+        Arg
             url: 下载链接
             headers: HTTP请求头
             maxThreads: 最大线程数，默认为8
@@ -504,7 +504,6 @@ class TransferManager(QThread):
             self.session.close()
 
     def stop(self):
-        """停止下载任务并清理资源"""
         logging.info(f"正在停止任务: {self.filename}")
         self.isRunning = False
         

@@ -63,7 +63,7 @@ class TestDownloadKernel(unittest.TestCase):
         
         self.assertTrue(transfer.dynamicThreads)
     
-    # 更多测试可在这里添加...
+   
 
 if __name__ == "__main__":
     unittest.main() 

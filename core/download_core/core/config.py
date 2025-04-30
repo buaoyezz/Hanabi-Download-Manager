@@ -290,7 +290,6 @@ class Config:
         
     # 添加下载管理器需要的方法
     def get_save_path_for_category(self, category):
-        """获取指定分类的保存路径"""
         # 首先尝试从配置文件获取特定分类的路径
         category_path = self.get(f"CategoryPaths", category, None)
         if category_path:
@@ -305,14 +304,11 @@ class Config:
         return category_folder
         
     def set_save_path_for_category(self, category, path):
-        """设置指定分类的保存路径"""
         if not self.config.has_section("CategoryPaths"):
             self.config.add_section("CategoryPaths")
         self.set("CategoryPaths", category, path)
         
     def get_categories(self):
-        """获取所有下载分类"""
-        # 默认分类
         default_categories = ["程序", "视频", "音乐", "文档", "压缩包", "其他"]
         
         # 尝试从配置中加载自定义分类
@@ -322,10 +318,9 @@ class Config:
         return default_categories
         
     def guess_category(self, filename):
-        """根据文件名猜测分类"""
         ext = os.path.splitext(filename)[1].lower()
         
-        # 扩展名到分类的映射
+        # ext_map
         ext_map = {
             # 程序类
             ".exe": "程序", ".msi": "程序", ".app": "程序", ".dmg": "程序", ".apk": "程序",
@@ -346,14 +341,12 @@ class Config:
         return ext_map.get(ext, "其他")
         
     def get_last_browse_path(self):
-        """获取上次浏览的路径"""
         last_path = self.get("Download", "LastBrowsePath", None)
         if last_path and os.path.exists(last_path):
             return last_path
         return self.downloadFolder
         
     def set_last_browse_path(self, path):
-        """设置上次浏览的路径"""
         if os.path.exists(path):
             self.set("Download", "LastBrowsePath", path)
 

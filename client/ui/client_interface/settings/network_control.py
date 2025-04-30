@@ -10,7 +10,6 @@ from core.font.font_manager import FontManager
 from client.ui.components.customNotify import NotifyManager
 
 class NetworkControlWidget(QWidget):
-    """网络控制设置页面"""
     settings_applied = Signal(bool, str)  # 成功/失败, 消息
 
     def __init__(self, config_manager, parent=None):
@@ -23,7 +22,6 @@ class NetworkControlWidget(QWidget):
         self.load_config()
 
     def load_config(self):
-        """从配置文件加载网络设置"""
         try:
             # 获取网络配置
             network_config = self.config_manager.get("network", {})
@@ -66,7 +64,7 @@ class NetworkControlWidget(QWidget):
             self.settings_applied.emit(False, f"加载网络设置失败: {str(e)}")
 
     def setup_ui(self):
-        """设置UI界面"""
+       
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
@@ -276,7 +274,7 @@ class NetworkControlWidget(QWidget):
         """)
 
     def _set_proxy_type(self, proxy_type):
-        """设置代理类型下拉框"""
+       
         index = 0
         if proxy_type.lower() == "http":
             index = 0
@@ -287,7 +285,6 @@ class NetworkControlWidget(QWidget):
         self.proxy_type_combo.setCurrentIndex(index)
 
     def _get_proxy_type(self):
-        """获取当前选择的代理类型"""
         index = self.proxy_type_combo.currentIndex()
         if index == 0:
             return "http"
@@ -298,7 +295,6 @@ class NetworkControlWidget(QWidget):
         return "http"
 
     def _update_proxy_ui_state(self):
-        """更新代理设置UI的启用状态"""
         proxy_enabled = self.proxy_enabled_checkbox.isChecked()
         self.proxy_type_combo.setEnabled(proxy_enabled)
         self.proxy_host_edit.setEnabled(proxy_enabled)
@@ -310,17 +306,15 @@ class NetworkControlWidget(QWidget):
         self.proxy_password_edit.setEnabled(auth_enabled)
 
     def _update_speed_limit_ui_state(self):
-        """更新速度限制UI的启用状态"""
         self.download_limit_spinbox.setEnabled(self.download_limit_checkbox.isChecked())
         self.upload_limit_spinbox.setEnabled(self.upload_limit_checkbox.isChecked())
 
     def reset_settings(self):
-        """重置设置为当前配置值"""
+       
         self.load_config()
         self.settings_applied.emit(True, "网络设置已重置")
 
     def apply_settings(self):
-        """应用当前设置"""
         try:
             # 收集代理设置
             proxy_config = {
