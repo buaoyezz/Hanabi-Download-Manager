@@ -43,8 +43,8 @@ class WebSocketServer:
             # 发送版本信息
             version_info = {
                 "type": "version",
-                "ClientVersion": "1.0.0",
-                "LatestExtensionVersion": "1.0.0"
+                "ClientVersion": "1.0.1",
+                "LatestExtensionVersion": "1.0.1"
             }
             await websocket.send(json.dumps(version_info))
             

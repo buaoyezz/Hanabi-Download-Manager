@@ -38,8 +38,8 @@ class BasicTCPServer:
             # 发送版本信息
             version_info = {
                 "type": "version",
-                "ClientVersion": "1.0.0",
-                "LatestExtensionVersion": "1.0.0"
+                "ClientVersion": "1.0.1",
+                "LatestExtensionVersion": "1.0.1"
             }
             writer.write((json.dumps(version_info) + '\n').encode('utf-8'))
             await writer.drain()

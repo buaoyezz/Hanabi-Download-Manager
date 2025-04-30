@@ -1,0 +1,520 @@
+from PySide6.QtWidgets import (QStackedWidget, QPushButton, QVBoxLayout, QWidget, 
+                              QHBoxLayout, QLabel, QSizePolicy, QScrollArea)
+from PySide6.QtCore import Qt, QObject, Signal, QEasingCurve, QPropertyAnimation, QParallelAnimationGroup, QTimer
+from PySide6.QtGui import QFont
+
+from core.font.font_manager import FontManager
+from client.ui.components.scrollStyle import ScrollStyle
+
+class CategoryButton(QPushButton):
+    def __init__(self, text, parent=None, icon_code=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedHeight(44)  # 增加高度使其更易点击
+        self.icon_code = icon_code
+        self.text_content = text
+        
+        # 使用布局来放置图标和文本
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(15, 0, 15, 0)
+        self.layout.setSpacing(12)  # 增加间距使布局更舒适
+        
+        # 创建图标标签
+        if icon_code:
+            self.icon_label = QLabel()
+            self.font_manager = FontManager()
+            
+            # 直接创建并设置字体，确保是Material Icons
+            icon_font = QFont("Material Icons")  # 使用确切的字体名称
+            icon_font.setPixelSize(18)  # 略微增大图标尺寸
+            self.icon_label.setFont(icon_font)
+            
+            # 使用Unicode值直接设置图标
+            icon_text = self.font_manager.get_icon_text(icon_code)
+            if not icon_text:
+                # 如果图标代码无效，显示一个通用图标
+                icon_text = "\ue5d4"  # info_outline 图标
+                
+            self.icon_label.setText(icon_text)
+            self.layout.addWidget(self.icon_label)
+        
+        # 创建文本标签
+        self.text_label = QLabel(text)
+        self.layout.addWidget(self.text_label)
+        self.layout.addStretch()
+        
+        # 设置基本样式
+        self.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 15px;
+                padding: 5px 0px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+            QPushButton:checked {
+                background-color: rgba(179, 157, 219, 0.2);
+                border: none;
+            }
+        """)
+        
+        # 单独设置标签样式
+        self.updateStyle(self.isChecked())
+    
+    def setChecked(self, checked):
+        super().setChecked(checked)
+        self.updateStyle(checked)
+    
+    def updateStyle(self, checked):
+        if checked:
+            if hasattr(self, 'icon_label'):
+                self.icon_label.setStyleSheet("color: #B39DDB; background-color: transparent; font-weight: bold;")
+            self.text_label.setStyleSheet("color: #B39DDB; background-color: transparent; font-weight: bold; font-size: 14px;")
+            # 选中时使用一致的内边距
+            self.layout.setContentsMargins(15, 0, 15, 0)
+        else:
+            if hasattr(self, 'icon_label'):
+                self.icon_label.setStyleSheet("color: #9E9E9E; background-color: transparent; font-size: 14px;")
+            self.text_label.setStyleSheet("color: #9E9E9E; background-color: transparent; font-size: 14px;")
+            # 未选中时保持相同间距
+            self.layout.setContentsMargins(15, 0, 15, 0)
+
+class PageAnimationManager(QObject):
+    def __init__(self):
+        super().__init__()
+        self.animations = []
+        self.is_animating = False
+        self.animation_duration = 250  # 减少默认动画时间，使切换更快
+    
+    def create_page_switch_animation(self, current_page, next_page, direction="left", duration=None):
+        if duration is None:
+            duration = self.animation_duration
+            
+        # 如果已经在动画中，打断当前动画
+        if self.is_animating:
+            self.stop_animations()
+            
+        # 标记动画状态
+        self.is_animating = True
+        
+        # 获取页面宽度，用于计算偏移量
+        width = current_page.width()
+        
+        # 设置起始位置 - 预先放置好页面
+        if direction == "left":
+            # 当前页面向左移动，下一页面从右侧进入
+            next_page.setGeometry(width, 0, width, current_page.height())
+        else:
+            # 当前页面向右移动，下一页面从左侧进入
+            next_page.setGeometry(-width, 0, width, current_page.height())
+        
+        # 创建并配置动画组
+        animation_group = QParallelAnimationGroup()
+        
+        # 当前页面的动画
+        current_anim = QPropertyAnimation(current_page, b"geometry")
+        current_anim.setDuration(duration)
+        current_anim.setStartValue(current_page.geometry())
+        
+        # 设置结束值
+        if direction == "left":
+            end_current_rect = current_page.geometry().adjusted(-width, 0, -width, 0)
+        else:
+            end_current_rect = current_page.geometry().adjusted(width, 0, width, 0)
+            
+        current_anim.setEndValue(end_current_rect)
+        current_anim.setEasingCurve(QEasingCurve.OutCubic)
+        
+        # 下一页面的动画
+        next_anim = QPropertyAnimation(next_page, b"geometry")
+        next_anim.setDuration(duration)
+        next_anim.setStartValue(next_page.geometry())
+        next_anim.setEndValue(current_page.geometry())  # 直接使用当前页面的几何信息作为目标
+        next_anim.setEasingCurve(QEasingCurve.OutCubic)
+        
+        # 添加动画到组
+        animation_group.addAnimation(current_anim)
+        animation_group.addAnimation(next_anim)
+        
+        # 确保下一页面在动画期间可见
+        next_page.show()
+        next_page.raise_()  # 确保新页面在上层
+        
+        # 记录动画组
+        self.animations.append(animation_group)
+        
+        # 连接动画完成信号
+        animation_group.finished.connect(lambda: self.on_animation_finished(current_page, next_page))
+        
+        # 启动动画
+        animation_group.start()
+        
+        return animation_group
+    
+    def on_animation_finished(self, current_page, next_page):
+        # 清理可能已完成的动画
+        self.animations = [anim for anim in self.animations if anim.state() == QPropertyAnimation.Running]
+        
+        # 隐藏当前页面
+        current_page.hide()
+        
+        # 重置当前页面和下一页面的几何布局
+        parent = next_page.parent()
+        if parent and isinstance(parent, QStackedWidget):
+            # 确保下一页面在堆叠窗口中正确显示
+            parent.setCurrentWidget(next_page)
+            
+            # 恢复几何布局，以便下次动画正常
+            rect = parent.rect()
+            next_page.setGeometry(rect)
+            current_page.setGeometry(rect)
+        
+        # 重置动画状态标记
+        self.is_animating = False
+    
+    def stop_animations(self):
+        # 复制列表，避免迭代时修改
+        animations_copy = list(self.animations)
+        for anim in animations_copy:
+            if hasattr(anim, 'stop'):
+                anim.stop()
+        
+        # 清空列表
+        self.animations.clear()
+        self.is_animating = False
+
+class PagesManager(QObject):
+        
+    # 定义信号
+    page_changed = Signal(str)  # 页面变更信号
+    
+    def __init__(self, sidebar_widget, content_area, main_window=None):
+        super().__init__()
+        
+        # 存储传入的部件
+        self.sidebar_widget = sidebar_widget
+        self.content_area = content_area
+        self.main_window = main_window  # 存储主窗口引用，用于访问资源和配置
+        
+        # 初始化字体管理器
+        self.font_manager = FontManager()
+        
+        # 创建堆叠窗口用于切换不同页面
+        self.stacked_widget = QStackedWidget()
+        # 设置堆叠窗口属性，确保显示正确
+        self.stacked_widget.setContentsMargins(0, 0, 0, 0)
+        self.stacked_widget.setAttribute(Qt.WA_TranslucentBackground)
+        self.stacked_widget.setObjectName("mainStackedWidget")
+        
+        # 初始化页面管理
+        self.pages = {}  # 存储页面实例
+        self.buttons = {}  # 存储按钮实例
+        self.current_page = None  # 当前页面
+        self._pending_switch = None  # 待处理的页面切换
+        
+        # 创建动画管理器
+        self.animation_manager = PageAnimationManager()
+        
+        # 设置堆叠窗口布局
+        content_layout = QVBoxLayout(self.content_area)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(0)
+        content_layout.addWidget(self.stacked_widget)
+        
+        # 添加定时器用于检查页面状态同步
+        self.sync_timer = QTimer(self)
+        self.sync_timer.setInterval(500)  # 每500毫秒检查一次
+        self.sync_timer.timeout.connect(self.check_page_button_sync)
+        self.sync_timer.start()
+    
+    def check_page_button_sync(self):
+        """检查当前页面与按钮选择状态是否同步"""
+        if not self.animation_manager.is_animating and self.current_page:
+            # 确保当前页面是可见的
+            current_widget = self.pages.get(self.current_page)
+            if current_widget and not current_widget.isVisible():
+                # 强制同步状态
+                self.stacked_widget.setCurrentWidget(current_widget)
+                current_widget.show()
+                
+                # 同步按钮状态
+                for btn_id, btn in self.buttons.items():
+                    btn.setChecked(btn_id == self.current_page)
+    
+    def register_common_pages(self):
+        """注册常用页面"""
+        # 这个方法将创建和注册下载管理器需要的基本页面
+
+        # 下载页面
+        download_page = self.create_download_page()
+        
+        # 已完成页面
+        finished_page = self.create_finished_page()
+        
+        # 尝试从主窗口获取特殊页面
+        settings_page = None
+        about_page = None
+        
+        if self.main_window:
+            # 从主窗口获取设置页面和关于页面
+            if hasattr(self.main_window, 'settings_page'):
+                settings_page = self.main_window.settings_page
+            
+            if hasattr(self.main_window, 'about_page'):
+                about_page = self.main_window.about_page
+        
+        # 添加页面到管理器
+        self.add_page("downloads", download_page, "download", "下载")
+        self.add_page("finished", finished_page, "done_all", "已完成")
+        
+        if settings_page:
+            self.add_page("settings", settings_page, "settings", "设置")
+        
+        if about_page:
+            self.add_page("about", about_page, "info", "关于")
+        
+        # 默认显示下载页面
+        self.switch_page("downloads")
+        
+        return {
+            "downloads": download_page,
+            "finished": finished_page,
+            "settings": settings_page,
+            "about": about_page
+        }
+    
+    def add_page(self, page_id, page_widget, icon_name=None, button_text=None):
+        """添加页面到管理器"""
+        # 添加页面到堆叠窗口
+        self.stacked_widget.addWidget(page_widget)
+        self.pages[page_id] = page_widget
+        
+        # 如果提供了按钮文本，创建导航按钮
+        if button_text:
+            button = CategoryButton(button_text, icon_code=icon_name)
+            button.clicked.connect(lambda: self.switch_page(page_id))
+            self.buttons[page_id] = button
+            
+            # 获取侧边栏布局并添加按钮
+            sidebar_layout = self.sidebar_widget.layout()
+            if sidebar_layout:
+                # 尝试在倒数第二个位置添加按钮（通常紧接着现有按钮组的最后一个按钮）
+                count = sidebar_layout.count()
+                stretch_index = -1
+                
+                # 查找第一个拉伸项的位置
+                for i in range(count):
+                    item = sidebar_layout.itemAt(i)
+                    if item and item.spacerItem():
+                        stretch_index = i
+                        break
+                
+                if stretch_index >= 0:
+                    # 在拉伸项之前插入
+                    sidebar_layout.insertWidget(stretch_index, button)
+                else:
+                    # 如果没有找到拉伸项，添加到布局末尾
+                    sidebar_layout.addWidget(button)
+        
+        return page_widget
+    
+    def switch_page(self, page_id):
+        """切换到指定页面"""
+        if page_id not in self.pages:
+            print(f"错误: 页面 '{page_id}' 不存在")
+            return
+            
+        if page_id == self.current_page:
+            # 已经在当前页面
+            if page_id in self.buttons:
+                self.buttons[page_id].setChecked(True)
+            return
+        
+        # 动画状态处理 - 当有新的切换请求时打断当前动画
+        if self.animation_manager.is_animating:
+            # 强制停止当前所有动画
+            self.animation_manager.stop_animations()
+            # 重置动画状态
+            self.animation_manager.is_animating = False
+            
+            # 如果当前有页面正在切换，需要完成最后的整理
+            if hasattr(self, '_pending_switch') and self._pending_switch:
+                old_id, _ = self._pending_switch
+                if old_id in self.pages:
+                    self.pages[old_id].hide()
+        
+        # 更新按钮状态
+        for btn_id, btn in self.buttons.items():
+            btn.setChecked(btn_id == page_id)
+        
+        # 获取页面实例
+        next_page = self.pages[page_id]
+        
+        # 记录待处理的切换，用于动画打断时恢复
+        self._pending_switch = (self.current_page, page_id)
+        
+        # 先隐藏所有页面，避免多个页面同时可见
+        for p_id, page in self.pages.items():
+            if p_id != page_id and p_id != self.current_page:
+                page.hide()
+        
+        if self.current_page:
+            current_page = self.pages[self.current_page]
+            
+            # 在开始任何动画前确保页面可见并准备就绪
+            current_page.show()
+            current_page.raise_()
+            
+            # 确保设置页面位置正确
+            if "settings" in [page_id, self.current_page]:
+                # 设置页面有特殊处理，确保父级宽高正确
+                parent = self.stacked_widget
+                if parent:
+                    rect = parent.rect()
+                    if page_id == "settings":
+                        next_page.setFixedSize(rect.width(), rect.height())
+                    if self.current_page == "settings":
+                        current_page.setFixedSize(rect.width(), rect.height())
+            
+            # 获取页面索引以确定动画方向
+            try:
+                current_index = list(self.pages.keys()).index(self.current_page)
+                next_index = list(self.pages.keys()).index(page_id)
+                direction = "left" if current_index < next_index else "right"
+            except ValueError:
+                # 索引错误时默认从右侧切入
+                direction = "left"
+            
+            # 创建页面切换动画
+            animation = self.animation_manager.create_page_switch_animation(
+                current_page=current_page,
+                next_page=next_page,
+                direction=direction
+            )
+            
+            # 如果动画创建失败，确保页面立即切换
+            if not animation:
+                self.stacked_widget.setCurrentWidget(next_page)
+                current_page.hide()
+                next_page.show()
+        else:
+            # 第一次切换，直接显示
+            self.stacked_widget.setCurrentWidget(next_page)
+            next_page.show()
+        
+        # 更新当前页面
+        self.current_page = page_id
+        
+        # 发送页面变更信号
+        self.page_changed.emit(page_id)
+    
+    def get_current_page(self):
+        """获取当前页面ID"""
+        return self.current_page
+    
+    def get_page(self, page_id):
+        """获取指定ID的页面实例"""
+        return self.pages.get(page_id)
+    
+    def get_button(self, page_id):
+        """获取指定ID的按钮实例"""
+        return self.buttons.get(page_id)
+    
+    def remove_page(self, page_id):
+        """移除页面"""
+        if page_id not in self.pages:
+            return
+        
+        page = self.pages[page_id]
+        self.stacked_widget.removeWidget(page)
+        del self.pages[page_id]
+        
+        # 如果有对应的按钮，也移除
+        if page_id in self.buttons:
+            button = self.buttons[page_id]
+            sidebar_layout = self.sidebar_widget.layout()
+            if sidebar_layout:
+                for i in range(sidebar_layout.count()):
+                    item = sidebar_layout.itemAt(i)
+                    if item and item.widget() == button:
+                        sidebar_layout.removeItem(item)
+                        button.deleteLater()
+                        break
+            del self.buttons[page_id]
+        
+        # 如果移除的是当前页面，切换到第一个可用页面
+        if page_id == self.current_page:
+            if self.pages:
+                self.switch_page(next(iter(self.pages.keys())))
+            else:
+                self.current_page = None 
+    
+    def create_download_page(self):
+        """创建下载页面"""
+        download_page = QWidget()
+        
+        # 创建滚动区域
+        download_scroll = QScrollArea()
+        download_scroll.setWidgetResizable(True)
+        download_scroll.setFrameShape(QScrollArea.NoFrame)
+        download_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        download_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        ScrollStyle.apply_to_widget(download_scroll, "dark")
+        
+        # 创建内容容器
+        download_content = QWidget()
+        download_page_layout = QVBoxLayout(download_content)
+        download_page_layout.setContentsMargins(15, 15, 15, 15)
+        download_page_layout.setSpacing(20)
+        
+        # 设置滚动区域的内容
+        download_scroll.setWidget(download_content)
+        
+        # 将滚动区域添加到下载页面
+        download_layout = QVBoxLayout(download_page)
+        download_layout.setContentsMargins(0, 0, 0, 0)
+        download_layout.addWidget(download_scroll)
+        
+        # 存储容器引用，方便主窗口使用
+        download_page.content_widget = download_content
+        download_page.content_layout = download_page_layout
+        
+        return download_page
+    
+    def create_finished_page(self):
+        """创建已完成页面"""
+        finished_page = QWidget()
+        
+        # 创建滚动区域
+        finished_scroll = QScrollArea()
+        finished_scroll.setWidgetResizable(True)
+        finished_scroll.setFrameShape(QScrollArea.NoFrame)
+        finished_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        finished_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        ScrollStyle.apply_to_widget(finished_scroll, "dark")
+        
+        # 创建内容容器
+        finished_content = QWidget()
+        finished_layout = QVBoxLayout(finished_content)
+        finished_layout.setContentsMargins(15, 15, 15, 15)
+        
+        finished_label = QLabel("已完成的下载任务将显示在这里")
+        finished_label.setAlignment(Qt.AlignCenter)
+        finished_layout.addWidget(finished_label)
+        
+        # 设置滚动区域的内容
+        finished_scroll.setWidget(finished_content)
+        
+        # 将滚动区域添加到页面
+        finished_page_layout = QVBoxLayout(finished_page)
+        finished_page_layout.setContentsMargins(0, 0, 0, 0)
+        finished_page_layout.addWidget(finished_scroll)
+        
+        # 存储容器引用，方便主窗口使用
+        finished_page.content_widget = finished_content
+        finished_page.content_layout = finished_layout
+        
+        return finished_page 

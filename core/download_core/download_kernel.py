@@ -74,8 +74,8 @@ class TransferManager(QThread):
             status_forcelist=[429, 500, 502, 503, 504],  # 需要重试的HTTP状态码
         )
         self.session = requests.Session()
-        self.session.mount("http://", HTTPAdapter(max_retries=retry_strategy))
-        self.session.mount("https://", HTTPAdapter(max_retries=retry_strategy))
+        self.session.mount("http://", HTTPAdapter(max_retries=retry_strategy, pool_connections=128, pool_maxsize=128))
+        self.session.mount("https://", HTTPAdapter(max_retries=retry_strategy, pool_connections=128, pool_maxsize=128))
         self.session.headers.update(headers)
         
         # 配置SSL验证和代理

@@ -4,7 +4,7 @@ import os
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QFontDatabase, QFont
+from PySide6.QtGui import QFontDatabase, QFont, QIcon
 from client.ui.client_interface.main_window import DownloadManagerWindow
 # 使用FallbackConnector替代DownloadConnector
 try:
@@ -21,6 +21,15 @@ from core.log.log_manager import log
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     # app.setStyle("Fusion")
+    
+    # 设置应用图标
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "logo.png")
+    if os.path.exists(icon_path):
+        app_icon = QIcon(icon_path)
+        app.setWindowIcon(app_icon)
+        log.info(f"已设置应用图标: {icon_path}")
+    else:
+        log.warning(f"图标文件不存在: {icon_path}")
     
     # 先记录系统字体情况
     system_fonts = QFontDatabase.families()

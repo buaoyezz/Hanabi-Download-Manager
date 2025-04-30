@@ -118,7 +118,12 @@ class FontManager:
         if os.path.exists(self.icon_font_path):
             font_id = font_db.addApplicationFont(self.icon_font_path)
             if font_id >= 0:
-                log.info("加载图标字体成功")
+                families = font_db.applicationFontFamilies(font_id)
+                if families:
+                    self.material_font = families[0]  # 使用实际加载的字体族名称
+                    log.info(f"加载图标字体成功，字体族: {families}")
+                else:
+                    log.error("加载图标字体成功但未找到字体族")
             else:
                 log.error(f"加载图标字体失败，路径: {self.icon_font_path}")
         else:
@@ -172,7 +177,7 @@ class FontManager:
                 log.error(f"加载字体出错 {font_name}: {str(e)}")
         
         # 打印所有可用字体族供调试
-        log.info(f"系统所有可用字体族: {font_db.families()}")
+        #log.info(f"系统所有可用字体族: {font_db.families()}")
         log.info(f"成功加载的字体族: {self.loaded_families}")
         
         # 添加系统字体作为后备
@@ -259,8 +264,6 @@ class FontManager:
                 english_font,  # 英文字体
                 self.material_font  # 图标字体
             ])
-            
-            log.debug(f"设置字体族: {chinese_font}, {english_font}")
         else:
             # 使用原始的字体名称
             chinese_font = self.hmsans_fonts_bold if is_bold else self.hmsans_fonts
@@ -291,6 +294,12 @@ class FontManager:
     def create_icon_font(self, size=24):
         font = QFont(self.material_font)
         font.setPixelSize(size)
+        # 设置字体渲染选项
+        font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        font.setStyleStrategy(
+            QFont.StyleStrategy.PreferAntialias |
+            QFont.StyleStrategy.PreferQuality
+        )
         return font
 
     def get_icon_text(self, icon_name):
@@ -351,6 +360,8 @@ class FontManager:
         if isinstance(widget, (QWidget, QLabel)):
             icon_font = self.create_icon_font(size)
             widget.setFont(icon_font)
+            # 设置抗锯齿和渲染选项
+            widget.setAttribute(Qt.WA_TranslucentBackground)
         else:
             raise TypeError("不支持的类型,只能应用到QWidget或QLabel ")
 
