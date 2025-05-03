@@ -53,7 +53,7 @@ class ProgressBar(QWidget):
             return
             
         # 打印进度数据用于调试
-        print(f"[DEBUG] ProgressBar接收到的进度数据: {progress_data}, 文件大小: {file_size}")
+        print(f"[DEBUG] ProgressBar接收到的进度数据: {progress_data[:2]}, 文件大小: {file_size}")
             
         segments = []
         total_downloaded = 0
@@ -63,14 +63,19 @@ class ProgressBar(QWidget):
         try:
             if isinstance(progress_data[0], dict):
                 for segment in progress_data:
-                    # 字段名可能是 start 或 startPos，需要兼容处理
-                    start_pos = segment.get('start', segment.get('startPos', 0))
-                    end_pos = segment.get('end', segment.get('endPos', 0))
-                    current = segment.get('progress', start_pos)
+                    # 兼容多种可能的字段名称
+                    start_pos = segment.get('start_position', segment.get('start_pos', segment.get('startPos', 0)))
+                    end_pos = segment.get('end_position', segment.get('end_pos', segment.get('endPos', 0)))
+                    current = segment.get('current_position', segment.get('progress', start_pos))
                     
-                    # 直接对比数值，避免计算错误
-                    current_downloaded = max(0, current - start_pos)
-                    segment_size = max(1, end_pos - start_pos + 1)
+                    # 确保值有效
+                    start_pos = max(0, start_pos)
+                    end_pos = max(start_pos, end_pos)
+                    current = max(start_pos, min(end_pos, current))
+                    
+                    # 计算当前块的下载量和总大小
+                    current_downloaded = current - start_pos
+                    segment_size = end_pos - start_pos + 1
                     
                     # 累加已下载和总大小
                     total_downloaded += current_downloaded
@@ -79,7 +84,7 @@ class ProgressBar(QWidget):
                     # 避免除零错误
                     if end_pos > start_pos and file_size > 0:
                         start_percent = (start_pos / file_size) * 100
-                        end_percent = ((end_pos + 1) / file_size) * 100  # 修正结束位置计算
+                        end_percent = ((end_pos + 1) / file_size) * 100
                         current_percent = (current / file_size) * 100
                         
                         # 添加已下载部分(绿色)
@@ -89,15 +94,24 @@ class ProgressBar(QWidget):
                         # 添加未下载部分(灰色)
                         if current < end_pos:
                             segments.append((current_percent, end_percent, self.pendingColor))
+                            
+                    # 打印调试信息
+                    print(f"块 {start_pos}-{end_pos}, 当前={current}, 进度={((current-start_pos)/(end_pos-start_pos+1))*100:.1f}%")
+                    
             elif isinstance(progress_data[0], (list, tuple)) and len(progress_data[0]) >= 3:
                 for segment in progress_data:
                     start_pos = segment[0]
                     current = segment[1]
                     end_pos = segment[2]
                     
-                    # 直接对比数值，避免计算错误
-                    current_downloaded = max(0, current - start_pos)
-                    segment_size = max(1, end_pos - start_pos + 1)
+                    # 确保值有效
+                    start_pos = max(0, start_pos)
+                    end_pos = max(start_pos, end_pos)
+                    current = max(start_pos, min(end_pos, current))
+                    
+                    # 计算当前块的下载量和总大小
+                    current_downloaded = current - start_pos
+                    segment_size = end_pos - start_pos + 1
                     
                     # 累加已下载和总大小
                     total_downloaded += current_downloaded
@@ -106,7 +120,7 @@ class ProgressBar(QWidget):
                     # 避免除零错误
                     if end_pos > start_pos and file_size > 0:
                         start_percent = (start_pos / file_size) * 100
-                        end_percent = ((end_pos + 1) / file_size) * 100  # 修正结束位置计算
+                        end_percent = ((end_pos + 1) / file_size) * 100
                         current_percent = (current / file_size) * 100
                         
                         # 添加已下载部分(绿色)
@@ -116,6 +130,9 @@ class ProgressBar(QWidget):
                         # 添加未下载部分(灰色)
                         if current < end_pos:
                             segments.append((current_percent, end_percent, self.pendingColor))
+                            
+                    # 打印调试信息
+                    print(f"块 {start_pos}-{end_pos}, 当前={current}, 进度={((current-start_pos)/(end_pos-start_pos+1))*100:.1f}%")
             
             # 使用直接计算的方式获取总进度
             total_progress = 0
@@ -125,7 +142,11 @@ class ProgressBar(QWidget):
                 print(f"[DEBUG] 进度条计算总进度: {total_progress:.2f}%, 已下载: {total_downloaded}, 总大小: {total_size}")
                 
                 # 确保进度大于0且不超过100
-                total_progress = max(0.1, min(100.0, total_progress))
+                # 如果接近完成但未完全完成，限制在99%
+                if total_progress >= 99.5 and total_downloaded < total_size:
+                    total_progress = 99.0
+                else:
+                    total_progress = max(0.1, min(100.0, total_progress))
             
             # 设置分段和总进度
             if segments:
@@ -136,23 +157,29 @@ class ProgressBar(QWidget):
             import traceback
             print(f"[ERROR] 更新进度条出错: {e}")
             traceback.print_exc()
-            # 强制设置一个分段和进度，保证显示
-            self.setProgress(3, False)
+            # 强制设置一个小进度值
+            self.setProgress(1, False)
             
-            # 如果文件已经完成下载，设置100%进度
+            # 如果所有块的进度都等于结束位置，说明完成了
             completed = True
             try:
                 for seg in progress_data:
                     if isinstance(seg, dict):
-                        end = seg.get('end', seg.get('endPos', 0))
-                        current = seg.get('progress', 0)
+                        end = seg.get('end_position', seg.get('end_pos', seg.get('endPos', 0)))
+                        current = seg.get('current_position', seg.get('progress', 0))
                         if current < end:
                             completed = False
                             break
+                    elif isinstance(seg, (list, tuple)) and len(seg) >= 3:
+                        if seg[1] < seg[2]:  # current < end
+                            completed = False
+                            break
+                            
                 if completed:
                     self.setProgress(100, False)
-            except:
-                pass
+                    print("[INFO] 检测到所有块已完成，设置进度为100%")
+            except Exception as e2:
+                print(f"[ERROR] 检查完成状态出错: {e2}")
         
     def setProgress(self, value, animated=True):
         if self._animation.state() == QPropertyAnimation.Running:

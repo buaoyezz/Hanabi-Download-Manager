@@ -16,7 +16,7 @@ class CustomMessageBox(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setModal(True)
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -28,22 +28,22 @@ class CustomMessageBox(QDialog):
             QWidget#container {
                 background-color: #2C2C2C;
                 border: 1px solid #3C3C3C;
-                border-radius: 10px;
+                border-radius: 12px;
             }
         """)
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(20, 20, 20, 20)
-        container_layout.setSpacing(15)
+        container_layout.setContentsMargins(25, 25, 25, 25)
+        container_layout.setSpacing(18)
         
         title_layout = QHBoxLayout()
         title_layout.setSpacing(10)
         
         # 图标映射
         icon_map = {
-            "info": "info",
-            "warning": "warning_amber",
-            "error": "error",
-            "help": "help"
+            "info": "ic_fluent_sparkle_info_24_regular",
+            "warning": "ic_fluent_chat_warning_24_regular",
+            "error": "ic_fluent_calendar_error_16_regular",
+            "help": "ic_fluent_chat_help_24_regular"
         }
         
         # 图标颜色映射
@@ -58,17 +58,17 @@ class CustomMessageBox(QDialog):
         if icon and icon in icon_map:
             # 创建图标标签
             icon_label = QLabel()
-            icon_label.setFixedSize(28, 28)  # 放大容器尺寸
+            icon_label.setFixedSize(36, 36)  # 放大容器尺寸
             
             # 使用FontManager获取图标
-            self.font_manager.apply_icon_font(icon_label, 20)  # 保持16的字体大小
+            self.font_manager.apply_icon_font(icon_label, 28)  # 增大字体大小
             icon_label.setText(self.font_manager.get_icon_text(icon_map[icon]))
             
             # 设置图标颜色和居中对齐
             if icon in icon_color:
                 icon_label.setStyleSheet(f"""
                     color: {icon_color[icon]};
-                    font-size: 16px;
+                    font-size: 24px;
                     qproperty-alignment: AlignCenter;
                     padding: 2px;
                 """)
@@ -78,7 +78,7 @@ class CustomMessageBox(QDialog):
         title_label = QLabel(title)
         title_label.setStyleSheet("""
             color: #FFFFFF;
-            font-size: 16px;
+            font-size: 18px;
             font-weight: bold;
         """)
         self.font_manager.apply_font(title_label)
@@ -88,13 +88,13 @@ class CustomMessageBox(QDialog):
         
         # 创建关闭按钮
         close_btn = QPushButton()
-        close_btn.setFixedSize(24, 24)
+        close_btn.setFixedSize(30, 30)
         
         # 使用字体管理器设置图标字体
-        self.font_manager.apply_icon_font(close_btn, 16)
+        self.font_manager.apply_icon_font(close_btn, 20)
         
         # 设置关闭图标
-        close_btn.setText(self.font_manager.get_icon_text("close"))
+        close_btn.setText(self.font_manager.get_icon_text("ic_fluent_dismiss_24_regular"))
         close_btn.setStyleSheet("""
             QPushButton {
                 color: #9E9E9E;
@@ -120,15 +120,16 @@ class CustomMessageBox(QDialog):
         
         # 内容区域
         content_layout = QHBoxLayout()
-        content_layout.setSpacing(15)
+        content_layout.setSpacing(20)  # 增加间距
         
         message_label = QLabel(text)
         message_label.setWordWrap(True)
         message_label.setStyleSheet("""
             color: #CCCCCC;
-            font-size: 14px;
-            min-height: 40px;
-            padding-left: 10px;
+            font-size: 16px;
+            min-height: 50px;
+            padding-left: 15px;
+            line-height: 140%;
         """)
         self.font_manager.apply_font(message_label)
         content_layout.addWidget(message_label, 1)
@@ -136,7 +137,7 @@ class CustomMessageBox(QDialog):
         container_layout.addLayout(content_layout)
         
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(10)
+        button_layout.setSpacing(15)
         button_layout.addStretch()
         
         if not buttons:
@@ -146,15 +147,21 @@ class CustomMessageBox(QDialog):
             btn = QPushButton(btn_text)
             self.font_manager.apply_font(btn)
             if is_default:
+                # 为确认按钮添加图标
+                self.font_manager.apply_icon_font(btn, 16)
+                # 设置图标文本在按钮文本前面
+                btn.setText(f"{self.font_manager.get_icon_text('ic_fluent_sparkle_32_regular')} {btn_text}")
                 btn.setStyleSheet("""
                     QPushButton {
                         background-color: #7E57C2;
                         color: #FFFFFF;
                         border: none;
-                        border-radius: 4px;
-                        padding: 8px 16px;
+                        border-radius: 5px;
+                        padding: 6px 12px;
                         font-weight: bold;
+                        font-size: 15px;
                         min-width: 80px;
+                        min-height: 30px;
                     }
                     QPushButton:hover {
                         background-color: #9575CD;
@@ -170,9 +177,11 @@ class CustomMessageBox(QDialog):
                         background-color: #424242;
                         color: #FFFFFF;
                         border: none;
-                        border-radius: 4px;
-                        padding: 8px 16px;
+                        border-radius: 5px;
+                        padding: 6px 12px;
+                        font-size: 15px;
                         min-width: 80px;
+                        min-height: 30px;
                     }
                     QPushButton:hover {
                         background-color: #4E4E4E;
@@ -191,6 +200,11 @@ class CustomMessageBox(QDialog):
     def info(parent, title, text, buttons=None):
         dialog = CustomMessageBox(parent, title, text, buttons, icon="info")
         return dialog.exec()
+    
+    @staticmethod
+    def information(parent, title, text, buttons=None):
+        """info方法的别名，保持API一致性"""
+        return CustomMessageBox.info(parent, title, text, buttons)
     
     @staticmethod
     def warning(parent, title, text, buttons=None):
