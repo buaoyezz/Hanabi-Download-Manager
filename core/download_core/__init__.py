@@ -1,4 +1,4 @@
 # Download core module initialization
-from .download_kernel import TransferManager, DownloadSegment
+from .download_kernel_reformed import DownloadEngine, DownloadBlock
 
-__all__ = ['TransferManager', 'DownloadSegment'] 
+__all__ = ['DownloadEngine', 'DownloadBlock'] 
