@@ -5,6 +5,7 @@ from PySide6.QtGui import QFont
 
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
+from client.ui.client_interface.history_window import HistoryWindow
 
 class CategoryButton(QPushButton):
     def __init__(self, text, parent=None, icon_code=None):
@@ -21,21 +22,12 @@ class CategoryButton(QPushButton):
         
         # 创建图标标签
         if icon_code:
-            self.icon_label = QLabel()
             self.font_manager = FontManager()
+            self.icon_label = QLabel()
             
-            # 直接创建并设置字体，确保是Material Icons
-            icon_font = QFont("Material Icons")  # 使用确切的字体名称
-            icon_font.setPixelSize(18)  # 略微增大图标尺寸
-            self.icon_label.setFont(icon_font)
+            # 使用font_manager应用图标字体并设置图标
+            self.font_manager.apply_icon_font(self.icon_label, icon_code, size=18)
             
-            # 使用Unicode值直接设置图标
-            icon_text = self.font_manager.get_icon_text(icon_code)
-            if not icon_text:
-                # 如果图标代码无效，显示一个通用图标
-                icon_text = "\ue5d4"  # info_outline 图标
-                
-            self.icon_label.setText(icon_text)
             self.layout.addWidget(self.icon_label)
         
         # 创建文本标签
@@ -70,14 +62,18 @@ class CategoryButton(QPushButton):
     
     def updateStyle(self, checked):
         if checked:
-            if hasattr(self, 'icon_label'):
-                self.icon_label.setStyleSheet("color: #B39DDB; background-color: transparent; font-weight: bold;")
+            if hasattr(self, 'icon_label') and self.icon_label:
+                self.icon_label.setStyleSheet("color: #B39DDB; background-color: transparent; font-size: 14px;")
+                # 确保图标在选中状态下仍然可见
+                self.icon_label.show()
             self.text_label.setStyleSheet("color: #B39DDB; background-color: transparent; font-weight: bold; font-size: 14px;")
             # 选中时使用一致的内边距
             self.layout.setContentsMargins(15, 0, 15, 0)
         else:
-            if hasattr(self, 'icon_label'):
+            if hasattr(self, 'icon_label') and self.icon_label:
                 self.icon_label.setStyleSheet("color: #9E9E9E; background-color: transparent; font-size: 14px;")
+                # 确保图标在非选中状态下仍然可见
+                self.icon_label.show()
             self.text_label.setStyleSheet("color: #9E9E9E; background-color: transparent; font-size: 14px;")
             # 未选中时保持相同间距
             self.layout.setContentsMargins(15, 0, 15, 0)
@@ -251,12 +247,13 @@ class PagesManager(QObject):
         # 下载页面
         download_page = self.create_download_page()
         
-        # 已完成页面
-        finished_page = self.create_finished_page()
+        # 历史页面（以前是已完成页面）
+        history_page = self.create_history_page()
         
         # 尝试从主窗口获取特殊页面
         settings_page = None
         about_page = None
+        update_page = None
         
         if self.main_window:
             # 从主窗口获取设置页面和关于页面
@@ -265,59 +262,122 @@ class PagesManager(QObject):
             
             if hasattr(self.main_window, 'about_page'):
                 about_page = self.main_window.about_page
+                
+            if hasattr(self.main_window, 'update_page'):
+                update_page = self.main_window.update_page
         
-        # 添加页面到管理器
-        self.add_page("downloads", download_page, "download", "下载")
-        self.add_page("finished", finished_page, "done_all", "已完成")
+        # 使用Fluent图标添加页面到管理器
+        self.add_page("downloads", download_page, "ic_fluent_arrow_download_24_regular", "下载")
+        self.add_page("finished", history_page, "ic_fluent_history_24_regular", "历史")
         
         if settings_page:
-            self.add_page("settings", settings_page, "settings", "设置")
+            self.add_page("settings", settings_page, "ic_fluent_settings_24_regular", "设置")
         
         if about_page:
-            self.add_page("about", about_page, "info", "关于")
+            self.add_page("about", about_page, "ic_fluent_info_24_regular", "关于")
+            
+        if update_page:
+            self.add_page("update", update_page, "ic_fluent_arrow_sync_24_regular", "更新")
         
         # 默认显示下载页面
         self.switch_page("downloads")
         
         return {
             "downloads": download_page,
-            "finished": finished_page,
+            "history": history_page,
             "settings": settings_page,
-            "about": about_page
+            "about": about_page,
+            "update": update_page
         }
     
-    def add_page(self, page_id, page_widget, icon_name=None, button_text=None):
-        """添加页面到管理器"""
-        # 添加页面到堆叠窗口
-        self.stacked_widget.addWidget(page_widget)
-        self.pages[page_id] = page_widget
+    def create_generic_page(self):
+        """创建通用页面"""
+        generic_page = QWidget()
         
-        # 如果提供了按钮文本，创建导航按钮
-        if button_text:
-            button = CategoryButton(button_text, icon_code=icon_name)
-            button.clicked.connect(lambda: self.switch_page(page_id))
-            self.buttons[page_id] = button
-            
-            # 获取侧边栏布局并添加按钮
-            sidebar_layout = self.sidebar_widget.layout()
-            if sidebar_layout:
-                # 尝试在倒数第二个位置添加按钮（通常紧接着现有按钮组的最后一个按钮）
-                count = sidebar_layout.count()
-                stretch_index = -1
-                
-                # 查找第一个拉伸项的位置
-                for i in range(count):
-                    item = sidebar_layout.itemAt(i)
-                    if item and item.spacerItem():
-                        stretch_index = i
-                        break
-                
-                if stretch_index >= 0:
-                    # 在拉伸项之前插入
-                    sidebar_layout.insertWidget(stretch_index, button)
-                else:
-                    # 如果没有找到拉伸项，添加到布局末尾
-                    sidebar_layout.addWidget(button)
+        # 创建滚动区域
+        generic_scroll = QScrollArea()
+        generic_scroll.setWidgetResizable(True)
+        generic_scroll.setFrameShape(QScrollArea.NoFrame)
+        generic_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        generic_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        ScrollStyle.apply_to_widget(generic_scroll, "dark")
+        
+        # 创建内容容器
+        generic_content = QWidget()
+        generic_layout = QVBoxLayout(generic_content)
+        generic_layout.setContentsMargins(15, 15, 15, 15)
+        
+        generic_label = QLabel("此页面尚未实现")
+        generic_label.setAlignment(Qt.AlignCenter)
+        generic_layout.addWidget(generic_label)
+        
+        # 设置滚动区域的内容
+        generic_scroll.setWidget(generic_content)
+        
+        # 将滚动区域添加到页面
+        generic_page_layout = QVBoxLayout(generic_page)
+        generic_page_layout.setContentsMargins(0, 0, 0, 0)
+        generic_page_layout.addWidget(generic_scroll)
+        
+        # 存储容器引用，方便主窗口使用
+        generic_page.content_widget = generic_content
+        generic_page.content_layout = generic_layout
+        
+        return generic_page
+    
+    def create_history_page(self):
+        """创建历史页面（原已完成页面）"""
+        # 创建历史页面
+        history_page = QWidget()
+        history_page_layout = QVBoxLayout(history_page)
+        history_page_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 创建历史窗口
+        history_window = HistoryWindow(self.font_manager)
+        
+        # 将历史窗口添加到页面
+        history_page_layout.addWidget(history_window)
+        
+        # 存储容器引用，方便主窗口使用
+        history_page.content_widget = history_window
+        history_page.content_layout = history_window.main_layout
+        
+        return history_page
+        
+    def create_finished_page(self):
+        """创建已完成页面（保留此方法以兼容现有代码）"""
+        # 调用历史页面以保持一致性
+        return self.create_history_page()
+    
+    def create_page(self, page_id, page_name):
+        """创建页面"""
+        page_widget = QWidget()
+        
+        # 创建滚动区域
+        page_scroll = QScrollArea()
+        page_scroll.setWidgetResizable(True)
+        page_scroll.setFrameShape(QScrollArea.NoFrame)
+        page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        page_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        ScrollStyle.apply_to_widget(page_scroll, "dark")
+        
+        # 创建内容容器
+        page_content = QWidget()
+        page_layout = QVBoxLayout(page_content)
+        page_layout.setContentsMargins(15, 15, 15, 15)
+        page_layout.setSpacing(20)
+        
+        # 设置滚动区域的内容
+        page_scroll.setWidget(page_content)
+        
+        # 将滚动区域添加到页面
+        page_layout = QVBoxLayout(page_widget)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.addWidget(page_scroll)
+        
+        # 存储容器引用，方便主窗口使用
+        page_widget.content_widget = page_content
+        page_widget.content_layout = page_layout
         
         return page_widget
     
@@ -484,37 +544,39 @@ class PagesManager(QObject):
         
         return download_page
     
-    def create_finished_page(self):
-        """创建已完成页面"""
-        finished_page = QWidget()
+    def add_page(self, page_id, page_widget, icon_code, text):
+        """添加页面到管理器"""
+        self.pages[page_id] = page_widget
         
-        # 创建滚动区域
-        finished_scroll = QScrollArea()
-        finished_scroll.setWidgetResizable(True)
-        finished_scroll.setFrameShape(QScrollArea.NoFrame)
-        finished_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        finished_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        ScrollStyle.apply_to_widget(finished_scroll, "dark")
+        # 创建侧边栏按钮
+        button = CategoryButton(
+            parent=self.sidebar_widget,
+            text=text,
+            icon_code=icon_code
+        )
+        button.clicked.connect(lambda checked=False, pid=page_id: self.switch_page(pid))
+        self.buttons[page_id] = button
         
-        # 创建内容容器
-        finished_content = QWidget()
-        finished_layout = QVBoxLayout(finished_content)
-        finished_layout.setContentsMargins(15, 15, 15, 15)
+        # 获取侧边栏布局并添加按钮
+        sidebar_layout = self.sidebar_widget.layout()
+        if sidebar_layout:
+            # 尝试在倒数第二个位置添加按钮（通常紧接着现有按钮组的最后一个按钮）
+            count = sidebar_layout.count()
+            stretch_index = -1
+            
+            # 查找第一个拉伸项的位置
+            for i in range(count):
+                item = sidebar_layout.itemAt(i)
+                if item and item.spacerItem():
+                    stretch_index = i
+                    break
+            
+            if stretch_index >= 0:
+                # 在拉伸项之前插入
+                sidebar_layout.insertWidget(stretch_index, button)
+            else:
+                # 如果没有找到拉伸项，添加到布局末尾
+                sidebar_layout.addWidget(button)
         
-        finished_label = QLabel("已完成的下载任务将显示在这里")
-        finished_label.setAlignment(Qt.AlignCenter)
-        finished_layout.addWidget(finished_label)
-        
-        # 设置滚动区域的内容
-        finished_scroll.setWidget(finished_content)
-        
-        # 将滚动区域添加到页面
-        finished_page_layout = QVBoxLayout(finished_page)
-        finished_page_layout.setContentsMargins(0, 0, 0, 0)
-        finished_page_layout.addWidget(finished_scroll)
-        
-        # 存储容器引用，方便主窗口使用
-        finished_page.content_widget = finished_content
-        finished_page.content_layout = finished_layout
-        
-        return finished_page 
+        # 将页面添加到堆叠窗口
+        self.stacked_widget.addWidget(page_widget) 
