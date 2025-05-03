@@ -1,27 +1,10 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QScrollArea, QDialog, QFrame
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, QThread
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QPixmap, QIcon, QPainter, QPainterPath, QBrush, QColor
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.components.customNotify import NotifyManager
-from core.update.update_log_manager import UpdateLogManager
-from client.ui.components.update_log_dialog import UpdateLogDialog
 import webbrowser
-import time
-
-class UpdateCheckThread(QThread):
-    update_found = Signal()
-    no_update = Signal()
-    error = Signal(str)
-    
-    def run(self):
-        try:
-            # 模拟检查更新过程
-            time.sleep(2)
-            # 这里添加实际的更新检查逻辑
-            self.no_update.emit()
-        except Exception as e:
-            self.error.emit(str(e))
 
 class RoundedContainer(QWidget):
     def __init__(self, parent=None, radius=15, bg_color="#2C2C2C"):
@@ -43,26 +26,14 @@ class RoundedContainer(QWidget):
         painter.drawPath(path)
 
 class AboutWindow(QWidget):
-    # 添加信号用于状态同步
-    update_status_changed = Signal(str, str)  # (status_text, status_color)
-    
     def __init__(self, parent=None):
         super().__init__(parent)
         
         # 初始化字体管理器
         self.font_manager = FontManager()
         
-        # 初始化更新日志管理器
-        self.update_log_manager = UpdateLogManager()
-        
-        # 初始化更新检查线程
-        self.update_thread = None
-        
         # 设置透明背景
         self.setAttribute(Qt.WA_TranslucentBackground)
-        
-        # 连接状态更新信号
-        self.update_status_changed.connect(self.update_status_display)
         
         # 创建主布局
         main_layout = QVBoxLayout(self)
@@ -109,7 +80,7 @@ class AboutWindow(QWidget):
         header_layout.addStretch(1)
         
         # 版本信息
-        version_label = QLabel("版本 1.0.1 Release")
+        version_label = QLabel("版本 1.0.2 Release")
         version_label.setStyleSheet("color: #9E9E9E; font-size: 14px;")
         self.font_manager.apply_font(version_label)
         header_layout.addWidget(version_label)
@@ -176,24 +147,6 @@ class AboutWindow(QWidget):
         links_layout = QHBoxLayout()
         links_layout.setSpacing(15)
         
-        # 检查更新日志按钮
-        check_update_btn = QPushButton("检查更新日志")
-        check_update_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333333;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 15px;
-                padding: 8px 15px;
-            }
-            QPushButton:hover {
-                background-color: #444444;
-            }
-        """)
-        self.font_manager.apply_font(check_update_btn)
-        check_update_btn.clicked.connect(self.check_update_logs)
-        links_layout.addWidget(check_update_btn)
-        
         github_btn = QPushButton("GitHub Home")
         github_btn.setStyleSheet("""
             QPushButton {
@@ -242,216 +195,122 @@ class AboutWindow(QWidget):
         # 添加卡片到内容布局
         content_layout.addWidget(about_card)
         
-        # 软件更新卡片
-        update_card = RoundedContainer(radius=20, bg_color="#252525")
-        update_layout = QVBoxLayout(update_card)
-        update_layout.setContentsMargins(30, 30, 30, 30)
-        update_layout.setSpacing(20)
+        # 第三方资源卡片
+        thirdparty_card = RoundedContainer(radius=20, bg_color="#252525")
+        thirdparty_layout = QVBoxLayout(thirdparty_card)
+        thirdparty_layout.setContentsMargins(30, 30, 30, 30)
+        thirdparty_layout.setSpacing(20)
         
-        # 软件更新标题区域
-        update_title_layout = QHBoxLayout()
-        update_title_layout.setSpacing(10)
+        # 第三方资源标题区域
+        thirdparty_title_layout = QHBoxLayout()
+        thirdparty_title_layout.setSpacing(10)
         
-        # 软件更新图标
-        update_icon = QLabel()
-        update_icon.setFixedSize(24, 24)
-        self.font_manager.apply_icon_font(update_icon, 24)
-        update_icon.setText(self.font_manager.get_icon_text("system_update"))
-        update_icon.setStyleSheet("color: #B39DDB;")
-        update_title_layout.addWidget(update_icon)
+        # 第三方资源图标
+        thirdparty_icon = QLabel()
+        thirdparty_icon.setFixedSize(24, 24)
+        self.font_manager.apply_icon_font(thirdparty_icon, 24)
+        thirdparty_icon.setText(self.font_manager.get_icon_text("ic_fluent_leaf_three_16_regular"))
+        thirdparty_icon.setStyleSheet("color: #B39DDB;")
+        thirdparty_title_layout.addWidget(thirdparty_icon)
         
-        # 软件更新标题
-        update_title = QLabel("软件更新")
-        update_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
-        self.font_manager.apply_font(update_title)
-        update_title_layout.addWidget(update_title)
-        update_title_layout.addStretch()
+        # 第三方资源标题
+        thirdparty_title = QLabel("第三方资源")
+        thirdparty_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
+        self.font_manager.apply_font(thirdparty_title)
+        thirdparty_title_layout.addWidget(thirdparty_title)
+        thirdparty_title_layout.addStretch()
         
-        # 版本信息
-        version_info = QLabel("当前版本: 1.0.1")
-        version_info.setStyleSheet("color: #9E9E9E; font-size: 14px;")
-        self.font_manager.apply_font(version_info)
-        update_title_layout.addWidget(version_info)
+        thirdparty_layout.addLayout(thirdparty_title_layout)
         
-        update_layout.addLayout(update_title_layout)
+        # 第三方资源描述
+        thirdparty_desc = QLabel("本软件使用了以下优秀的第三方资源：")
+        thirdparty_desc.setWordWrap(True)
+        thirdparty_desc.setStyleSheet("color: #E0E0E0; font-size: 14px;")
+        self.font_manager.apply_font(thirdparty_desc)
+        thirdparty_layout.addWidget(thirdparty_desc)
         
-        # 按钮区域
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(10)
+        # 添加分隔线
+        separator3 = QWidget()
+        separator3.setFixedHeight(1)
+        separator3.setStyleSheet("background-color: #3C3C3C;")
+        thirdparty_layout.addWidget(separator3)
         
-        # 检查更新按钮
-        check_update_btn = QPushButton("检查更新")
-        check_update_btn.setStyleSheet("""
+        # 第三方资源列表
+        resources = [
+            ("PySide6", "Qt for Python GUI框架", "https://doc.qt.io/qtforpython/"),
+            ("Microsoft Fluent UI Icons", "现代化图标系统", "https://github.com/microsoft/fluentui-system-icons"),
+            ("HarmonyOS Sans", "华为鸿蒙字体", "https://developer.harmonyos.com/cn/design/resource"),
+            ("Mulish", "开源无衬线字体", "https://fonts.google.com/specimen/Mulish"),
+            ("Xiaoy", "感谢晓宇提供服务器供我部署图标在线查询", "https://apiv2.xiaoy.asia/icons-page/"),
+            ("ClutUI Next Generation", "使用了部分ClutUI NG的控件", "https://github.com/buaoyezz/ClutUI-Nextgen")
+        ]
+        
+        for name, desc, url in resources:
+            resource_layout = QVBoxLayout()
+            resource_layout.setSpacing(4)
+        
+            # 资源名称
+            name_label = QLabel(name)
+            name_label.setStyleSheet("color: #B39DDB; font-size: 15px; font-weight: bold;")
+            self.font_manager.apply_font(name_label)
+            resource_layout.addWidget(name_label)
+            
+            # 资源描述
+            desc_label = QLabel(desc)
+            desc_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
+            self.font_manager.apply_font(desc_label)
+            resource_layout.addWidget(desc_label)
+            
+            # 资源链接行
+            link_layout = QHBoxLayout()
+            link_layout.setSpacing(5)
+            
+            # 链接图标
+            link_icon = QLabel()
+            self.font_manager.apply_icon_font(link_icon, 16)
+            link_icon.setText(self.font_manager.get_icon_text("ic_fluent_link_24_regular"))
+            link_icon.setStyleSheet("color: #9E9E9E;")
+            link_layout.addWidget(link_icon)
+            
+            # 链接按钮
+            link_btn = QPushButton(url)
+            link_btn.setStyleSheet("""
             QPushButton {
-                background-color: #B39DDB;
-                color: #121212;
+                    color: #9E9E9E;
+                    background: transparent;
                 border: none;
-                border-radius: 15px;
-                padding: 8px 20px;
-                font-weight: bold;
+                    text-align: left;
+                    font-size: 12px;
             }
             QPushButton:hover {
-                background-color: #9575CD;
-            }
-            QPushButton:disabled {
-                background-color: #666666;
-                color: #999999;
+                    color: #B39DDB;
+                    text-decoration: underline;
             }
         """)
-        self.font_manager.apply_font(check_update_btn)
-        check_update_btn.clicked.connect(self.check_update)
-        buttons_layout.addWidget(check_update_btn)
-        self.check_update_btn = check_update_btn
+            self.font_manager.apply_font(link_btn)
+            # 为每个按钮创建一个单独的lambda，捕获当前url值
+            link_btn.clicked.connect(lambda checked=False, url=url: webbrowser.open(url))
+            link_layout.addWidget(link_btn)
+            link_layout.addStretch()
+            
+            resource_layout.addLayout(link_layout)
+            thirdparty_layout.addLayout(resource_layout)
         
-        # 自动检查更新按钮
-        auto_check_btn = QPushButton("自动检查更新")
-        auto_check_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #333333;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 15px;
-                padding: 8px 20px;
-            }
-            QPushButton:hover {
-                background-color: #444444;
-            }
-            QPushButton:disabled {
-                background-color: #222222;
-                color: #666666;
-            }
-        """)
-        self.font_manager.apply_font(auto_check_btn)
-        auto_check_btn.clicked.connect(self.toggle_auto_check)
-        buttons_layout.addWidget(auto_check_btn)
-        self.auto_check_btn = auto_check_btn
+            # 添加资源间分隔线，最后一个资源除外
+            if name != resources[-1][0]:
+                separator = QWidget()
+                separator.setFixedHeight(1)
+                separator.setStyleSheet("background-color: #333333;")
+                thirdparty_layout.addWidget(separator)
         
-        buttons_layout.addStretch()
-        update_layout.addLayout(buttons_layout)
-        
-        # 更新状态
-        status_label = QLabel("您当前使用的已是最新版本")
-        status_label.setStyleSheet("color: #4CAF50; font-size: 14px;")
-        self.font_manager.apply_font(status_label)
-        update_layout.addWidget(status_label)
-        self.status_label = status_label  # 保存引用
-        
-        content_layout.addWidget(update_card)
-        
-        # 更新日志卡片
-        log_card = RoundedContainer(radius=20, bg_color="#252525")
-        log_layout = QVBoxLayout(log_card)
-        log_layout.setContentsMargins(30, 30, 30, 30)
-        log_layout.setSpacing(20)
-        
-        # 更新日志标题区域
-        log_title_layout = QHBoxLayout()
-        log_title_layout.setSpacing(10)
-        
-        # 更新日志图标
-        log_icon = QLabel()
-        log_icon.setFixedSize(24, 24)
-        self.font_manager.apply_icon_font(log_icon, 24)
-        log_icon.setText(self.font_manager.get_icon_text("description"))
-        log_icon.setStyleSheet("color: #B39DDB;")
-        log_title_layout.addWidget(log_icon)
-        
-        # 更新日志标题
-        log_title = QLabel("更新日志")
-        log_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
-        self.font_manager.apply_font(log_title)
-        log_title_layout.addWidget(log_title)
-        log_title_layout.addStretch()
-        
-        log_layout.addLayout(log_title_layout)
-        
-        # 更新日志内容
-        log_content = QLabel("暂无更新日志信息，请检查更新\n检查更新后将在此处显示最新版本信息")
-        log_content.setWordWrap(True)
-        log_content.setStyleSheet("color: #9E9E9E; font-size: 14px; line-height: 1.5;")
-        self.font_manager.apply_font(log_content)
-        log_layout.addWidget(log_content)
-        
-        content_layout.addWidget(log_card)
+        # 添加第三方资源卡片到内容布局
+        content_layout.addWidget(thirdparty_card)
         
         # 设置滚动区域的内容
         scroll_area.setWidget(content_widget)
         
         # 将滚动区域添加到主布局
         main_layout.addWidget(scroll_area)
-
-    def check_update_logs(self):
-        latest = self.update_log_manager.get_latest_version_log()
-        if latest:
-            version, log_data = latest
-            dialog = UpdateLogDialog(
-                version=version,
-                content=log_data["content"],
-                update_time=log_data["update_time"],
-                parent=self
-            )
-            if dialog.exec() == QDialog.Accepted:
-                self.update_log_manager.mark_as_read(version)
-                self.update_log_manager.clean_old_logs()
-                NotifyManager.success("更新日志已确认")
-        else:
-            NotifyManager.info("暂无新的更新日志")
-
-    def check_update(self):
-        self.check_update_btn.setEnabled(False)
-        self.auto_check_btn.setEnabled(False)
-        
-        status_text = "正在检查更新..."
-        status_color = "#2196F3"
-        self.update_status_changed.emit(status_text, status_color)
-        
-        self.update_thread = UpdateCheckThread()
-        self.update_thread.update_found.connect(self.handle_update_found)
-        self.update_thread.no_update.connect(self.handle_no_update)
-        self.update_thread.error.connect(self.handle_update_error)
-        self.update_thread.finished.connect(self.update_check_finished)
-        self.update_thread.start()
-    
-    def handle_update_found(self):
-        status_text = "发现新版本！"
-        status_color = "#4CAF50"
-        self.update_status_changed.emit(status_text, status_color)
-        self.check_update_btn.setEnabled(True)
-        self.auto_check_btn.setEnabled(True)
-    
-    def handle_no_update(self):
-        status_text = "您当前使用的已是最新版本"
-        status_color = "#4CAF50"
-        self.update_status_changed.emit(status_text, status_color)
-        self.check_update_btn.setEnabled(True)
-        self.auto_check_btn.setEnabled(True)
-    
-    def handle_update_error(self, error):
-        status_text = f"检查更新失败: {error}"
-        status_color = "#f44336"
-        self.update_status_changed.emit(status_text, status_color)
-        self.check_update_btn.setEnabled(True)
-        self.auto_check_btn.setEnabled(True)
-        NotifyManager.error(f"检查更新失败: {error}")
-    
-    def update_check_finished(self):
-        # 重新启用按钮
-        self.check_update_btn.setEnabled(True)
-        self.auto_check_btn.setEnabled(True)
-        
-        # 清理线程
-        if self.update_thread:
-            self.update_thread.deleteLater()
-            self.update_thread = None
-    
-    def toggle_auto_check(self):
-        # TODO: 实现自动检查更新的开关功能
-        NotifyManager.info("自动检查更新功能开发中")
-
-    def update_status_display(self, text, color):
-        if hasattr(self, 'status_label'):
-            self.status_label.setText(text)
-            self.status_label.setStyleSheet(f"color: {color}; font-size: 14px;")
 
     def create_icon_label(self, icon_name, color="#B39DDB"):
         icon_label = QLabel()
@@ -461,159 +320,3 @@ class AboutWindow(QWidget):
         icon_label.setStyleSheet(f"color: {color}; margin: 0; padding: 0;")
         icon_label.setAlignment(Qt.AlignCenter)
         return icon_label
-
-    def init_ui(self):
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(15)
-
-        # 标题区域
-        title_layout = QHBoxLayout()
-        title_layout.setSpacing(10)
-        
-        # 标题图标
-        title_icon = self.create_icon_label("info")
-        title_layout.addWidget(title_icon)
-        
-        # 标题文本
-        title_label = QLabel("关于 Hanabi 下载管理器")
-        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #1976D2;")
-        self.font_manager.apply_font(title_label)
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        
-        main_layout.addLayout(title_layout)
-
-        # 版本信息
-        version_label = QLabel("版本 1.0.1")
-        version_label.setStyleSheet("font-size: 16px; color: #424242;")
-        self.font_manager.apply_font(version_label)
-        main_layout.addWidget(version_label, alignment=Qt.AlignCenter)
-
-        # 分割线
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet("background-color: #E0E0E0;")
-        main_layout.addWidget(line)
-
-        # 更新检查区域
-        update_layout = QVBoxLayout()
-        update_layout.setSpacing(10)
-
-        # 更新检查标题区域
-        update_title_layout = QHBoxLayout()
-        update_title_layout.setSpacing(10)
-        
-        # 更新图标
-        update_icon = self.create_icon_label("system_update")
-        update_title_layout.addWidget(update_icon)
-        
-        # 更新标题
-        update_title = QLabel("软件更新")
-        update_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976D2;")
-        self.font_manager.apply_font(update_title)
-        update_title_layout.addWidget(update_title)
-        update_title_layout.addStretch()
-        
-        update_layout.addLayout(update_title_layout)
-
-        # 状态标签
-        self.status_label = QLabel("点击按钮检查更新")
-        self.status_label.setStyleSheet("color: #757575; font-size: 14px;")
-        self.font_manager.apply_font(self.status_label)
-        update_layout.addWidget(self.status_label, alignment=Qt.AlignCenter)
-
-        # 按钮布局
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(10)
-
-        # 检查更新按钮
-        self.check_update_btn = QPushButton("检查更新")
-        self.check_update_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #0D47A1;
-            }
-            QPushButton:disabled {
-                background-color: #BDBDBD;
-            }
-        """)
-        self.font_manager.apply_font(self.check_update_btn)
-        self.check_update_btn.clicked.connect(self.check_update)
-        button_layout.addWidget(self.check_update_btn)
-
-        # 自动检查按钮
-        self.auto_check_btn = QPushButton("自动检查")
-        self.auto_check_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #388E3C;
-            }
-            QPushButton:pressed {
-                background-color: #1B5E20;
-            }
-            QPushButton:disabled {
-                background-color: #BDBDBD;
-            }
-        """)
-        self.font_manager.apply_font(self.auto_check_btn)
-        button_layout.addWidget(self.auto_check_btn)
-
-        update_layout.addLayout(button_layout)
-        main_layout.addLayout(update_layout)
-        
-        # 更新日志区域
-        log_layout = QVBoxLayout()
-        log_layout.setSpacing(10)
-        
-        # 更新日志标题区域
-        log_title_layout = QHBoxLayout()
-        log_title_layout.setSpacing(10)
-        
-        # 更新日志图标
-        log_icon = self.create_icon_label("description")
-        log_title_layout.addWidget(log_icon)
-        
-        # 更新日志标题
-        log_title = QLabel("更新日志")
-        log_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976D2;")
-        self.font_manager.apply_font(log_title)
-        log_title_layout.addWidget(log_title)
-        log_title_layout.addStretch()
-        
-        log_layout.addLayout(log_title_layout)
-        
-        # 更新日志内容
-        log_content = QLabel("暂无更新日志信息，请检查更新\n检查更新后将在此处显示最新版本信息")
-        log_content.setWordWrap(True)
-        log_content.setStyleSheet("color: #757575; font-size: 14px;")
-        self.font_manager.apply_font(log_content)
-        log_layout.addWidget(log_content)
-        
-        main_layout.addLayout(log_layout)
-
-        # 版权信息
-        copyright_label = QLabel("© 2024 Hanabi Team. All rights reserved.")
-        copyright_label.setStyleSheet("color: #9E9E9E; font-size: 12px;")
-        self.font_manager.apply_font(copyright_label)
-        main_layout.addWidget(copyright_label, alignment=Qt.AlignCenter)
-
-        self.setLayout(main_layout)
-        self.setWindowTitle("关于")
