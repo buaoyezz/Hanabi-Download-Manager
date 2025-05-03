@@ -21,7 +21,7 @@ class UpdatePage(QWidget):
         self.font_manager = FontManager()
         
         # 软件当前版本
-        self.current_version = "1.0.1"
+        self.current_version = "1.0.2"
         
         # 检查更新API地址
         self.api_url = "https://zzbuaoye.dpdns.org"
@@ -38,8 +38,45 @@ class UpdatePage(QWidget):
         self.cached_data = self.load_cache()
         self.has_newer_version = False
         
+        # 创建主滚动区域，使整个页面可滚动
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.NoFrame)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background-color: #252526;
+                width: 12px;
+                margin: 0px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #666666;
+                min-height: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        
+        # 创建内容容器
+        self.content_widget = QWidget()
+        
+        # 设置主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(self.scroll_area)
+        
         # 初始化UI
         self.setup_ui()
+        
+        # 设置滚动区域的内容
+        self.scroll_area.setWidget(self.content_widget)
         
         # 加载上次检查时间
         self.load_last_check_time()
@@ -119,9 +156,10 @@ class UpdatePage(QWidget):
                 self.update_release_notes(current_version_info, False)
     
     def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(20)
+        # 内容布局
+        content_layout = QVBoxLayout(self.content_widget)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.setSpacing(20)
         
         # 版本信息卡片
         version_card = self.create_card()
@@ -135,7 +173,7 @@ class UpdatePage(QWidget):
         # 添加图标
         icon_label = QLabel()
         self.font_manager.apply_icon_font(icon_label, 24)
-        icon_label.setText(self.font_manager.get_icon_text("browser_updated"))
+        icon_label.setText(self.font_manager.get_icon_text("ic_fluent_arrow_sync_circle_24_regular"))
         icon_label.setStyleSheet("""
             QLabel {
                 color: #B39DDB;
@@ -224,7 +262,7 @@ class UpdatePage(QWidget):
         # 图标
         check_icon = QLabel()
         self.font_manager.apply_icon_font(check_icon, 16)
-        check_icon.setText(self.font_manager.get_icon_text("refresh"))
+        check_icon.setText(self.font_manager.get_icon_text("ic_fluent_arrow_counterclockwise_24_regular"))
         check_icon.setStyleSheet("""
             QLabel {
                 color: #FFFFFF;
@@ -305,7 +343,7 @@ class UpdatePage(QWidget):
         self.font_manager.apply_font(self.status_label)
         version_layout.addWidget(self.status_label)
         
-        main_layout.addWidget(version_card)
+        content_layout.addWidget(version_card)
         
         # 更新日志卡片
         update_log_card = self.create_card()
@@ -318,7 +356,7 @@ class UpdatePage(QWidget):
         
         log_icon = QLabel()
         self.font_manager.apply_icon_font(log_icon, 24)
-        log_icon.setText(self.font_manager.get_icon_text("history"))
+        log_icon.setText(self.font_manager.get_icon_text("ic_fluent_bookmark_16_regular"))
         log_icon.setStyleSheet("""
             QLabel {
                 color: #B39DDB;
@@ -343,32 +381,7 @@ class UpdatePage(QWidget):
         log_separator.setFixedHeight(1)
         update_log_layout.addWidget(log_separator)
         
-        # 创建滚动区域用于显示更新日志
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QScrollArea.NoFrame)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollBar:vertical {
-                background-color: #252526;
-                width: 12px;
-                margin: 0px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #666666;
-                min-height: 20px;
-                border-radius: 6px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
-        
-        # 创建内容部件
+        # 创建日志内容区域（不使用滚动区域）
         self.log_content = QWidget()
         self.log_content.setStyleSheet("background-color: transparent;")
         self.log_layout = QVBoxLayout(self.log_content)
@@ -391,11 +404,18 @@ class UpdatePage(QWidget):
         self.log_layout.addWidget(default_log)
         self.log_layout.addStretch()
         
-        scroll_area.setWidget(self.log_content)
-        update_log_layout.addWidget(scroll_area)
+        # 直接添加日志内容到布局中（不使用滚动区域）
+        update_log_layout.addWidget(self.log_content)
         
-        main_layout.addWidget(update_log_card, 1)  # 1表示拉伸系数，使更新日志卡片可拉伸
+        # 添加日志卡片到内容布局
+        content_layout.addWidget(update_log_card)
         
+        # 添加底部间距
+        bottom_spacer = QWidget()
+        bottom_spacer.setFixedHeight(20)
+        bottom_spacer.setStyleSheet("background-color: transparent;")
+        content_layout.addWidget(bottom_spacer)
+    
     def create_card(self):
         card = QWidget()
         card.setStyleSheet("""
@@ -612,21 +632,125 @@ class UpdatePage(QWidget):
         self.config_manager.set_auto_check_update(checked)
     
     def compare_versions(self, version1, version2):
-        # 简单版本比较：将版本号分解为组件，然后比较各个组件
-        v1_components = list(map(int, version1.split('.')))
-        v2_components = list(map(int, version2.split('.')))
+        """
+        比较两个版本号的大小
+        支持以下格式:
+        - 标准版本号 (1.0.0)
+        - 带hotfix/remake后缀 (1.0.0-1 hotfix, 1.0.0 remake)
+        - 四段式版本号 (1.0.0.1000)
+        - 混合模式 (1.1.1.9033 hotfix)
         
-        # 确保两个版本号具有相同数量的组件
-        while len(v1_components) < len(v2_components):
-            v1_components.append(0)
-        while len(v2_components) < len(v1_components):
-            v2_components.append(0)
+        返回值:
+        - 1: version1 更新
+        - 0: 版本相同
+        - -1: version2 更新
+        """
+        # 定义优先级字典，值越大优先级越高
+        suffix_priority = {
+            "": 0,
+            "hotfix": 1,  # hotfix优先级低于普通版本
+            "remake": 2   # remake优先级高于普通版本
+        }
         
-        # 比较各个组件
-        for i in range(len(v1_components)):
-            if v1_components[i] > v2_components[i]:
+        # 解析版本1
+        v1_main, v1_build, v1_suffix, v1_suffix_num = self._parse_version(version1)
+        
+        # 解析版本2
+        v2_main, v2_build, v2_suffix, v2_suffix_num = self._parse_version(version2)
+        
+        # 首先比较主版本号
+        for i in range(max(len(v1_main), len(v2_main))):
+            v1_comp = v1_main[i] if i < len(v1_main) else 0
+            v2_comp = v2_main[i] if i < len(v2_main) else 0
+            
+            if v1_comp > v2_comp:
                 return 1  # version1 更新
-            elif v1_components[i] < v2_components[i]:
+            elif v1_comp < v2_comp:
                 return -1  # version2 更新
         
-        return 0  # 版本相同
+        # 如果主版本号相同，比较构建版本号
+        if v1_build > v2_build:
+            return 1
+        elif v1_build < v2_build:
+            return -1
+            
+        # 如果主版本号和构建版本号都相同，比较后缀优先级
+        if suffix_priority.get(v1_suffix, 0) > suffix_priority.get(v2_suffix, 0):
+            return 1
+        elif suffix_priority.get(v1_suffix, 0) < suffix_priority.get(v2_suffix, 0):
+            return -1
+            
+        # 如果后缀类型相同，比较后缀数字（仅hotfix有）
+        if v1_suffix == v2_suffix == "hotfix":
+            if v1_suffix_num > v2_suffix_num:
+                return 1
+            elif v1_suffix_num < v2_suffix_num:
+                return -1
+        
+        # 完全相同
+        return 0
+        
+    def _parse_version(self, version_str):
+        """解析版本号字符串
+        
+        返回:
+            tuple: (主版本号列表, 构建版本号, 后缀类型, 后缀编号)
+        """
+        # 默认值
+        main_version = []
+        build_number = 0
+        suffix_type = ""
+        suffix_number = 0
+        
+        # 处理特殊情况：空字符串或None
+        if not version_str:
+            return ([0, 0, 0], 0, "", 0)
+            
+        # 处理后缀
+        version_parts = version_str.lower().split()
+        version_base = version_parts[0]  # 基本版本部分
+        
+        # 检查是否有后缀类型
+        if len(version_parts) > 1:
+            if "hotfix" in version_parts:
+                suffix_type = "hotfix"
+            elif "remake" in version_parts:
+                suffix_type = "remake"
+        
+        # 处理带有-的hotfix格式（例如1.0.0-1）
+        if "-" in version_base and suffix_type == "hotfix":
+            version_base, suffix_num_str = version_base.split("-", 1)
+            try:
+                suffix_number = int(suffix_num_str)
+            except ValueError:
+                suffix_number = 0
+        
+        # 分割版本号
+        version_segments = version_base.split(".")
+        
+        # 解析主版本号（前三段）
+        main_segments = min(3, len(version_segments))
+        for i in range(main_segments):
+            try:
+                main_version.append(int(version_segments[i]))
+            except ValueError:
+                main_version.append(0)
+        
+        # 补齐主版本号到3段
+        while len(main_version) < 3:
+            main_version.append(0)
+        
+        # 如果有第四段，作为构建版本号，支持超大数字
+        if len(version_segments) > 3:
+            try:
+                build_number = int(version_segments[3])
+                # 确保构建号能处理大数值
+                print(f"解析构建号: {version_segments[3]} -> {build_number}")
+            except ValueError:
+                build_number = 0
+                print(f"无效的构建号格式: {version_segments[3]}")
+        
+        result = (main_version, build_number, suffix_type, suffix_number)
+        print(f"版本解析结果: {version_str} -> {result}")
+        return result
+        

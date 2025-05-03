@@ -6,6 +6,9 @@ from PySide6.QtCore import Qt, Signal
 
 from core.font.font_manager import FontManager
 from client.ui.components.customNotify import NotifyManager
+from client.ui.components.customMessagebox import CustomMessageBox
+from client.ui.components.comboBox import CustomComboBox
+from client.ui.components.checkBox import CustomCheckBox
 
 class GeneralControlWidget(QWidget):
    
@@ -30,24 +33,21 @@ class GeneralControlWidget(QWidget):
             show_notifications = ui_config.get("show_notifications", True)
             
             # 启动设置
-            start_config = self.config_manager.get("app", {})
+            start_config = self.config_manager.get("startup", {})
             auto_start = start_config.get("auto_start", False)
-            check_updates = start_config.get("check_updates", True)
+            check_updates = start_config.get("check_update", True)
             restore_tasks = start_config.get("restore_tasks", True)
             
             # 设置控件值
-            theme_index = 0 if theme == "dark" else 1
-            self.theme_combo.setCurrentIndex(theme_index)
-            
-            lang_index = 0
-            if language == "en":
-                lang_index = 1
-            self.language_combo.setCurrentIndex(lang_index)
+            # 设置主题和语言选择
+            self.theme_combo.setCurrentByUserData(theme)
+            self.language_combo.setCurrentByUserData(language)
             
             self.show_notifications_checkbox.setChecked(show_notifications)
             self.auto_start_checkbox.setChecked(auto_start)
-            self.check_updates_checkbox.setChecked(check_updates)
-            self.restore_tasks_checkbox.setChecked(restore_tasks)
+            self.auto_update_checkbox.setChecked(check_updates)
+            self.start_minimized_checkbox.setChecked(restore_tasks)
+            self.close_to_tray_checkbox.setChecked(restore_tasks)
             
         except Exception as e:
             self.settings_applied.emit(False, f"加载常规设置失败: {str(e)}")
@@ -61,14 +61,15 @@ class GeneralControlWidget(QWidget):
         ui_group = QGroupBox("界面设置")
         ui_layout = QVBoxLayout(ui_group)
         
-        # 主题设置
+        # 主题选择
         theme_layout = QHBoxLayout()
         theme_label = QLabel("界面主题:")
         self.font_manager.apply_font(theme_label)
         theme_layout.addWidget(theme_label)
         
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["深色主题", "浅色主题"])
+        self.theme_combo = CustomComboBox()
+        self.theme_combo.addIconItem("深色主题", "ic_fluent_dark_theme_24_regular", "dark")
+        self.theme_combo.addIconItem("浅色主题", "ic_fluent_dark_theme_24_regular", "light")
         self.font_manager.apply_font(self.theme_combo)
         theme_layout.addWidget(self.theme_combo)
         theme_layout.addStretch()
@@ -81,8 +82,9 @@ class GeneralControlWidget(QWidget):
         self.font_manager.apply_font(language_label)
         language_layout.addWidget(language_label)
         
-        self.language_combo = QComboBox()
-        self.language_combo.addItems(["简体中文", "English"])
+        self.language_combo = CustomComboBox()
+        self.language_combo.addIconItem("简体中文", "ic_fluent_globe_24_regular", "zh_CN")
+        self.language_combo.addIconItem("English", "ic_fluent_globe_24_regular", "en")
         self.font_manager.apply_font(self.language_combo)
         language_layout.addWidget(self.language_combo)
         language_layout.addStretch()
@@ -90,7 +92,7 @@ class GeneralControlWidget(QWidget):
         ui_layout.addLayout(language_layout)
         
         # 通知设置
-        self.show_notifications_checkbox = QCheckBox("显示桌面通知")
+        self.show_notifications_checkbox = CustomCheckBox("显示桌面通知")
         self.font_manager.apply_font(self.show_notifications_checkbox)
         ui_layout.addWidget(self.show_notifications_checkbox)
         
@@ -101,19 +103,24 @@ class GeneralControlWidget(QWidget):
         startup_layout = QVBoxLayout(startup_group)
         
         # 开机自启
-        self.auto_start_checkbox = QCheckBox("开机时自动启动")
+        self.auto_start_checkbox = CustomCheckBox("开机时自动启动")
         self.font_manager.apply_font(self.auto_start_checkbox)
         startup_layout.addWidget(self.auto_start_checkbox)
         
-        # 检查更新
-        self.check_updates_checkbox = QCheckBox("启动时检查更新")
-        self.font_manager.apply_font(self.check_updates_checkbox)
-        startup_layout.addWidget(self.check_updates_checkbox)
+        # 启动时自动检查更新
+        self.auto_update_checkbox = CustomCheckBox("启动时自动检查更新")
+        self.font_manager.apply_font(self.auto_update_checkbox)
+        startup_layout.addWidget(self.auto_update_checkbox)
         
-        # 恢复任务
-        self.restore_tasks_checkbox = QCheckBox("恢复未完成的下载任务")
-        self.font_manager.apply_font(self.restore_tasks_checkbox)
-        startup_layout.addWidget(self.restore_tasks_checkbox)
+        # 启动时最小化到系统托盘
+        self.start_minimized_checkbox = CustomCheckBox("启动时最小化到系统托盘")
+        self.font_manager.apply_font(self.start_minimized_checkbox)
+        startup_layout.addWidget(self.start_minimized_checkbox)
+        
+        # 关闭时最小化到系统托盘
+        self.close_to_tray_checkbox = CustomCheckBox("关闭时最小化到系统托盘")
+        self.font_manager.apply_font(self.close_to_tray_checkbox)
+        startup_layout.addWidget(self.close_to_tray_checkbox)
         
         startup_layout.addStretch()
         main_layout.addWidget(startup_group)
@@ -180,10 +187,11 @@ class GeneralControlWidget(QWidget):
         self.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
-                border: 1px solid #aaa;
+                border: 1px solid #3C3C3C;
                 border-radius: 5px;
                 margin-top: 15px;
                 padding-top: 15px;
+                color: #FFFFFF;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -191,16 +199,16 @@ class GeneralControlWidget(QWidget):
                 padding: 0 5px;
             }
             QLabel {
-                color: #e0e0e0;
+                color: #FFFFFF;
             }
             QCheckBox {
-                color: #e0e0e0;
+                color: #FFFFFF;
                 spacing: 5px;
             }
             QComboBox {
-                background-color: #333;
-                color: #e0e0e0;
-                border: 1px solid #555;
+                background-color: #2D2D30;
+                color: #FFFFFF;
+                border: 1px solid #3C3C3C;
                 border-radius: 3px;
                 padding: 5px;
                 min-width: 120px;
@@ -209,94 +217,103 @@ class GeneralControlWidget(QWidget):
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width: 20px;
-                border-left: 1px solid #555;
+                border-left: 1px solid #3C3C3C;
             }
             QPushButton {
-                background-color: #333;
-                color: #e0e0e0;
-                border: 1px solid #555;
+                background-color: #2D2D30;
+                color: #FFFFFF;
+                border: 1px solid #3C3C3C;
                 border-radius: 3px;
                 padding: 5px 15px;
                 min-width: 80px;
             }
             QPushButton:hover {
-                background-color: #444;
-                border: 1px solid #0078D7;
+                background-color: #3F3F46;
+                border: 1px solid #7E57C2;
             }
         """)
     
     def clear_cache(self):
         
         try:
-            # 在实际应用中，这里会实现缓存清理逻辑
-            self.notify_manager.show_message("清除缓存", "缓存已成功清除")
-            self.settings_applied.emit(True, "缓存已清除")
+            # 确认是否清除缓存
+            reply = CustomMessageBox.question(
+                self, "清除缓存", 
+                "确定要清除所有缓存和历史记录吗？这将清空下载历史记录。",
+                [("确定", True), ("取消", False)]
+            )
+            
+            if reply:
+                # 在实际应用中，这里会实现缓存清理逻辑
+                self.notify_manager.show_message("清除缓存", "缓存已成功清除")
+                self.settings_applied.emit(True, "缓存已清除")
         except Exception as e:
             self.settings_applied.emit(False, f"清除缓存失败: {str(e)}")
     
     def reset_all_settings(self):
        
         try:
-            # 在实际应用中，这里会实现重置所有设置的逻辑
-            self.load_config()  # 重新加载默认配置
-            self.notify_manager.show_message("重置设置", "所有设置已恢复到默认状态")
-            self.settings_applied.emit(True, "所有设置已重置为默认值")
+            # 确认是否重置所有设置
+            reply = CustomMessageBox.question(
+                self, "重置设置", 
+                "确定要将所有设置恢复到默认状态吗？这将清除所有自定义配置。",
+                [("确定", True), ("取消", False)]
+            )
+            
+            if reply:
+                # 在实际应用中，这里会实现重置所有设置的逻辑
+                self.load_config()  # 重新加载默认配置
+                self.notify_manager.show_message("重置设置", "所有设置已恢复到默认状态")
+                self.settings_applied.emit(True, "所有设置已重置为默认值")
         except Exception as e:
             self.settings_applied.emit(False, f"重置所有设置失败: {str(e)}")
     
     def reset_settings(self):
        
         try:
-            self.theme_combo.setCurrentIndex(0)  # 深色主题
-            self.language_combo.setCurrentIndex(0)  # 简体中文
-            self.show_notifications_checkbox.setChecked(True)
-            self.auto_start_checkbox.setChecked(False)
-            self.check_updates_checkbox.setChecked(True)
-            self.restore_tasks_checkbox.setChecked(True)
-            
-            self.settings_applied.emit(True, "已重置为默认设置")
+            # 重置本页面设置
+            self.load_config()
+            CustomMessageBox.info(self, "重置设置", "已重置本页面设置")
         except Exception as e:
-            self.settings_applied.emit(False, f"重置设置失败: {str(e)}")
+            CustomMessageBox.error(self, "重置设置失败", str(e))
     
     def apply_settings(self):
        
         try:
             # 收集设置
-            theme = "dark" if self.theme_combo.currentIndex() == 0 else "light"
-            language = "zh_CN" if self.language_combo.currentIndex() == 0 else "en"
-            show_notifications = self.show_notifications_checkbox.isChecked()
-            
-            auto_start = self.auto_start_checkbox.isChecked()
-            check_updates = self.check_updates_checkbox.isChecked()
-            restore_tasks = self.restore_tasks_checkbox.isChecked()
-            
-            # 保存界面设置
             ui_config = {
-                "theme": theme,
-                "language": language,
-                "show_notifications": show_notifications
+                "theme": self.theme_combo.getCurrentUserData() or "dark",
+                "language": self.language_combo.getCurrentUserData() or "zh_CN",
+                "show_notifications": self.show_notifications_checkbox.isChecked()
             }
-            self.config_manager.set("ui", "theme", theme)
-            self.config_manager.set("ui", "language", language)
-            self.config_manager.set("ui", "show_notifications", show_notifications)
             
-            # 保存启动设置
-            self.config_manager.set("app", "auto_start", auto_start)
-            self.config_manager.set("app", "check_updates", check_updates)
-            self.config_manager.set("app", "restore_tasks", restore_tasks)
+            startup_config = {
+                "auto_start": self.auto_start_checkbox.isChecked(),
+                "check_update": self.auto_update_checkbox.isChecked(),
+                "restore_tasks": self.start_minimized_checkbox.isChecked()
+            }
+            
+            # 更新配置
+            self.config_manager._config["ui"] = ui_config
+            self.config_manager._config["startup"] = startup_config
             
             # 保存配置
-            self.config_manager.save_config()
-            
-            # 如果设置了开机自启动
-            if auto_start:
-                self._setup_autostart()
+            if self.config_manager.save_config():
+                # 处理自启动设置
+                if self.auto_start_checkbox.isChecked():
+                    self._setup_autostart()
+                else:
+                    self._remove_autostart()
+                
+                # 只发送信号，不显示额外通知
+                self.settings_applied.emit(True, "常规设置已保存")
             else:
-                self._remove_autostart()
-            
-            self.settings_applied.emit(True, "常规设置已成功保存")
+                raise Exception("保存配置失败")
         except Exception as e:
-            self.settings_applied.emit(False, f"保存设置失败: {str(e)}")
+            # 只发送信号，不显示额外通知
+            self.settings_applied.emit(False, f"应用设置失败: {str(e)}")
+            # 不再显示额外的错误对话框
+            # CustomMessageBox.error(self, "应用设置失败", str(e))
     
     def _setup_autostart(self):
       

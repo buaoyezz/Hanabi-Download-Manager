@@ -7,8 +7,13 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIntValidator
 
 from client.ui.components.customNotify import NotifyManager
+from client.ui.components.customMessagebox import CustomMessageBox
 from core.font.font_manager import FontManager
 from pathlib import Path
+from client.ui.components.comboBox import CustomComboBox
+from client.ui.components.spinBox import CustomSpinBox
+from client.ui.components.checkBox import CustomCheckBox
+from client.ui.components.slider import CustomSlider
 
 class DownloadControlWidget(QWidget):
     settings_applied = Signal(bool, str)  # 成功/失败, 消息
@@ -111,52 +116,15 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(tasks_label)
         tasks_control_layout.addWidget(tasks_label)
 
-        self.max_tasks_spinbox = QSpinBox()
+        self.max_tasks_spinbox = CustomSpinBox()
         self.max_tasks_spinbox.setRange(1, 20)
         self.max_tasks_spinbox.setValue(5)
-        self.max_tasks_spinbox.setStyleSheet("""
-            QSpinBox {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 3px;
-                padding: 5px;
-                min-width: 60px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                background-color: #3E3E42;
-                width: 16px;
-                border: none;
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                background-color: #525257;
-            }
-        """)
         self.font_manager.apply_font(self.max_tasks_spinbox)
         tasks_control_layout.addWidget(self.max_tasks_spinbox)
 
-        tasks_slider = QSlider(Qt.Horizontal)
+        tasks_slider = CustomSlider(Qt.Horizontal)
         tasks_slider.setRange(1, 20)
         tasks_slider.setValue(5)
-        tasks_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 1px solid #3C3C3C;
-                height: 8px;
-                background: #2D2D30;
-                margin: 2px 0;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #B39DDB;
-                border: 1px solid #B39DDB;
-                width: 18px;
-                margin: -2px 0;
-                border-radius: 9px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #9575CD;
-            }
-        """)
         tasks_slider.valueChanged.connect(self.max_tasks_spinbox.setValue)
         self.max_tasks_spinbox.valueChanged.connect(tasks_slider.setValue)
         tasks_control_layout.addWidget(tasks_slider, 1)
@@ -193,52 +161,15 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(thread_count_label)
         thread_count_layout.addWidget(thread_count_label)
         
-        self.thread_count_spinbox = QSpinBox()
+        self.thread_count_spinbox = CustomSpinBox()
         self.thread_count_spinbox.setRange(1, 64)
         self.thread_count_spinbox.setValue(8)
-        self.thread_count_spinbox.setStyleSheet("""
-            QSpinBox {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 3px;
-                padding: 5px;
-                min-width: 60px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                background-color: #3E3E42;
-                width: 16px;
-                border: none;
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                background-color: #525257;
-            }
-        """)
         self.font_manager.apply_font(self.thread_count_spinbox)
         thread_count_layout.addWidget(self.thread_count_spinbox)
         
-        thread_slider = QSlider(Qt.Horizontal)
+        thread_slider = CustomSlider(Qt.Horizontal)
         thread_slider.setRange(1, 64)
         thread_slider.setValue(8)
-        thread_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 1px solid #3C3C3C;
-                height: 8px;
-                background: #2D2D30;
-                margin: 2px 0;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #B39DDB;
-                border: 1px solid #B39DDB;
-                width: 18px;
-                margin: -2px 0;
-                border-radius: 9px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #9575CD;
-            }
-        """)
         thread_slider.valueChanged.connect(self.thread_count_spinbox.setValue)
         self.thread_count_spinbox.valueChanged.connect(thread_slider.setValue)
         thread_count_layout.addWidget(thread_slider, 1)
@@ -248,7 +179,7 @@ class DownloadControlWidget(QWidget):
         # 动态线程
         dynamic_thread_layout = QVBoxLayout()
         dynamic_thread_layout.setSpacing(5)
-        self.dynamic_threads_checkbox = QCheckBox("启用智能线程管理（根据网络情况自动调整线程数）")
+        self.dynamic_threads_checkbox = CustomCheckBox("启用智能线程管理（根据网络情况自动调整线程数）")
         self.dynamic_threads_checkbox.setStyleSheet("""
             QCheckBox {
                 color: #FFFFFF;
@@ -304,27 +235,9 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(max_threads_label)
         advanced_thread_layout.addWidget(max_threads_label)
         
-        self.max_threads_spinbox = QSpinBox()
+        self.max_threads_spinbox = CustomSpinBox()
         self.max_threads_spinbox.setRange(4, 64)
         self.max_threads_spinbox.setValue(32)
-        self.max_threads_spinbox.setStyleSheet("""
-            QSpinBox {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 3px;
-                padding: 5px;
-                min-width: 60px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                background-color: #3E3E42;
-                width: 16px;
-                border: none;
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                background-color: #525257;
-            }
-        """)
         self.font_manager.apply_font(self.max_threads_spinbox)
         advanced_thread_layout.addWidget(self.max_threads_spinbox)
         
@@ -333,27 +246,9 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(segment_size_label)
         advanced_thread_layout.addWidget(segment_size_label)
         
-        self.segment_size_spinbox = QSpinBox()
+        self.segment_size_spinbox = CustomSpinBox()
         self.segment_size_spinbox.setRange(1, 100)
         self.segment_size_spinbox.setValue(10)
-        self.segment_size_spinbox.setStyleSheet("""
-            QSpinBox {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 3px;
-                padding: 5px;
-                min-width: 60px;
-            }
-            QSpinBox::up-button, QSpinBox::down-button {
-                background-color: #3E3E42;
-                width: 16px;
-                border: none;
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                background-color: #525257;
-            }
-        """)
         self.font_manager.apply_font(self.segment_size_spinbox)
         advanced_thread_layout.addWidget(self.segment_size_spinbox)
         
@@ -394,7 +289,7 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(buffer_label)
         buffer_size_layout.addWidget(buffer_label)
 
-        self.buffer_spinbox = QSpinBox()
+        self.buffer_spinbox = CustomSpinBox()
         self.buffer_spinbox.setRange(1, 64)
         self.buffer_spinbox.setValue(8) # 默认8KB
         self.font_manager.apply_font(self.buffer_spinbox)
@@ -407,7 +302,7 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(chunk_label)
         chunk_size_layout.addWidget(chunk_label)
 
-        self.chunk_spinbox = QSpinBox()
+        self.chunk_spinbox = CustomSpinBox()
         self.chunk_spinbox.setRange(1, 32)
         self.chunk_spinbox.setValue(1) # 默认1MB
         self.font_manager.apply_font(self.chunk_spinbox)
@@ -439,7 +334,7 @@ class DownloadControlWidget(QWidget):
         path_layout.addLayout(path_input_layout)
         
         # 自动整理文件
-        self.auto_organize_checkbox = QCheckBox("根据文件类型自动整理到不同文件夹")
+        self.auto_organize_checkbox = CustomCheckBox("根据文件类型自动整理到不同文件夹")
         self.font_manager.apply_font(self.auto_organize_checkbox)
         path_layout.addWidget(self.auto_organize_checkbox)
         
@@ -450,7 +345,7 @@ class DownloadControlWidget(QWidget):
         behavior_layout = QVBoxLayout(behavior_group)
         
         # 自动开始下载
-        self.auto_start_checkbox = QCheckBox("添加任务后自动开始下载")
+        self.auto_start_checkbox = CustomCheckBox("添加任务后自动开始下载")
         self.font_manager.apply_font(self.auto_start_checkbox)
         behavior_layout.addWidget(self.auto_start_checkbox)
         
@@ -460,7 +355,7 @@ class DownloadControlWidget(QWidget):
         self.font_manager.apply_font(retry_label)
         retry_layout.addWidget(retry_label)
         
-        self.max_retries_spinbox = QSpinBox()
+        self.max_retries_spinbox = CustomSpinBox()
         self.max_retries_spinbox.setRange(0, 10)
         self.max_retries_spinbox.setValue(3)
         self.font_manager.apply_font(self.max_retries_spinbox)
@@ -585,72 +480,81 @@ class DownloadControlWidget(QWidget):
             self.path_edit.setText(folder)
     
     def reset_settings(self):
-        self.max_tasks_spinbox.setValue(5)
-        self.thread_count_spinbox.setValue(8)
-        self.dynamic_threads_checkbox.setChecked(True)
-        self.max_threads_spinbox.setValue(32)
-        self.segment_size_spinbox.setValue(10)
-        self.buffer_spinbox.setValue(8) # 8KB
-        self.chunk_spinbox.setValue(1) # 1MB
-        
-        self.path_edit.setText(str(Path.home() / "Downloads"))
-        self.auto_organize_checkbox.setChecked(False)
-        
-        self.auto_start_checkbox.setChecked(True)
-        self.max_retries_spinbox.setValue(3)
-        
-        self.update_ui_state()
-        self.settings_applied.emit(True, "已重置为默认设置")
+        """重置为默认设置"""
+        try:
+            # 重置本页面设置
+            self.load_config()
+            CustomMessageBox.info(self, "重置设置", "已重置本页面设置")
+        except Exception as e:
+            CustomMessageBox.error(self, "重置设置失败", str(e))
     
     def apply_settings(self):
+        """应用设置更改"""
         try:
-            # 获取当前设置值
+            # 收集设置
             max_tasks = self.max_tasks_spinbox.value()
             thread_count = self.thread_count_spinbox.value()
             dynamic_threads = self.dynamic_threads_checkbox.isChecked()
             max_threads = self.max_threads_spinbox.value()
             min_segment_size = self.segment_size_spinbox.value()
-            buffer_size = self.buffer_spinbox.value() * 1024  # 转换为字节
-            chunk_size = self.chunk_spinbox.value() * 1024 * 1024  # 转换为字节
+            buffer_size = self.buffer_spinbox.value() * 1024  # KB to Bytes
+            chunk_size = self.chunk_spinbox.value() * 1024 * 1024  # MB to Bytes
+            
             save_path = self.path_edit.text()
             auto_organize = self.auto_organize_checkbox.isChecked()
+            
             auto_start = self.auto_start_checkbox.isChecked()
             max_retries = self.max_retries_spinbox.value()
             
-            # 记录操作日志
-            print(f"[INFO] 应用下载设置: 线程数={thread_count}, 最大线程数={max_threads}, 任务数={max_tasks}")
+            # 验证路径存在
+            path = Path(save_path)
+            if not path.exists() or not path.is_dir():
+                # 询问是否创建目录
+                reply = CustomMessageBox.question(
+                    self, 
+                    "路径不存在", 
+                    f"保存路径 '{save_path}' 不存在。是否创建该目录？",
+                    [("是", True), ("否", False)]
+                )
+                
+                if reply:
+                    try:
+                        path.mkdir(parents=True, exist_ok=True)
+                    except Exception as e:
+                        raise Exception(f"无法创建目录: {str(e)}")
+                else:
+                    raise Exception("保存路径不存在")
             
-            # 保存到配置
-            self.config_manager.set_setting("download", "max_tasks", max_tasks)
-            self.config_manager.set_setting("download", "thread_count", thread_count)
-            self.config_manager.set_setting("download", "dynamic_threads", dynamic_threads)
-            self.config_manager.set_setting("download", "max_thread_count", max_threads)
-            self.config_manager.set_setting("download", "min_segment_size", min_segment_size)
-            self.config_manager.set_setting("download", "buffer_size", buffer_size)
-            self.config_manager.set_setting("download", "chunk_size", chunk_size)
-            self.config_manager.set_setting("download", "save_path", save_path)
-            self.config_manager.set_setting("download", "auto_organize", auto_organize)
-            self.config_manager.set_setting("download", "auto_start", auto_start)
-            self.config_manager.set_setting("download", "max_retries", max_retries)
+            # 更新配置
+            download_config = {
+                "thread_count": thread_count,
+                "dynamic_threads": dynamic_threads,
+                "max_thread_count": max_threads,
+                "min_segment_size": min_segment_size,
+                "max_tasks": max_tasks,
+                "buffer_size": buffer_size,
+                "chunk_size": chunk_size,
+                "save_path": save_path,
+                "auto_organize": auto_organize,
+                "auto_start": auto_start,
+                "max_retries": max_retries
+            }
             
-            # 保存配置到文件
-            success = self.config_manager.save_config()
+            # 更新配置
+            self.config_manager._config["download"] = download_config
             
-            if success:
-                # 发送设置应用成功的信号
-                self.settings_applied.emit(True, "下载设置已成功应用")
-                self.notify_manager.show_message("设置已保存", "下载设置已成功更新")
+            # 保存配置
+            if self.config_manager.save_config():
+                # 只发送信号，不显示额外通知
+                self.settings_applied.emit(True, "下载设置已保存")
             else:
-                self.settings_applied.emit(False, "保存设置时出错")
-                self.notify_manager.show_message("设置保存失败", "保存设置时出错", level="error")
-            
+                raise Exception("保存配置失败")
+                
         except Exception as e:
-            # 记录错误
-            print(f"[ERROR] 保存下载设置失败: {str(e)}")
-            # 发送设置应用失败的信号
-            self.settings_applied.emit(False, f"应用设置时出错: {str(e)}")
-            # 显示错误通知
-            self.notify_manager.show_message("设置保存失败", f"保存设置时出错: {str(e)}", level="error")
+            # 只发送信号，不显示额外通知
+            self.settings_applied.emit(False, f"应用设置失败: {str(e)}")
+            # 不再显示额外的错误对话框
+            # CustomMessageBox.error(self, "应用设置失败", str(e))
 
     def disable_dynamic_threads(self):
       

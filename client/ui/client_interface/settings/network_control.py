@@ -8,6 +8,10 @@ from PySide6.QtGui import QIntValidator
 
 from core.font.font_manager import FontManager
 from client.ui.components.customNotify import NotifyManager
+from client.ui.components.customMessagebox import CustomMessageBox
+from client.ui.components.comboBox import CustomComboBox
+from client.ui.components.spinBox import CustomSpinBox
+from client.ui.components.checkBox import CustomCheckBox
 
 class NetworkControlWidget(QWidget):
     settings_applied = Signal(bool, str)  # 成功/失败, 消息
@@ -22,44 +26,47 @@ class NetworkControlWidget(QWidget):
         self.load_config()
 
     def load_config(self):
+        """加载网络配置"""
         try:
             # 获取网络配置
             network_config = self.config_manager.get("network", {})
             
-            # 代理设置
+            # 设置UA
+            user_agent = network_config.get("user_agent", "")
+            self.user_agent_input.setText(user_agent)
+            
+            # 设置代理
             proxy_config = network_config.get("proxy", {})
-            proxy_enabled = proxy_config.get("enabled", False)
-            proxy_type = proxy_config.get("type", "http")
+            
+            # 代理启用状态
+            enable_proxy = proxy_config.get("enable", False)
+            self.enable_proxy_checkbox.setChecked(enable_proxy)
+            
+            # 代理类型
+            proxy_type = proxy_config.get("type", "http").lower()
+            # 使用用户数据设置代理类型
+            self.proxy_type_combo.setCurrentByUserData(proxy_type)
+            
+            # 代理地址和端口
             proxy_host = proxy_config.get("host", "")
-            proxy_port = proxy_config.get("port", 1080)
-            proxy_auth = proxy_config.get("auth", False)
-            proxy_username = proxy_config.get("username", "")
-            proxy_password = proxy_config.get("password", "")
+            self.proxy_host_input.setText(proxy_host)
             
-            # 速度限制
-            speed_config = network_config.get("speed_limit", {})
-            download_limit_enabled = speed_config.get("download_enabled", False)
-            download_limit = speed_config.get("download_limit", 0)
-            upload_limit_enabled = speed_config.get("upload_enabled", False)
-            upload_limit = speed_config.get("upload_limit", 0)
+            proxy_port = proxy_config.get("port", 0)
+            self.proxy_port_spinbox.setValue(proxy_port)
             
-            # 设置UI控件值
-            self.proxy_enabled_checkbox.setChecked(proxy_enabled)
-            self._set_proxy_type(proxy_type)
-            self.proxy_host_edit.setText(proxy_host)
-            self.proxy_port_edit.setText(str(proxy_port))
-            self.proxy_auth_checkbox.setChecked(proxy_auth)
-            self.proxy_username_edit.setText(proxy_username)
-            self.proxy_password_edit.setText(proxy_password)
+            # 代理认证
+            auth_required = proxy_config.get("auth_required", False)
+            self.auth_required_checkbox.setChecked(auth_required)
             
-            self.download_limit_checkbox.setChecked(download_limit_enabled)
-            self.download_limit_spinbox.setValue(download_limit)
-            self.upload_limit_checkbox.setChecked(upload_limit_enabled)
-            self.upload_limit_spinbox.setValue(upload_limit)
+            username = proxy_config.get("username", "")
+            self.username_input.setText(username)
+            
+            password = proxy_config.get("password", "")
+            self.password_input.setText(password)
             
             # 更新UI状态
-            self._update_proxy_ui_state()
-            self._update_speed_limit_ui_state()
+            self.update_ui_state()
+            
         except Exception as e:
             self.settings_applied.emit(False, f"加载网络设置失败: {str(e)}")
 
@@ -74,23 +81,26 @@ class NetworkControlWidget(QWidget):
         proxy_layout = QVBoxLayout(proxy_group)
         
         # 启用代理
-        self.proxy_enabled_checkbox = QCheckBox("启用代理")
-        self.font_manager.apply_font(self.proxy_enabled_checkbox)
-        self.proxy_enabled_checkbox.toggled.connect(self._update_proxy_ui_state)
-        proxy_layout.addWidget(self.proxy_enabled_checkbox)
+        self.enable_proxy_checkbox = CustomCheckBox("启用代理")
+        self.font_manager.apply_font(self.enable_proxy_checkbox)
+        self.enable_proxy_checkbox.toggled.connect(self.update_ui_state)
+        proxy_layout.addWidget(self.enable_proxy_checkbox)
         
         # 代理类型
-        proxy_type_layout = QHBoxLayout()
+        proxy_type_row = QHBoxLayout()
         proxy_type_label = QLabel("代理类型:")
+        proxy_type_label.setMinimumWidth(80)
         self.font_manager.apply_font(proxy_type_label)
-        proxy_type_layout.addWidget(proxy_type_label)
+        proxy_type_row.addWidget(proxy_type_label)
         
-        self.proxy_type_combo = QComboBox()
-        self.proxy_type_combo.addItems(["HTTP", "SOCKS5", "SOCKS4"])
+        self.proxy_type_combo = CustomComboBox()
+        self.proxy_type_combo.addIconItem("HTTP", "ic_fluent_globe_24_regular", "http")
+        self.proxy_type_combo.addIconItem("SOCKS5", "ic_fluent_shield_24_regular", "socks5")
+        self.proxy_type_combo.addIconItem("DIRECT", "ic_fluent_arrow_routing_24_regular", "direct")
         self.font_manager.apply_font(self.proxy_type_combo)
-        proxy_type_layout.addWidget(self.proxy_type_combo)
-        proxy_type_layout.addStretch()
-        proxy_layout.addLayout(proxy_type_layout)
+        proxy_type_row.addWidget(self.proxy_type_combo)
+        proxy_type_row.addStretch()
+        proxy_layout.addLayout(proxy_type_row)
         
         # 代理地址和端口
         proxy_server_layout = QHBoxLayout()
@@ -98,28 +108,28 @@ class NetworkControlWidget(QWidget):
         self.font_manager.apply_font(server_label)
         proxy_server_layout.addWidget(server_label)
         
-        self.proxy_host_edit = QLineEdit()
-        self.proxy_host_edit.setPlaceholderText("例如: 127.0.0.1")
-        self.font_manager.apply_font(self.proxy_host_edit)
-        proxy_server_layout.addWidget(self.proxy_host_edit, 3)
+        self.proxy_host_input = QLineEdit()
+        self.proxy_host_input.setPlaceholderText("例如: 127.0.0.1")
+        self.font_manager.apply_font(self.proxy_host_input)
+        proxy_server_layout.addWidget(self.proxy_host_input, 3)
         
         port_label = QLabel("端口:")
         self.font_manager.apply_font(port_label)
         proxy_server_layout.addWidget(port_label)
         
-        self.proxy_port_edit = QLineEdit()
-        self.proxy_port_edit.setValidator(QIntValidator(1, 65535))
-        self.proxy_port_edit.setPlaceholderText("1080")
-        self.proxy_port_edit.setMaximumWidth(80)
-        self.font_manager.apply_font(self.proxy_port_edit)
-        proxy_server_layout.addWidget(self.proxy_port_edit, 1)
+        self.proxy_port_spinbox = CustomSpinBox()
+        self.proxy_port_spinbox.setRange(0, 65535)
+        self.proxy_port_spinbox.setSingleStep(1)
+        self.proxy_port_spinbox.setSuffix("端口")
+        self.font_manager.apply_font(self.proxy_port_spinbox)
+        proxy_server_layout.addWidget(self.proxy_port_spinbox, 1)
         proxy_layout.addLayout(proxy_server_layout)
         
         # 代理认证
-        self.proxy_auth_checkbox = QCheckBox("需要认证")
-        self.font_manager.apply_font(self.proxy_auth_checkbox)
-        self.proxy_auth_checkbox.toggled.connect(self._update_proxy_ui_state)
-        proxy_layout.addWidget(self.proxy_auth_checkbox)
+        self.auth_required_checkbox = CustomCheckBox("需要认证")
+        self.font_manager.apply_font(self.auth_required_checkbox)
+        self.auth_required_checkbox.toggled.connect(self.update_ui_state)
+        proxy_layout.addWidget(self.auth_required_checkbox)
         
         # 用户名和密码
         auth_layout = QVBoxLayout()
@@ -129,9 +139,9 @@ class NetworkControlWidget(QWidget):
         self.font_manager.apply_font(username_label)
         username_layout.addWidget(username_label)
         
-        self.proxy_username_edit = QLineEdit()
-        self.font_manager.apply_font(self.proxy_username_edit)
-        username_layout.addWidget(self.proxy_username_edit)
+        self.username_input = QLineEdit()
+        self.font_manager.apply_font(self.username_input)
+        username_layout.addWidget(self.username_input)
         auth_layout.addLayout(username_layout)
         
         password_layout = QHBoxLayout()
@@ -139,10 +149,10 @@ class NetworkControlWidget(QWidget):
         self.font_manager.apply_font(password_label)
         password_layout.addWidget(password_label)
         
-        self.proxy_password_edit = QLineEdit()
-        self.proxy_password_edit.setEchoMode(QLineEdit.Password)
-        self.font_manager.apply_font(self.proxy_password_edit)
-        password_layout.addWidget(self.proxy_password_edit)
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.Password)
+        self.font_manager.apply_font(self.password_input)
+        password_layout.addWidget(self.password_input)
         auth_layout.addLayout(password_layout)
         
         proxy_layout.addLayout(auth_layout)
@@ -154,12 +164,12 @@ class NetworkControlWidget(QWidget):
         
         # 下载速度限制
         download_limit_layout = QHBoxLayout()
-        self.download_limit_checkbox = QCheckBox("限制下载速度:")
+        self.download_limit_checkbox = CustomCheckBox("限制下载速度:")
         self.font_manager.apply_font(self.download_limit_checkbox)
-        self.download_limit_checkbox.toggled.connect(self._update_speed_limit_ui_state)
+        self.download_limit_checkbox.toggled.connect(self.update_ui_state)
         download_limit_layout.addWidget(self.download_limit_checkbox)
         
-        self.download_limit_spinbox = QSpinBox()
+        self.download_limit_spinbox = CustomSpinBox()
         self.download_limit_spinbox.setRange(0, 1000000)
         self.download_limit_spinbox.setSingleStep(100)
         self.download_limit_spinbox.setSuffix(" KB/s")
@@ -170,12 +180,12 @@ class NetworkControlWidget(QWidget):
         
         # 上传速度限制
         upload_limit_layout = QHBoxLayout()
-        self.upload_limit_checkbox = QCheckBox("限制上传速度:")
+        self.upload_limit_checkbox = CustomCheckBox("限制上传速度:")
         self.font_manager.apply_font(self.upload_limit_checkbox)
-        self.upload_limit_checkbox.toggled.connect(self._update_speed_limit_ui_state)
+        self.upload_limit_checkbox.toggled.connect(self.update_ui_state)
         upload_limit_layout.addWidget(self.upload_limit_checkbox)
         
-        self.upload_limit_spinbox = QSpinBox()
+        self.upload_limit_spinbox = CustomSpinBox()
         self.upload_limit_spinbox.setRange(0, 1000000)
         self.upload_limit_spinbox.setSingleStep(100)
         self.upload_limit_spinbox.setSuffix(" KB/s")
@@ -273,75 +283,75 @@ class NetworkControlWidget(QWidget):
             }
         """)
 
-    def _set_proxy_type(self, proxy_type):
-       
-        index = 0
-        if proxy_type.lower() == "http":
-            index = 0
-        elif proxy_type.lower() == "socks5":
-            index = 1
-        elif proxy_type.lower() == "socks4":
-            index = 2
-        self.proxy_type_combo.setCurrentIndex(index)
-
-    def _get_proxy_type(self):
-        index = self.proxy_type_combo.currentIndex()
-        if index == 0:
-            return "http"
-        elif index == 1:
-            return "socks5"
-        elif index == 2:
-            return "socks4"
-        return "http"
-
-    def _update_proxy_ui_state(self):
-        proxy_enabled = self.proxy_enabled_checkbox.isChecked()
+    def update_ui_state(self):
+        proxy_enabled = self.enable_proxy_checkbox.isChecked()
         self.proxy_type_combo.setEnabled(proxy_enabled)
-        self.proxy_host_edit.setEnabled(proxy_enabled)
-        self.proxy_port_edit.setEnabled(proxy_enabled)
-        self.proxy_auth_checkbox.setEnabled(proxy_enabled)
+        self.proxy_host_input.setEnabled(proxy_enabled)
+        self.proxy_port_spinbox.setEnabled(proxy_enabled)
+        self.auth_required_checkbox.setEnabled(proxy_enabled)
         
-        auth_enabled = proxy_enabled and self.proxy_auth_checkbox.isChecked()
-        self.proxy_username_edit.setEnabled(auth_enabled)
-        self.proxy_password_edit.setEnabled(auth_enabled)
-
-    def _update_speed_limit_ui_state(self):
-        self.download_limit_spinbox.setEnabled(self.download_limit_checkbox.isChecked())
-        self.upload_limit_spinbox.setEnabled(self.upload_limit_checkbox.isChecked())
+        auth_enabled = proxy_enabled and self.auth_required_checkbox.isChecked()
+        self.username_input.setEnabled(auth_enabled)
+        self.password_input.setEnabled(auth_enabled)
 
     def reset_settings(self):
-       
-        self.load_config()
-        self.settings_applied.emit(True, "网络设置已重置")
-
-    def apply_settings(self):
+        """重置为默认设置"""
         try:
-            # 收集代理设置
-            proxy_config = {
-                "enabled": self.proxy_enabled_checkbox.isChecked(),
-                "type": self._get_proxy_type(),
-                "host": self.proxy_host_edit.text().strip(),
-                "port": int(self.proxy_port_edit.text() or "1080"),
-                "auth": self.proxy_auth_checkbox.isChecked(),
-                "username": self.proxy_username_edit.text(),
-                "password": self.proxy_password_edit.text()
-            }
-            
-            # 收集速度限制设置
-            speed_config = {
-                "download_enabled": self.download_limit_checkbox.isChecked(),
-                "download_limit": self.download_limit_spinbox.value(),
-                "upload_enabled": self.upload_limit_checkbox.isChecked(),
-                "upload_limit": self.upload_limit_spinbox.value()
-            }
-            
-            # 保存到配置
-            self.config_manager.set("network", "proxy", proxy_config)
-            self.config_manager.set("network", "speed_limit", speed_config)
-            self.config_manager.save_config()
-            
-            self.notify_manager.show_message("网络设置", "网络设置已成功应用")
-            self.settings_applied.emit(True, "网络设置已成功应用")
+            # 重置本页面设置
+            self.load_config()
+            CustomMessageBox.info(self, "重置设置", "已重置本页面设置")
         except Exception as e:
-            self.notify_manager.show_message("网络设置", f"应用网络设置失败: {str(e)}", level="error")
-            self.settings_applied.emit(False, f"应用网络设置失败: {str(e)}") 
+            CustomMessageBox.error(self, "重置设置失败", str(e))
+    
+    def apply_settings(self):
+        """应用网络设置"""
+        try:
+            # 收集网络设置
+            user_agent = self.user_agent_input.text().strip()
+            
+            # 代理设置
+            enable_proxy = self.enable_proxy_checkbox.isChecked()
+            # 获取代理类型用户数据
+            proxy_type = self.proxy_type_combo.getCurrentUserData() or "http"
+            proxy_host = self.proxy_host_input.text().strip()
+            proxy_port = self.proxy_port_spinbox.value()
+            
+            auth_required = self.auth_required_checkbox.isChecked()
+            username = self.username_input.text().strip()
+            password = self.password_input.text().strip()
+            
+            # 验证设置
+            if enable_proxy:
+                if not proxy_host or proxy_port <= 0:
+                    raise ValueError("启用代理时，必须提供有效的代理服务器和端口")
+                    
+                if auth_required and (not username or not password):
+                    raise ValueError("启用代理认证时，必须提供用户名和密码")
+            
+            # 更新网络配置
+            network_config = {
+                "user_agent": user_agent,
+                "proxy": {
+                    "enable": enable_proxy,
+                "type": proxy_type,
+                "host": proxy_host,
+                    "port": proxy_port,
+                    "auth_required": auth_required,
+                    "username": username,
+                    "password": password
+            }
+            }
+            
+            # 更新配置
+            self.config_manager._config["network"] = network_config
+            
+            # 保存配置
+            if self.config_manager.save_config():
+                self.settings_applied.emit(True, "网络设置已保存")
+            else:
+                raise Exception("保存配置失败")
+                
+        except ValueError as ve:
+            self.settings_applied.emit(False, str(ve))
+        except Exception as e:
+            self.settings_applied.emit(False, f"应用设置失败: {str(e)}")

@@ -111,8 +111,14 @@ class ConfigManager:
                 self._config[section] = values
     
     def save_config(self):
+        """保存配置到文件"""
         config_path = self._get_config_path()
         try:
+            # 创建父目录（如果不存在）
+            config_dir = config_path.parent
+            config_dir.mkdir(exist_ok=True, parents=True)
+            
+            # 保存配置
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self._config, f, indent=4, ensure_ascii=False)
             
@@ -129,6 +135,20 @@ class ConfigManager:
             return self._config[section]
         except (KeyError, TypeError):
             return default if default is not None else {}
+    
+    def set(self, section, config):
+        """设置整个配置段
+        
+        Args:
+            section: 配置段名称
+            config: 配置段内容（字典）
+        """
+        try:
+            self._config[section] = config
+            return True
+        except Exception as e:
+            logging.error(f"设置配置段失败: {section}={config}, 错误: {e}")
+            return False
     
     def get_setting(self, section, key, default=None):
        
@@ -148,6 +168,9 @@ class ConfigManager:
     def set_setting(self, section, key, value):
         
         try:
+            if section not in self._config:
+                self._config[section] = {}
+                
             if "." in key:
                 # 支持嵌套设置，如 "proxy.enabled"
                 parts = key.split(".")
