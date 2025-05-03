@@ -6,15 +6,9 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFontDatabase, QFont, QIcon
 from client.ui.client_interface.main_window import DownloadManagerWindow
-# 使用FallbackConnector替代DownloadConnector
-try:
-    # 尝试导入原始连接器
-    from connect.download_manager import DownloadConnector as Connector
-    print("使用原始DownloadConnector")
-except ImportError:
-    # 如果失败，则使用备用连接器
-    from connect.fallback_connector import FallbackConnector as Connector
-    print("使用FallbackConnector")
+# 使用FallbackConnector作为默认连接器
+from connect.fallback_connector import FallbackConnector as Connector
+print("使用FallbackConnector")
 from core.font.font_manager import FontManager
 from core.log.log_manager import log
 
@@ -66,7 +60,7 @@ if __name__ == "__main__":
     
     window = DownloadManagerWindow()
     
-    # 创建连接器 - 使用FallbackConnector
+    # 创建连接器
     connector = Connector()
     # 设置下载处理程序
     connector.downloadRequestReceived.connect(window.add_download_from_extension)

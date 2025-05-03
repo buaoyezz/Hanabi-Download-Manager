@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fluent System Icons 查看器 (动态版)</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f9f9f9;
+            padding: 20px;
+        }
+        @font-face {
+            font-family: 'FluentSystemIcons-Regular';
+            src: url('FluentSystemIcons-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #0078d7;
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            margin-bottom: 10px;
+        }
+        .search-container {
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: center;
+        }
+        #searchInput {
+            width: 60%;
+            padding: 12px 15px;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+        }
+        .icons-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 20px;
+        }
+        .icon-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .icon-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            background-color: #f0f8ff;
+        }
+        .icon-display {
+            font-family: 'FluentSystemIcons-Regular';
+            font-size: 48px;
+            margin-bottom: 10px;
+            color: #0078d7;
+        }
+        .icon-name {
+            font-size: 12px;
+            text-align: center;
+            word-break: break-all;
+            color: #555;
+        }
+        .tooltip {
+            position: fixed;
+            background-color: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 100;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .stats {
+            text-align: center;
+            margin-top: 20px;
+            margin-bottom: 20px;
+            color: #666;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 20px;
+            color: #666;
+        }
+        .icon-code {
+            font-size: 10px;
+            color: #999;
+            margin-top: 5px;
+        }
+        .filter-controls {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            background-color: #f0f8ff;
+            border: 1px solid #0078d7;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #0078d7;
+            font-weight: bold;
+        }
+        .filter-btn.active {
+            background-color: #0078d7;
+            color: white;
+        }
+        .instructions {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f0f8ff;
+            border-radius: 8px;
+            border: 1px solid #d0e8ff;
+        }
+        .file-input-container {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #fff8e0;
+            border-radius: 8px;
+            border: 1px solid #ffe0a0;
+        }
+        .error-message {
+            color: #d32f2f;
+            text-align: center;
+            font-weight: bold;
+            padding: 15px;
+            background-color: #ffebee;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        /* 分页控件 */
+        .pagination-controls {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            gap: 10px;
+        }
+        .pagination-btn {
+            padding: 8px 16px;
+            background-color: #f0f8ff;
+            border: 1px solid #0078d7;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #0078d7;
+            font-weight: bold;
+        }
+        .pagination-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .page-info {
+            display: flex;
+            align-items: center;
+            margin: 0 10px;
+            font-weight: bold;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border-left-color: #0078d7;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Fluent System Icons 查看器</h1>
+            <p>点击图标可复制图标ID</p>
+        </header>
+        
+        <div class="file-input-container" id="fileInputContainer">
+            <p>请选择<strong>FluentSystemIcons-Regular.json</strong>文件：</p>
+            <input type="file" id="jsonFileInput" accept=".json">
+            <button id="loadFileBtn" style="margin-left: 10px; padding: 5px 10px;">加载文件</button>
+            <p id="jsonLoadStatus" style="margin-top: 10px;"></p>
+        </div>
+        
+        <div id="errorContainer" class="error-message" style="display: none;"></div>
+        
+        <div id="mainContent" style="display: none;">
+            <div class="instructions">
+                <p>使用说明：1. 搜索框输入关键词查找图标 2. 点击图标复制ID 3. 查看码点信息</p>
+            </div>
+            
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="搜索图标...">
+            </div>
+            
+            <div class="filter-controls">
+                <button class="filter-btn active" data-size="all">全部</button>
+                <button class="filter-btn" data-size="16">16px</button>
+                <button class="filter-btn" data-size="20">20px</button>
+                <button class="filter-btn" data-size="24">24px</button>
+                <button class="filter-btn" data-size="28">28px</button>
+                <button class="filter-btn" data-size="48">48px</button>
+                <button class="filter-btn category" data-category="arrow">箭头</button>
+                <button class="filter-btn category" data-category="add">添加</button>
+                <button class="filter-btn category" data-category="alert">提醒</button>
+                <button class="filter-btn category" data-category="app">应用</button>
+                <button class="filter-btn category" data-category="battery">电池</button>
+                <button class="filter-btn category" data-category="document">文档</button>
+                <button class="filter-btn category" data-category="home">主页</button>
+            </div>
+            
+            <div class="stats">
+                <span id="totalCount">0</span> 个图标 | 显示: <span id="displayCount">0</span> 个
+            </div>
+            
+            <div class="pagination-controls">
+                <button id="prevPageBtn" class="pagination-btn" disabled>上一页</button>
+                <div class="page-info">第 <span id="currentPage">1</span> 页，共 <span id="totalPages">1</span> 页</div>
+                <button id="nextPageBtn" class="pagination-btn" disabled>下一页</button>
+            </div>
+            
+            <div id="iconsContainer" class="icons-container">
+                <div class="loading">加载中...</div>
+            </div>
+            
+            <div class="pagination-controls">
+                <button id="prevPageBtnBottom" class="pagination-btn" disabled>上一页</button>
+                <div class="page-info">第 <span id="currentPageBottom">1</span> 页，共 <span id="totalPagesBottom">1</span> 页</div>
+                <button id="nextPageBtnBottom" class="pagination-btn" disabled>下一页</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="tooltip" class="tooltip"></div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // 检查是否在Electron或类似环境下可以使用Node.js API
+            const isNodeEnvironment = typeof process !== 'undefined' && 
+                                     typeof require !== 'undefined';
+            
+            // 页面元素
+            const fileInputContainer = document.getElementById('fileInputContainer');
+            const jsonFileInput = document.getElementById('jsonFileInput');
+            const loadFileBtn = document.getElementById('loadFileBtn');
+            const jsonLoadStatus = document.getElementById('jsonLoadStatus');
+            const errorContainer = document.getElementById('errorContainer');
+            const mainContent = document.getElementById('mainContent');
+            const iconsContainer = document.getElementById('iconsContainer');
+            const searchInput = document.getElementById('searchInput');
+            const totalCountEl = document.getElementById('totalCount');
+            const displayCountEl = document.getElementById('displayCount');
+            const tooltip = document.getElementById('tooltip');
+            const filterBtns = document.querySelectorAll('.filter-btn');
+            
+            // 分页元素
+            const prevPageBtn = document.getElementById('prevPageBtn');
+            const nextPageBtn = document.getElementById('nextPageBtn');
+            const currentPageEl = document.getElementById('currentPage');
+            const totalPagesEl = document.getElementById('totalPages');
+            const prevPageBtnBottom = document.getElementById('prevPageBtnBottom');
+            const nextPageBtnBottom = document.getElementById('nextPageBtnBottom');
+            const currentPageElBottom = document.getElementById('currentPageBottom');
+            const totalPagesElBottom = document.getElementById('totalPagesBottom');
+            
+            // 图标数据
+            let iconsData = {};
+            
+            // 分页设置
+            const ICONS_PER_PAGE = 100;
+            let currentPage = 1;
+            let totalPages = 1;
+            
+            // 当前筛选设置
+            let currentFilter = {
+                searchTerm: '',
+                size: 'all',
+                category: ''
+            };
+            
+            // 加载成功后的处理
+            function handleSuccessfulLoad(data) {
+                iconsData = data;
+                
+                // 显示图标总数
+                const totalIcons = Object.keys(iconsData).length;
+                totalCountEl.textContent = totalIcons;
+                
+                // 计算总页数
+                totalPages = Math.ceil(totalIcons / ICONS_PER_PAGE);
+                totalPagesEl.textContent = totalPages;
+                totalPagesElBottom.textContent = totalPages;
+                
+                // 更新分页按钮状态
+                updatePaginationButtons();
+                
+                // 隐藏文件输入区域，显示主内容
+                fileInputContainer.style.display = 'none';
+                mainContent.style.display = 'block';
+                
+                // 渲染第一页图标
+                renderIcons();
+            }
+            
+            // 显示JSON解析错误
+            function showError(message) {
+                errorContainer.textContent = message;
+                errorContainer.style.display = 'block';
+                jsonLoadStatus.innerHTML = '加载失败: ' + message + 
+                    '<br><br>请手动选择JSON文件加载';
+                jsonLoadStatus.style.color = '#d32f2f';
+            }
+            
+            jsonLoadStatus.innerHTML = '<div class="spinner"></div> 正在加载文件...';
+            jsonLoadStatus.style.color = '#0078d7';
+            
+            // 尝试使用Node.js方式加载文件（针对Electron等环境）
+            if (isNodeEnvironment) {
+                try {
+                    const fs = require('fs');
+                    const path = require('path');
+                    
+                    // 可能的文件路径，尝试多种可能性
+                    const possiblePaths = [
+                        path.join(__dirname, 'FluentSystemIcons-Regular.json'),
+                        path.join(__dirname, 'fluent-icons.json'),
+                        path.join(__dirname, 'fluenticons.json'),
+                        path.join(__dirname, 'icons.json')
+                    ];
+                    
+                    // 尝试查找第一个存在的文件
+                    let jsonData = null;
+                    for (const filePath of possiblePaths) {
+                        if (fs.existsSync(filePath)) {
+                            console.log(`找到JSON文件: ${filePath}`);
+                            const fileContent = fs.readFileSync(filePath, 'utf8');
+                            jsonData = JSON.parse(fileContent);
+                            break;
+                        }
+                    }
+                    
+                    if (jsonData) {
+                        handleSuccessfulLoad(jsonData);
+                    } else {
+                        throw new Error('无法找到有效的图标文件');
+                    }
+                } catch (error) {
+                    console.error('Node.js读取失败:', error);
+                    // Node.js读取失败，回退到浏览器方式
+                    tryBrowserLoading();
+                }
+            } else {
+                // 不在Node环境，使用浏览器方式
+                tryBrowserLoading();
+            }
+            
+            // 浏览器方式加载文件的函数
+            function tryBrowserLoading() {
+                const jsonFiles = [
+                    'FluentSystemIcons-Regular.json',  // 首先尝试标准文件名
+                    'fluent-icons.json',              // 备选名称1
+                    'fluenticons.json',               // 备选名称2
+                    'icons.json'                      // 备选名称3
+                ];
+                
+                // 创建一个Promise数组，尝试加载所有可能的文件名
+                const loadPromises = jsonFiles.map(filename => {
+                    return fetch(filename)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`HTTP error ${response.status}`);
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            console.log(`成功加载: ${filename}`);
+                            return data;
+                        })
+                        .catch(error => {
+                            console.log(`无法加载 ${filename}: ${error.message}`);
+                            return null;
+                        });
+                });
+                
+                // 尝试所有可能的文件名，使用第一个成功的加载
+                Promise.all(loadPromises)
+                    .then(results => {
+                        // 过滤出成功加载的结果
+                        const successfulLoads = results.filter(result => result !== null);
+                        
+                        if (successfulLoads.length > 0) {
+                            // 使用第一个成功的加载结果
+                            handleSuccessfulLoad(successfulLoads[0]);
+                        } else {
+                            // 所有尝试都失败，显示手动选择选项
+                            throw new Error('无法自动加载任何图标文件');
+                        }
+                    })
+                    .catch(error => {
+                        showError(error.message);
+                    });
+            }
+            
+            // 保留手动加载功能作为备选
+            loadFileBtn.addEventListener('click', () => {
+                const file = jsonFileInput.files[0];
+                if (!file) {
+                    jsonLoadStatus.textContent = '请选择JSON文件';
+                    jsonLoadStatus.style.color = '#d32f2f';
+                    return;
+                }
+                
+                if (!file.name.includes('.json')) {
+                    jsonLoadStatus.textContent = '请选择JSON格式文件';
+                    jsonLoadStatus.style.color = '#d32f2f';
+                    return;
+                }
+                
+                jsonLoadStatus.innerHTML = '<div class="spinner"></div> 正在加载文件...';
+                jsonLoadStatus.style.color = '#0078d7';
+                
+                const reader = new FileReader();
+                
+                reader.onload = (event) => {
+                    try {
+                        const data = JSON.parse(event.target.result);
+                        handleSuccessfulLoad(data);
+                    } catch (error) {
+                        showError(`JSON解析错误: ${error.message}`);
+                    }
+                };
+                
+                reader.onerror = () => {
+                    showError('文件读取错误');
+                };
+                
+                reader.readAsText(file);
+            });
+            
+            // 分页按钮事件处理
+            prevPageBtn.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderIcons();
+                    updatePaginationButtons();
+                    // 滚动到顶部
+                    window.scrollTo(0, 0);
+                }
+            });
+            
+            nextPageBtn.addEventListener('click', () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderIcons();
+                    updatePaginationButtons();
+                    // 滚动到顶部
+                    window.scrollTo(0, 0);
+                }
+            });
+            
+            prevPageBtnBottom.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderIcons();
+                    updatePaginationButtons();
+                    // 滚动到顶部
+                    window.scrollTo(0, 0);
+                }
+            });
+            
+            nextPageBtnBottom.addEventListener('click', () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderIcons();
+                    updatePaginationButtons();
+                    // 滚动到顶部
+                    window.scrollTo(0, 0);
+                }
+            });
+            
+            // 更新分页按钮状态
+            function updatePaginationButtons() {
+                prevPageBtn.disabled = currentPage === 1;
+                nextPageBtn.disabled = currentPage === totalPages;
+                prevPageBtnBottom.disabled = currentPage === 1;
+                nextPageBtnBottom.disabled = currentPage === totalPages;
+                
+                currentPageEl.textContent = currentPage;
+                totalPagesEl.textContent = totalPages;
+                currentPageElBottom.textContent = currentPage;
+                totalPagesElBottom.textContent = totalPages;
+            }
+            
+            // 渲染图标
+            function renderIcons() {
+                const filteredIcons = filterIcons(iconsData);
+                const filteredKeys = Object.keys(filteredIcons);
+                
+                // 更新显示计数
+                displayCountEl.textContent = filteredKeys.length;
+                
+                // 计算当前页的图标
+                const startIndex = (currentPage - 1) * ICONS_PER_PAGE;
+                const endIndex = Math.min(startIndex + ICONS_PER_PAGE, filteredKeys.length);
+                const paginatedKeys = filteredKeys.slice(startIndex, endIndex);
+                
+                // 更新总页数
+                totalPages = Math.ceil(filteredKeys.length / ICONS_PER_PAGE);
+                totalPagesEl.textContent = totalPages;
+                totalPagesElBottom.textContent = totalPages;
+                
+                // 如果当前页大于总页数，重置到第一页
+                if (currentPage > totalPages && totalPages > 0) {
+                    currentPage = 1;
+                }
+                
+                // 更新分页按钮状态
+                updatePaginationButtons();
+                
+                iconsContainer.innerHTML = '';
+                
+                if (paginatedKeys.length === 0) {
+                    iconsContainer.innerHTML = '<div class="loading">没有找到匹配的图标</div>';
+                    return;
+                }
+                
+                paginatedKeys.forEach(iconName => {
+                    const codePoint = filteredIcons[iconName];
+                    const iconElement = document.createElement('div');
+                    iconElement.className = 'icon-item';
+                    iconElement.dataset.iconName = iconName;
+                    
+                    const iconChar = String.fromCodePoint(codePoint);
+                    
+                    iconElement.innerHTML = `
+                        <div class="icon-display">${iconChar}</div>
+                        <div class="icon-name">${iconName}</div>
+                        <div class="icon-code">U+${codePoint.toString(16).toUpperCase()}</div>
+                    `;
+                    
+                    // 点击复制功能
+                    iconElement.addEventListener('click', () => {
+                        copyToClipboard(iconName);
+                        showTooltip('已复制到剪贴板!', iconElement);
+                    });
+                    
+                    iconsContainer.appendChild(iconElement);
+                });
+            }
+            
+            // 过滤图标
+            function filterIcons(data) {
+                let filtered = {};
+                
+                Object.keys(data).forEach(key => {
+                    let shouldInclude = true;
+                    
+                    // 按搜索词过滤
+                    if (currentFilter.searchTerm && !key.toLowerCase().includes(currentFilter.searchTerm)) {
+                        shouldInclude = false;
+                    }
+                    
+                    // 按尺寸过滤
+                    if (shouldInclude && currentFilter.size !== 'all') {
+                        const sizePattern = new RegExp(`_${currentFilter.size}_`);
+                        if (!sizePattern.test(key)) {
+                            shouldInclude = false;
+                        }
+                    }
+                    
+                    // 按类别过滤
+                    if (shouldInclude && currentFilter.category) {
+                        if (!key.includes(currentFilter.category)) {
+                            shouldInclude = false;
+                        }
+                    }
+                    
+                    if (shouldInclude) {
+                        filtered[key] = data[key];
+                    }
+                });
+                
+                return filtered;
+            }
+            
+            // 搜索功能
+            searchInput.addEventListener('input', () => {
+                currentFilter.searchTerm = searchInput.value.toLowerCase();
+                currentPage = 1; // 重置到第一页
+                renderIcons();
+            });
+            
+            // 筛选按钮事件
+            filterBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    // 获取按钮类型
+                    const isCategory = btn.classList.contains('category');
+                    
+                    // 更新相应的按钮组激活状态
+                    if (isCategory) {
+                        // 类别筛选
+                        document.querySelectorAll('.filter-btn.category.active').forEach(b => {
+                            b.classList.remove('active');
+                        });
+                        
+                        if (currentFilter.category === btn.dataset.category) {
+                            // 已经是激活的类别，取消选择
+                            currentFilter.category = '';
+                        } else {
+                            // 激活新类别
+                            btn.classList.add('active');
+                            currentFilter.category = btn.dataset.category;
+                        }
+                    } else {
+                        // 尺寸筛选
+                        document.querySelectorAll('.filter-btn:not(.category)').forEach(b => {
+                            b.classList.remove('active');
+                        });
+                        btn.classList.add('active');
+                        currentFilter.size = btn.dataset.size;
+                    }
+                    
+                    // 重置到第一页并重新渲染
+                    currentPage = 1;
+                    renderIcons();
+                });
+            });
+            
+            // 复制到剪贴板
+            function copyToClipboard(text) {
+                navigator.clipboard.writeText(text).catch(err => {
+                    console.error('复制失败:', err);
+                    
+                    // 备用复制方法
+                    const textArea = document.createElement('textarea');
+                    textArea.value = text;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-999999px';
+                    textArea.style.top = '-999999px';
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    document.execCommand('copy');
+                    textArea.remove();
+                });
+            }
+            
+            // 显示提示工具
+            function showTooltip(message, element) {
+                const rect = element.getBoundingClientRect();
+                tooltip.textContent = message;
+                tooltip.style.left = rect.left + rect.width / 2 - (tooltip.offsetWidth / 2 || 50) + 'px';
+                tooltip.style.top = rect.top - 40 + 'px';
+                tooltip.style.opacity = '1';
+                
+                setTimeout(() => {
+                    tooltip.style.opacity = '0';
+                }, 1500);
+            }
+        });
+    </script>
+</body>
+</html> 

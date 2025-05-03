@@ -1,6 +1,6 @@
 # =================
 # 线程管理器
-# Version: 1.0.1
+# Version: 1.0.2
 # =================
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Callable, Any, Optional, Dict
