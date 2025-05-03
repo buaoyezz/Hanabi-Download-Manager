@@ -1,2 +1,2 @@
 from connect.websocket_server import WebSocketServer, get_server_instance
-from connect.download_manager import DownloadConnector 
+from connect.fallback_connector import FallbackConnector as DownloadConnector 
