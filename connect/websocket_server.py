@@ -3,6 +3,9 @@ import json
 import logging
 import threading
 import traceback
+import time  # 添加时间模块导入
+import socket  # 添加socket模块导入
+import random  # 添加随机模块导入
 from typing import Dict, List, Optional, Callable
 
 # 尝试导入websockets包的所有必要模块
@@ -18,11 +21,16 @@ class WebSocketServer:
     def __init__(self, host: str = "localhost", port: int = 20971):
         self.host = host
         self.port = port
+        self.initial_port = port  # 保存初始端口号
         self.clients = set()
         self.server = None
         self.server_thread = None
         self.is_running = False
         self._download_handler: Optional[Callable] = None
+        self.connection_lock = threading.Lock()
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 5
+        self.server_lock = threading.Lock()  # 服务器实例锁，防止多线程同时访问服务器
         
         # 设置日志
         logging.basicConfig(
@@ -33,18 +41,22 @@ class WebSocketServer:
     
     def set_download_handler(self, handler: Callable):
         self._download_handler = handler
+        self.logger.info("已设置下载处理程序")
     
     # 最简化的连接处理函数
     async def handler(self, websocket):
+        client_id = id(websocket)
         try:
-            self.clients.add(websocket)
-            self.logger.info(f"客户端已连接")
+            with self.connection_lock:
+                self.clients.add(websocket)
+            self.logger.info(f"客户端已连接 [ID: {client_id}], 当前连接数: {len(self.clients)}")
             
             # 发送版本信息
             version_info = {
                 "type": "version",
-                "ClientVersion": "1.0.1",
-                "LatestExtensionVersion": "1.0.1"
+                "ClientVersion": "1.0.2",
+                "LatestExtensionVersion": "1.0.1",
+                "ServerStatus": "ready"
             }
             await websocket.send(json.dumps(version_info))
             
@@ -52,110 +64,281 @@ class WebSocketServer:
             async for message in websocket:
                 try:
                     data = json.loads(message)
-                    self.logger.info(f"收到消息: {data}")
+                    request_id = data.get("requestId", "unknown")
+                    self.logger.info(f"收到消息 [ID: {client_id}, RequestID: {request_id}]: {data}")
                     
                     if data.get("type") == "heartbeat":
                         # 响应心跳消息
                         response = {
                             "type": "heartbeat",
-                            "timestamp": data.get("timestamp")
+                            "timestamp": data.get("timestamp"),
+                            "status": "active"
                         }
                         await websocket.send(json.dumps(response))
+                        self.logger.info(f"已响应心跳 [ID: {client_id}]")
                     elif data.get("type") == "download" or (data.get("url") and "type" not in data):
                         # 处理下载请求
                         if "type" not in data:
                             data["type"] = "download"
                         
+                        # 添加请求ID用于跟踪
+                        if "requestId" not in data:
+                            data["requestId"] = f"req_{int(time.time() * 1000)}"
+                        
+                        self.logger.info(f"处理下载请求 [ID: {client_id}, RequestID: {data['requestId']}]")
+                        
                         if self._download_handler:
-                            self._download_handler(data)
+                            # 在单独的线程中处理下载请求，避免阻塞WebSocket
+                            def process_download_request():
+                                try:
+                                    self._download_handler(data)
+                                    self.logger.info(f"下载请求已处理 [RequestID: {data['requestId']}]")
+                                except Exception as e:
+                                    self.logger.error(f"处理下载请求失败 [RequestID: {data['requestId']}]: {e}")
+                                    self.logger.error(traceback.format_exc())
+                            
+                            threading.Thread(target=process_download_request, daemon=True).start()
+                            
+                            # 立即发送响应，不等待下载处理完成
                             response = {
                                 "type": "download_response",
+                                "requestId": data.get("requestId", "unknown"),
                                 "status": "success",
                                 "message": "下载任务已添加"
                             }
                         else:
                             response = {
                                 "type": "download_response",
+                                "requestId": data.get("requestId", "unknown"),
                                 "status": "error",
                                 "message": "下载处理程序未设置"
                             }
                         await websocket.send(json.dumps(response))
+                        self.logger.info(f"已发送下载响应 [ID: {client_id}, RequestID: {data.get('requestId', 'unknown')}]")
                     
                 except json.JSONDecodeError:
-                    self.logger.error(f"无效的JSON消息: {message}")
+                    self.logger.error(f"无效的JSON消息 [ID: {client_id}]: {message}")
+                    try:
+                        error_response = {
+                            "type": "error",
+                            "message": "无效的JSON格式"
+                        }
+                        await websocket.send(json.dumps(error_response))
+                    except:
+                        pass
                 except Exception as e:
-                    self.logger.error(f"处理消息时出错: {e}")
+                    self.logger.error(f"处理消息时出错 [ID: {client_id}]: {e}")
                     self.logger.error(traceback.format_exc())
+                    try:
+                        error_response = {
+                            "type": "error",
+                            "message": f"服务器错误: {str(e)}"
+                        }
+                        await websocket.send(json.dumps(error_response))
+                    except:
+                        pass
         
+        except websockets.exceptions.ConnectionClosed as e:
+            self.logger.info(f"客户端断开连接 [ID: {client_id}]: {e}")
         except Exception as e:
-            self.logger.error(f"处理连接时出错: {e}")
+            self.logger.error(f"处理连接时出错 [ID: {client_id}]: {e}")
             self.logger.error(traceback.format_exc())
         finally:
-            self.clients.remove(websocket)
-            self.logger.info(f"客户端已断开连接")
+            with self.connection_lock:
+                if websocket in self.clients:
+                    self.clients.remove(websocket)
+            self.logger.info(f"客户端已断开连接 [ID: {client_id}], 剩余连接数: {len(self.clients)}")
+    
+    def _is_port_in_use(self, port):
+        """检查端口是否被占用"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(('localhost', port))
+                return False
+            except socket.error:
+                return True
+    
+    def _find_available_port(self, start_port=20971, max_attempts=10):
+        """查找可用端口，从start_port开始尝试"""
+        port = start_port
+        attempts = 0
+        
+        while attempts < max_attempts:
+            if not self._is_port_in_use(port):
+                return port
+            port += 1
+            attempts += 1
+        
+        # 如果找不到可用端口，返回一个随机端口
+        return random.randint(30000, 60000)
     
     # 服务器运行函数
     def run_server(self):
-        async def inner_run():
-            try:
-                # 使用最基本的API创建服务器
-                self.logger.info(f"正在尝试启动WebSocket服务器在 {self.host}:{self.port}")
-                
-                # 使用websockets的基本API创建服务器
-                server_instance = await websockets.serve(self.handler, self.host, self.port)
-                self.server = server_instance
-                self.is_running = True
-                self.logger.info(f"WebSocket服务器已启动，监听于 {self.host}:{self.port}")
-                
-                # 保持服务器运行
-                await asyncio.Future()
-            except Exception as e:
-                self.logger.error(f"启动WebSocket服务器出错: {e}")
-                self.logger.error(traceback.format_exc())
-                raise
+        """启动服务器，支持端口自动切换"""
+        # 避免递归调用，采用循环方式重启
+        retry_count = 0
+        max_retries = self.max_reconnect_attempts
+        current_port = self.port
         
-        try:
-            # 创建新的事件循环并运行服务器
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(inner_run())
-        except Exception as e:
-            self.logger.error(f"启动WebSocket服务器线程出错: {e}")
-            self.logger.error(traceback.format_exc())
-            raise
-        finally:
+        while retry_count <= max_retries and not self.is_running:
             try:
-                if loop and loop.is_running():
-                    loop.close()
-            except:
-                pass
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # 在循环中启动服务器
+                async def start_server():
+                    nonlocal current_port
+                    
+                    # 检查当前端口是否可用，如果不可用则尝试切换端口
+                    if self._is_port_in_use(current_port):
+                        old_port = current_port
+                        current_port = self._find_available_port(current_port + 1)
+                        self.logger.warning(f"端口 {old_port} 已被占用，切换到新端口 {current_port}")
+                        self.port = current_port
+                    
+                    self.logger.info(f"正在尝试启动WebSocket服务器在 {self.host}:{current_port}")
+                    
+                    # 配置WebSocket服务器
+                    try:
+                        server_instance = await websockets.serve(
+                            self.handler, 
+                            self.host, 
+                            current_port, 
+                            ping_interval=50,
+                            ping_timeout=30,
+                            max_size=10485760
+                        )
+                        
+                        with self.server_lock:
+                            self.server = server_instance
+                            self.is_running = True
+                        
+                        self.reconnect_attempts = 0
+                        self.logger.info(f"WebSocket服务器已启动，监听于 {self.host}:{current_port}")
+                        
+                        # 保持服务器运行
+                        await asyncio.Future()
+                    except Exception as e:
+                        # 特别处理端口占用错误
+                        if "address already in use" in str(e).lower() or "10048" in str(e):
+                            old_port = current_port
+                            current_port = self._find_available_port(current_port + 1)
+                            self.logger.warning(f"启动端口 {old_port} 失败，将尝试新端口 {current_port}")
+                            raise  # 重新抛出异常，进入重试循环
+                        else:
+                            self.logger.error(f"启动WebSocket服务器出错: {e}")
+                            self.logger.error(traceback.format_exc())
+                            raise
+                
+                # 运行服务器启动函数
+                loop.run_until_complete(start_server())
+                break  # 如果启动成功，跳出重试循环
+                
+            except Exception as e:
+                self.logger.error(f"启动尝试 {retry_count + 1}/{max_retries + 1} 失败: {e}")
+                retry_count += 1
+                
+                if retry_count <= max_retries:
+                    self.logger.info(f"等待 3 秒后进行下一次尝试...")
+                    time.sleep(3)  # 等待一段时间再重试
+                else:
+                    self.logger.error("达到最大重试次数，放弃启动服务器")
+                    break
+            finally:
+                try:
+                    if loop and loop.is_running():
+                        loop.close()
+                except:
+                    pass
     
     # 启动服务器
     def start(self):
-        if self.server_thread and self.server_thread.is_alive():
-            self.logger.warning("WebSocket服务器已经在运行")
-            return
-        
-        # 使用守护线程运行WebSocket服务器
-        self.server_thread = threading.Thread(target=self.run_server, daemon=True)
-        self.server_thread.start()
-        self.logger.info("WebSocket服务器线程已启动")
+        with self.server_lock:
+            if self.server_thread and self.server_thread.is_alive() and self.is_running:
+                self.logger.info("WebSocket服务器已经在运行")
+                return
+            
+            # 如果有旧线程但不再运行，清理它
+            if self.server_thread and not self.server_thread.is_alive():
+                self.logger.info("清理旧的WebSocket服务器线程")
+                self.server_thread = None
+            
+            # 重置端口到初始值
+            self.port = self.initial_port
+            
+            # 使用守护线程运行WebSocket服务器
+            self.server_thread = threading.Thread(target=self.run_server, daemon=True)
+            self.server_thread.start()
+            self.logger.info("WebSocket服务器线程已启动")
     
     # 停止服务器
     def stop(self):
-        try:
-            if self.server:
-                self.server.close()
-            self.is_running = False
-            self.logger.info("WebSocket服务器已标记为停止")
-        except Exception as e:
-            self.logger.error(f"停止WebSocket服务器出错: {e}")
+        with self.server_lock:
+            try:
+                if self.server:
+                    self.server.close()
+                self.is_running = False
+                
+                # 关闭所有客户端连接
+                async def close_connections():
+                    for client in list(self.clients):
+                        try:
+                            await client.close()
+                        except:
+                            pass
+                    self.clients.clear()
+                
+                # 执行关闭连接的异步函数
+                if self.clients:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(close_connections())
+                    loop.close()
+                
+                self.logger.info("WebSocket服务器已停止")
+            except Exception as e:
+                self.logger.error(f"停止WebSocket服务器出错: {e}")
+                self.logger.error(traceback.format_exc())
+
 
 # 单例模式，全局访问点
 _server_instance = None
+_instance_lock = threading.Lock()
 
-def get_server_instance(host="localhost", port=20971) -> WebSocketServer:
+def get_server_instance(host="localhost", port=20971, force_new=False) -> WebSocketServer:
+    """
+    获取WebSocket服务器实例
+    
+    参数:
+        host: 服务器主机名
+        port: 服务器端口号
+        force_new: 是否强制创建新实例（调试用）
+    
+    返回:
+        WebSocketServer实例
+    """
     global _server_instance
-    if _server_instance is None:
-        _server_instance = WebSocketServer(host, port)
+    
+    # 使用锁确保线程安全的单例模式
+    with _instance_lock:
+        # 如果要求新实例或者实例不存在，创建一个新的
+        if force_new or _server_instance is None:
+            _server_instance = WebSocketServer(host, port)
+        else:
+            # 检查现有实例是否正在运行，如果不是，更新端口并重启
+            if not _server_instance.is_running:
+                # 如果现有实例的端口被占用，尝试使用新端口
+                if _server_instance._is_port_in_use(port):
+                    # 查找可用端口
+                    new_port = _server_instance._find_available_port(port)
+                    logging.info(f"更新WebSocket服务器端口: {port} -> {new_port}")
+                    _server_instance.port = new_port
+                    _server_instance.initial_port = new_port
+                else:
+                    # 如果端口未被占用，更新为提供的端口
+                    if _server_instance.port != port:
+                        logging.info(f"更新WebSocket服务器端口: {_server_instance.port} -> {port}")
+                        _server_instance.port = port
+                        _server_instance.initial_port = port
+    
     return _server_instance 

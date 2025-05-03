@@ -2,6 +2,8 @@ import logging
 import json
 import traceback
 from typing import Dict, Any, Optional, Callable
+import threading
+import time
 
 from PySide6.QtCore import Qt, QObject, Signal, Slot
 
@@ -35,7 +37,7 @@ except (ImportError, ModuleNotFoundError) as e:
         logging.error(traceback.format_exc())
         raise
 
-from core.download_core.download_kernel import TransferManager
+from core.download_core.download_kernel_reformed import DownloadEngine
 
 class FallbackConnector(QObject):
     """
@@ -49,6 +51,10 @@ class FallbackConnector(QObject):
         self.logger = logging.getLogger('FallbackConnector')
         self.server = None
         self._download_handler = download_handler
+        self._request_queue = []  # 保存请求队列，确保不丢失请求
+        self._request_queue_lock = threading.Lock()  # 请求队列锁
+        self._is_processing = False  # 是否正在处理请求队列
+        self._request_count = 0  # 请求计数
         
         # 尝试初始化服务器
         self.initialize_server()
@@ -109,9 +115,16 @@ class FallbackConnector(QObject):
         """启动服务器"""
         if self.server:
             try:
+                # 尝试启动服务器
                 self.server.start()
+                
+                # 获取实际使用的端口（可能已被自动切换）
+                actual_port = getattr(self.server, 'port', 20971)
                 server_type = "WebSocket" if USE_WEBSOCKET else "TCP"
-                self.logger.info(f"{server_type}服务器已启动，端口: 20971")
+                self.logger.info(f"{server_type}服务器已启动，端口: {actual_port}")
+                
+                # 处理之前积压的请求
+                self.process_queued_requests()
             except Exception as e:
                 self.logger.error(f"启动服务器失败: {e}")
                 self.logger.error(traceback.format_exc())
@@ -125,21 +138,86 @@ class FallbackConnector(QObject):
                         self.server.set_download_handler(self.handle_download_request)
                         self.server.start()
                         self.logger.info("成功回退到TCP服务器")
+                        
+                        # 再次尝试处理队列
+                        self.process_queued_requests()
                     except Exception as tcp_error:
                         self.logger.error(f"回退到TCP服务器也失败了: {tcp_error}")
                         self.logger.error(traceback.format_exc())
         else:
             self.logger.error("没有可用的服务器，无法启动")
-            # 再次尝试初始化TCP服务器
+            # 再次尝试初始化服务器
             try:
-                from connect.tcp_server import get_server_instance as get_tcp_server
-                self.server = get_tcp_server(port=20971)
+                # 尝试重新初始化WebSocket服务器
+                if USE_WEBSOCKET:
+                    try:
+                        from connect.websocket_server import get_server_instance as get_ws_server
+                        self.server = get_ws_server(port=20971)
+                        self.logger.info("重新初始化WebSocket服务器成功")
+                    except Exception as ws_error:
+                        self.logger.error(f"重新初始化WebSocket服务器失败: {ws_error}")
+                        # 回退到TCP
+                        from connect.tcp_server import get_server_instance as get_tcp_server
+                        self.server = get_tcp_server(port=20971)
+                        self.logger.info("回退到TCP服务器")
+                else:
+                    # 直接初始化TCP服务器
+                    from connect.tcp_server import get_server_instance as get_tcp_server
+                    self.server = get_tcp_server(port=20971)
+                
+                # 设置下载处理程序
                 self.server.set_download_handler(self.handle_download_request)
                 self.server.start()
-                self.logger.info("重试初始化TCP服务器成功")
+                self.logger.info("重试初始化服务器成功")
+                
+                # 再次尝试处理队列
+                self.process_queued_requests()
             except Exception as retry_error:
-                self.logger.error(f"重试初始化TCP服务器失败: {retry_error}")
+                self.logger.error(f"重试初始化服务器失败: {retry_error}")
                 self.logger.error(traceback.format_exc())
+    
+    def process_queued_requests(self):
+        """处理积压的下载请求"""
+        # 只允许一个线程处理队列
+        with self._request_queue_lock:
+            if self._is_processing or not self._request_queue:
+                return
+            self._is_processing = True
+        
+        try:
+            # 复制队列并清空原队列
+            with self._request_queue_lock:
+                queue_copy = self._request_queue.copy()
+                self._request_queue.clear()
+            
+            self.logger.info(f"开始处理积压请求队列，共 {len(queue_copy)} 个请求")
+            
+            # 处理队列中的每个请求
+            for request in queue_copy:
+                request_id = request.get("requestId", "未知ID")
+                self.logger.info(f"从队列处理积压请求 [ID: {request_id}]: {request.get('url', '未知URL')}")
+                try:
+                    # 直接发送信号到主线程处理
+                    self.downloadRequestReceived.emit(request)
+                    self.logger.info(f"请求 [ID: {request_id}] 已发送到下载处理程序")
+                except Exception as e:
+                    self.logger.error(f"处理队列请求 [ID: {request_id}] 失败: {e}")
+                    self.logger.error(traceback.format_exc())
+            
+            self.logger.info(f"队列处理完成，已处理 {len(queue_copy)} 个请求")
+        finally:
+            # 处理完成，重置处理标志
+            with self._request_queue_lock:
+                self._is_processing = False
+                
+                # 检查是否有新请求入队
+                if self._request_queue:
+                    # 如果有新请求，再次调用处理
+                    new_count = len(self._request_queue)
+                    self.logger.info(f"处理过程中有 {new_count} 个新请求入队，准备处理")
+                    # 使用延迟调用避免递归过深
+                    import threading
+                    threading.Timer(0.1, self.process_queued_requests).start()
     
     def stop(self):
         """停止服务器"""
@@ -172,12 +250,26 @@ class FallbackConnector(QObject):
     
     def handle_download_request(self, data: Dict[str, Any]):
         """处理下载请求"""
-        self.logger.info(f"收到下载请求: {data}")
-        # 发出信号，将请求数据传递到主线程
-        self.downloadRequestReceived.emit(data)
+        # 为请求添加唯一ID
+        if "requestId" not in data:
+            data["requestId"] = f"req_{int(time.time() * 1000)}_{self._request_count}"
+            self._request_count += 1
+            
+        self.logger.info(f"收到下载请求 [ID: {data['requestId']}]: {data.get('url', '未知URL')}")
+        
+        # 将请求添加到队列
+        with self._request_queue_lock:
+            self._request_queue.append(data)
+            queue_len = len(self._request_queue)
+        
+        self.logger.info(f"请求已加入队列 [ID: {data['requestId']}], 当前队列长度: {queue_len}")
+        
+        # 尝试处理队列，使用非阻塞方式
+        import threading
+        threading.Thread(target=self.process_queued_requests, daemon=True).start()
     
     @staticmethod
-    def create_download_task(download_data: Dict[str, Any]) -> TransferManager:
+    def create_download_task(download_data: Dict[str, Any]) -> DownloadEngine:
         """根据下载数据创建下载任务"""
         url = download_data.get('url')
         filename = download_data.get('filename')
@@ -186,15 +278,26 @@ class FallbackConnector(QObject):
         # 从请求中提取HTTP头信息
         headers = download_data.get('headers', {})
         
-        # 创建下载管理器
-        transfer_manager = TransferManager(
+        # 如果有referrer参数，添加到headers中
+        if referrer:
+            headers['Referer'] = referrer
+        
+        # 确保有User-Agent
+        if 'User-Agent' not in headers:
+            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36'
+        
+        # 设置接受所有内容类型
+        if 'Accept' not in headers:
+            headers['Accept'] = '*/*'
+        
+        # 创建下载引擎
+        download_engine = DownloadEngine(
             url=url,
             headers=headers,
-            maxThreads=8,  # 可以从配置中读取
-            savePath=None,  # 使用默认保存路径，也可以从请求中获取
-            filename=filename,
-            dynamicThreads=True,
-            referrer=referrer
+            max_concurrent=8,  # 可以从配置中读取
+            save_path=None,    # 使用默认保存路径，也可以从请求中获取
+            file_name=filename,
+            smart_threading=True
         )
         
-        return transfer_manager 
+        return download_engine
