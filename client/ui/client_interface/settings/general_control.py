@@ -32,6 +32,9 @@ class GeneralControlWidget(QWidget):
             language = ui_config.get("language", "zh_CN")
             show_notifications = ui_config.get("show_notifications", True)
             
+            # 统计设置
+            stats_option = self.config_manager.get_setting("user", "stats_option", "local")
+            
             # 启动设置
             start_config = self.config_manager.get("startup", {})
             auto_start = start_config.get("auto_start", False)
@@ -42,6 +45,9 @@ class GeneralControlWidget(QWidget):
             # 设置主题和语言选择
             self.theme_combo.setCurrentByUserData(theme)
             self.language_combo.setCurrentByUserData(language)
+            
+            # 设置统计选项
+            self.stats_combo.setCurrentByUserData(stats_option)
             
             self.show_notifications_checkbox.setChecked(show_notifications)
             self.auto_start_checkbox.setChecked(auto_start)
@@ -90,6 +96,21 @@ class GeneralControlWidget(QWidget):
         language_layout.addStretch()
         
         ui_layout.addLayout(language_layout)
+        
+        # 统计参与选项
+        stats_layout = QHBoxLayout()
+        stats_label = QLabel("下载统计参与选项:")
+        self.font_manager.apply_font(stats_label)
+        stats_layout.addWidget(stats_label)
+        
+        self.stats_combo = CustomComboBox()
+        self.stats_combo.addIconItem("仅参与本地统计", "ic_fluent_data_pie_24_regular", "local")
+        self.stats_combo.addIconItem("参与全局统计", "ic_fluent_data_usage_24_regular", "global")
+        self.font_manager.apply_font(self.stats_combo)
+        stats_layout.addWidget(self.stats_combo)
+        stats_layout.addStretch()
+        
+        ui_layout.addLayout(stats_layout)
         
         # 通知设置
         self.show_notifications_checkbox = CustomCheckBox("显示桌面通知")
@@ -293,9 +314,17 @@ class GeneralControlWidget(QWidget):
                 "restore_tasks": self.start_minimized_checkbox.isChecked()
             }
             
+            # 统计选项
+            stats_option = self.stats_combo.getCurrentUserData() or "local"
+            
             # 更新配置
             self.config_manager._config["ui"] = ui_config
             self.config_manager._config["startup"] = startup_config
+            
+            # 设置统计选项
+            if "user" not in self.config_manager._config:
+                self.config_manager._config["user"] = {}
+            self.config_manager._config["user"]["stats_option"] = stats_option
             
             # 保存配置
             if self.config_manager.save_config():
