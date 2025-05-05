@@ -1034,10 +1034,26 @@ class TaskWindow(QWidget):
             print(f"严重错误: {', '.join(container_problems)}")
             print(f"尝试重新创建容器...")
             try:
-                # 这里不实际重建，只记录问题
-                print(f"需要重建容器，但这里只记录问题")
+                # 尝试重新创建容器
+                if not hasattr(self, 'tasks_container') or self.tasks_container is None:
+                    print("重新创建tasks_container...")
+                    self.tasks_container = QWidget()
+                    self.tasks_container.setStyleSheet("background-color: transparent;")
+                
+                if not hasattr(self, 'tasks_container_layout') or self.tasks_container_layout is None:
+                    print("重新创建tasks_container_layout...")
+                    self.tasks_container_layout = QVBoxLayout(self.tasks_container)
+                    self.tasks_container_layout.setContentsMargins(0, 0, 0, 0)
+                    self.tasks_container_layout.setSpacing(8)
+                    self.tasks_container_layout.addStretch()
+                
+                if hasattr(self, 'scroll_area') and self.scroll_area is not None:
+                    print("重新设置scroll_area的widget...")
+                    self.scroll_area.setWidget(self.tasks_container)
             except Exception as e:
                 print(f"重建容器失败: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 print(f"======== TaskWindow.add_download_task调用失败 ========\n")
                 return -1
         
@@ -1063,8 +1079,34 @@ class TaskWindow(QWidget):
             print(f"开始添加到容器布局...")
             if self.tasks_container_layout is None:
                 raise ValueError("tasks_container_layout为None，无法添加任务项")
+            
+            # 检查布局是否有效    
+            item_count = self.tasks_container_layout.count()
+            print(f"布局当前项目数: {item_count}")
+            
+            # 安全地添加到布局，确保不会出现布局问题
+            try:
+                # 移除stretch如果存在
+                if item_count > 0 and self.tasks_container_layout.itemAt(item_count-1).spacerItem():
+                    print("移除底部stretch...")
+                    self.tasks_container_layout.removeItem(self.tasks_container_layout.itemAt(item_count-1))
                 
-            self.tasks_container_layout.insertWidget(0, task_item)
+                # 添加任务项到顶部
+                print("添加任务项到布局...")
+                self.tasks_container_layout.insertWidget(0, task_item)
+                
+                # 重新添加stretch到底部
+                print("重新添加底部stretch...")
+                self.tasks_container_layout.addStretch()
+            except Exception as e:
+                print(f"布局操作失败: {str(e)}")
+                # 尝试简单添加到布局
+                try:
+                    self.tasks_container_layout.addWidget(task_item)
+                except Exception as e2:
+                    print(f"简单添加也失败: {str(e2)}")
+                    raise ValueError(f"无法添加任务项到布局: {str(e2)}")
+                
             print(f"添加到容器布局成功")
             
             # 检查任务项可见性

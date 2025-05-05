@@ -10,10 +10,14 @@ import os
 import time
 from datetime import datetime
 from PySide6.QtWidgets import QMessageBox
+import logging
+import urllib.request
+import urllib3
 
 class UpdatePage(QWidget):
     updateFound = Signal(str, str)  # 版本号, 更新内容
     updateError = Signal(str)       # 错误信息
+    addDownloadTask = Signal(str, str, int)  # 下载URL, 文件名, 文件大小
     
     def __init__(self, config_manager, parent=None):
         super().__init__(parent)
@@ -21,10 +25,24 @@ class UpdatePage(QWidget):
         self.font_manager = FontManager()
         
         # 软件当前版本
-        self.current_version = "1.0.2"
+        self.current_version = "1.0.3"
         
-        # 检查更新API地址
-        self.api_url = "https://zzbuaoye.dpdns.org"
+        # 更新源配置
+        self.primary_api_url = "https://apiv2.xiaoy.asia"  # 修正主更新源URL
+        # 次更新源 - 已知目前可能有连接问题
+        self.secondary_api_url = "https://zzbuaoye.dpdns.org"  
+        
+        # 更新源端点
+        self.primary_endpoint = "/hdm/version.json"
+        self.secondary_endpoint = "/HanabiDM/version.json"
+        
+        # 次更新源尝试次数和连接参数
+        self.secondary_max_retries = 2
+        self.secondary_retry_delay = 1  # 秒
+        
+        # 代理设置
+        self.use_proxy = self.config_manager.get_use_proxy() if hasattr(self.config_manager, 'get_use_proxy') else False
+        self.proxy_settings = self.get_proxy_settings()
         
         # 缓存文件路径
         self.cache_dir = os.path.join(os.path.expanduser("~"), ".hanabi_dm")
@@ -37,6 +55,7 @@ class UpdatePage(QWidget):
         # 加载缓存的版本信息
         self.cached_data = self.load_cache()
         self.has_newer_version = False
+        self.current_update_source = None  # 记录当前使用的更新源
         
         # 创建主滚动区域，使整个页面可滚动
         self.scroll_area = QScrollArea(self)
@@ -222,6 +241,13 @@ class UpdatePage(QWidget):
         version_info_layout.addWidget(self.last_check_label)
         
         version_layout.addLayout(version_info_layout)
+        
+        # 添加代理设置提示（如果启用）
+        if self.use_proxy and self.proxy_settings:
+            proxy_label = QLabel(f"已启用代理服务器进行更新")
+            proxy_label.setStyleSheet("color: #64B5F6; font-size: 12px; background-color: transparent;")
+            self.font_manager.apply_font(proxy_label)
+            version_layout.addWidget(proxy_label)
         
         # 检查更新按钮
         button_layout = QHBoxLayout()
@@ -435,77 +461,406 @@ class UpdatePage(QWidget):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self.last_check_label.setText(f"上次检查：{now}")
         
-        # 模拟网络请求检查更新
-        # 实际项目中应使用QNetworkAccessManager或requests在线程中进行
+        # 优先使用缓存的更新源
+        if self.cached_data and self.cached_data.get("working_source"):
+            source = self.cached_data.get("working_source")
+            endpoint = self.cached_data.get("working_endpoint", "")
+            
+            if source == "primary":
+                logging.info("使用缓存中记录的主更新源")
+                self.primary_endpoint = endpoint
+                self.try_primary_source(now)
+            else:
+                logging.info("使用缓存中记录的次更新源")
+                self.secondary_endpoint = endpoint
+                self.try_secondary_source(now)
+        else:
+            # 没有缓存的可用源，按正常顺序尝试
+            self.try_primary_source(now)
+    
+    def try_primary_source(self, now):
+        """尝试从主更新源获取更新信息"""
         try:
-            response = requests.get(f"{self.api_url}/HanabiDM/version.json", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                latest = data.get("latest", {})
+            primary_url = f"{self.primary_api_url}{self.primary_endpoint}"
+            logging.info(f"正在从主更新源获取更新信息: {primary_url}")
+            
+            # 使用更强大的异常处理和重试
+            try:
+                response = requests.get(
+                    primary_url, 
+                    timeout=10,
+                    headers={
+                        "User-Agent": "HanabiDownloadManager/1.0.3",
+                        "Accept": "application/json"
+                    }
+                )
+                response.raise_for_status()  # 抛出HTTP错误以便捕获
                 
-                if not latest:
-                    self.status_label.setText("检查更新失败: 无效的版本信息")
-                    self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
+                # 成功获取主源数据
+                self.current_update_source = "primary"
+                logging.info("主更新源连接成功")
+                self.process_update_data(response.json(), now)
+                return  # 成功后直接返回，不需要尝试次源
+                
+            except requests.exceptions.HTTPError as http_err:
+                logging.warning(f"主更新源HTTP错误: {http_err}")
+                # 尝试备用主源路径
+                try:
+                    alternate_url = f"{self.primary_api_url}/version.json"
+                    logging.info(f"尝试备用主源路径: {alternate_url}")
+                    alt_response = requests.get(
+                        alternate_url,
+                        timeout=10,
+                        headers={
+                            "User-Agent": "HanabiDownloadManager/1.0.3",
+                            "Accept": "application/json"
+                        }
+                    )
+                    alt_response.raise_for_status()
+                    
+                    # 如果成功，保存正确的端点
+                    self.primary_endpoint = "/version.json"
+                    # 成功获取主源数据
+                    self.current_update_source = "primary"
+                    logging.info("主更新源备用路径连接成功")
+                    self.process_update_data(alt_response.json(), now)
                     return
-                
-                # 保存缓存和检查时间
-                data["last_check_time"] = now
-                data["last_check_timestamp"] = time.time()
-                self.cached_data = data
-                self.save_cache(data)
-                
-                # 检查是否有新版本
-                if self.compare_versions(latest["version"], self.current_version) > 0:
-                    # 有更新版本
-                    self.has_newer_version = True
-                    self.status_label.setText(f"发现新版本: {latest['version']}")
-                    self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
-                    
-                    # 更新更新日志
-                    self.update_release_notes(latest, True)
-                    
-                    # 发出更新信号
-                    self.updateFound.emit(latest["version"], json.dumps(latest))
-                else:
-                    # 已经是最新版本
-                    self.has_newer_version = False
-                    self.status_label.setText("您当前使用的已经是最新版本")
-                    self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
-                    
-                    # 显示当前版本的更新日志
-                    current_version_info = None
-                    
-                    # 如果当前版本是最新版本
-                    if latest["version"] == self.current_version:
-                        current_version_info = latest
-                    # 否则从历史记录中查找
-                    elif "history" in data and self.current_version in data["history"]:
-                        current_version_info = data["history"][self.current_version]
-                    
-                    if current_version_info:
-                        self.update_release_notes(current_version_info, False)
-                    else:
-                        # 清除原有内容
-                        for i in reversed(range(self.log_layout.count())):
-                            item = self.log_layout.itemAt(i)
-                            if item.widget():
-                                item.widget().deleteLater()
-                        
-                        # 显示提示信息
-                        no_log_label = QLabel("暂无当前版本的更新日志信息")
-                        no_log_label.setStyleSheet("color: #9E9E9E; font-size: 14px; background-color: transparent;")
-                        self.font_manager.apply_font(no_log_label)
-                        self.log_layout.addWidget(no_log_label)
-                        self.log_layout.addStretch()
-        
+                except Exception as alt_err:
+                    logging.warning(f"备用主源路径也失败: {alt_err}")
+            except requests.exceptions.ConnectionError as conn_err:
+                logging.warning(f"主更新源连接错误: {conn_err}")
+            except requests.exceptions.Timeout as timeout_err:
+                logging.warning(f"主更新源连接超时: {timeout_err}")
+            except requests.exceptions.RequestException as req_err:
+                logging.warning(f"主更新源请求异常: {req_err}")
+            except ValueError as json_err:
+                logging.warning(f"主更新源JSON解析错误: {json_err}")
+            
+            # 如果走到这里，说明主源失败，尝试次源
+            logging.warning(f"主更新源获取失败，尝试使用次更新源")
+            self.try_secondary_source(now)
+            
         except Exception as e:
-            # 检查更新失败
-            self.status_label.setText(f"检查更新失败: {str(e)}")
-            self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
-            self.updateError.emit(str(e))
+            # 主源请求异常，尝试次源
+            logging.error(f"主更新源连接出现未预期错误: {str(e)}，尝试使用次更新源")
+            self.try_secondary_source(now)
+    
+    def try_secondary_source(self, now):
+        """从次更新源获取更新信息，支持多次重试，模拟浏览器行为，支持代理"""
+        retry_count = 0
         
-        finally:
+        # 禁止不安全连接警告 - 仅在此函数中禁用
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        while retry_count <= self.secondary_max_retries:
+            try:
+                secondary_url = f"{self.secondary_api_url}{self.secondary_endpoint}"
+                logging.info(f"正在从次更新源获取更新信息 [尝试 {retry_count+1}/{self.secondary_max_retries+1}]: {secondary_url}")
+                
+                # 准备代理设置
+                proxy_info = ""
+                if self.use_proxy and self.proxy_settings:
+                    proxy_info = f"（使用代理）"
+                    logging.info(f"使用代理访问次更新源")
+                else:
+                    logging.info(f"直接连接次更新源（不使用代理）")
+                
+                logging.info(f"次更新源请求开始 {proxy_info}")
+                
+                # 使用模拟浏览器行为的方式
+                try:
+                    # 创建新的会话对象
+                    session = requests.Session()
+                    
+                    # 设置代理（如果启用）
+                    if self.use_proxy and self.proxy_settings:
+                        session.proxies.update(self.proxy_settings)
+                    
+                    # 模拟浏览器头部
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", 
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "Connection": "close",
+                        "Cache-Control": "no-cache",
+                        "Pragma": "no-cache",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "none",
+                        "Sec-Fetch-User": "?1",
+                        "Upgrade-Insecure-Requests": "1",
+                        "DNT": "1"
+                    }
+                    
+                    # 优先使用requests，不再尝试urllib
+                    logging.info(f"使用requests请求更新信息")
+                    
+                    # 直接使用requests
+                    response = session.get(
+                        secondary_url,
+                        headers=headers,
+                        timeout=30,
+                        verify=False,  # 禁用SSL验证
+                        allow_redirects=True,
+                        proxies=self.proxy_settings if self.use_proxy else None
+                    )
+                    
+                    # 检查响应
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                            
+                            # 标记为次源
+                            self.current_update_source = "secondary"
+                            logging.info("次更新源连接成功 (通过requests)")
+                            
+                            # 保存工作的源信息
+                            data["working_source"] = "secondary"
+                            data["working_endpoint"] = self.secondary_endpoint
+                            
+                            # 添加警告标记
+                            if not data.get("warning_shown", False):
+                                data["warning_shown"] = True
+                                data["source_warning"] = "次更新源数据可能不是最新的"
+                            
+                            # 处理数据
+                            self.process_update_data(data, now)
+                            return  # 成功后返回
+                        except json.JSONDecodeError as json_err:
+                            logging.error(f"响应不是有效的JSON: {json_err}")
+                            # 这里尝试打印响应内容以便调试
+                            logging.debug(f"响应内容: {response.text[:200]}...")
+                            
+                            # 尝试检查并手动解析响应内容
+                            if response.content and len(response.content) > 0:
+                                # 检查是否有BOM标记或其他编码问题
+                                try:
+                                    text = response.content.decode('utf-8-sig')
+                                    logging.info("尝试使用utf-8-sig解码响应内容")
+                                    data = json.loads(text)
+                                    logging.info("成功使用utf-8-sig解析JSON")
+                                    
+                                    # 保存和处理数据
+                                    self.current_update_source = "secondary"
+                                    data["working_source"] = "secondary"
+                                    data["working_endpoint"] = self.secondary_endpoint
+                                    if not data.get("warning_shown", False):
+                                        data["warning_shown"] = True
+                                        data["source_warning"] = "次更新源数据可能不是最新的"
+                                    self.process_update_data(data, now)
+                                    return
+                                except Exception as decode_err:
+                                    logging.error(f"尝试替代解码方法失败: {decode_err}")
+                            raise
+                    else:
+                        logging.warning(f"次更新源返回状态码: {response.status_code}")
+                        
+                        # 尝试备用路径
+                        alternate_url = f"{self.secondary_api_url}/version.json"
+                        logging.info(f"尝试备用次源路径: {alternate_url}")
+                        
+                        alt_response = session.get(
+                            alternate_url,
+                            headers=headers,
+                            timeout=30,
+                            verify=False,
+                            allow_redirects=True,
+                            proxies=self.proxy_settings if self.use_proxy else None
+                        )
+                        
+                        if alt_response.status_code == 200:
+                            try:
+                                data = alt_response.json()
+                                
+                                # 更新端点
+                                self.secondary_endpoint = "/version.json"
+                                
+                                # 标记为次源
+                                self.current_update_source = "secondary"
+                                logging.info("次更新源备用路径连接成功")
+                                
+                                # 保存工作的源信息
+                                data["working_source"] = "secondary"
+                                data["working_endpoint"] = self.secondary_endpoint
+                                
+                                # 添加警告标记
+                                if not data.get("warning_shown", False):
+                                    data["warning_shown"] = True
+                                    data["source_warning"] = "次更新源数据可能不是最新的"
+                                
+                                # 处理数据
+                                self.process_update_data(data, now)
+                                return  # 成功后返回
+                            except json.JSONDecodeError:
+                                logging.error(f"备用路径响应不是有效的JSON")
+                                # 尝试手动解码
+                                try:
+                                    text = alt_response.content.decode('utf-8-sig')
+                                    data = json.loads(text)
+                                    logging.info("备用路径使用utf-8-sig解析成功")
+                                    
+                                    # 处理数据
+                                    self.secondary_endpoint = "/version.json"
+                                    self.current_update_source = "secondary"
+                                    data["working_source"] = "secondary"
+                                    data["working_endpoint"] = self.secondary_endpoint
+                                    if not data.get("warning_shown", False):
+                                        data["warning_shown"] = True
+                                        data["source_warning"] = "次更新源数据可能不是最新的"
+                                    self.process_update_data(data, now)
+                                    return
+                                except Exception as alt_decode_err:
+                                    logging.error(f"备用路径解码失败: {alt_decode_err}")
+                                raise
+                        else:
+                            logging.warning(f"备用次源路径返回状态码: {alt_response.status_code}")
+                            raise requests.exceptions.HTTPError(f"HTTP {alt_response.status_code}")
+                    
+                except (requests.exceptions.ConnectionError, urllib.error.URLError) as conn_err:
+                    logging.error(f"次更新源请求错误 [尝试 {retry_count+1}]: {conn_err}")
+                    # 继续尝试重试
+                    
+                except requests.exceptions.Timeout as timeout_err:
+                    logging.error(f"次更新源连接超时 [尝试 {retry_count+1}]: {timeout_err}")
+                    # 继续尝试重试
+                    
+                except json.JSONDecodeError as json_err:
+                    logging.error(f"次更新源JSON解析错误: {json_err}")
+                    # JSON解析错误不重试，直接尝试缓存
+                    break
+                    
+                except Exception as req_err:
+                    logging.error(f"次更新源请求过程中出现其他错误 [尝试 {retry_count+1}]: {req_err}")
+                    # 继续尝试重试
+                
+                finally:
+                    # 确保关闭session
+                    if 'session' in locals():
+                        session.close()
+                
+            except Exception as e:
+                # 捕获所有异常，确保重试循环不会中断
+                logging.error(f"次更新源连接尝试过程中出现未预期错误: {str(e)}")
+            
+            # 增加重试计数
+            retry_count += 1
+            
+            # 如果还有重试机会，等待一段时间再重试
+            if retry_count <= self.secondary_max_retries:
+                retry_delay = self.secondary_retry_delay * retry_count  # 逐次增加等待时间
+                logging.info(f"等待 {retry_delay} 秒后重试次更新源连接...")
+                time.sleep(retry_delay)
+        
+        # 所有重试都失败了，尝试使用缓存数据
+        logging.warning("所有更新源连接均失败，尝试使用缓存数据")
+        if self.cached_data and self.cached_data.get("latest"):
+            logging.info("使用缓存的更新数据")
+            # 设置缓存数据来源提示
+            self.status_label.setText("无法连接到更新服务器，使用缓存数据")
+            self.status_label.setStyleSheet("color: #FFC107; font-size: 13px; background-color: transparent;")
+            # 更新UI使用缓存数据
+            self.update_ui_from_cache()
             self.check_button.setEnabled(True)
+        else:
+            # 没有缓存数据可用
+            self.handle_update_failure("所有更新源连接失败，且无缓存数据可用")
+    
+    def handle_update_failure(self, error_msg):
+        """处理更新失败"""
+        self.status_label.setText(f"检查更新失败: {error_msg}")
+        self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
+        self.updateError.emit(error_msg)
+        self.check_button.setEnabled(True)
+    
+    def process_update_data(self, data, now):
+        """处理获取到的更新数据"""
+        latest = data.get("latest", {})
+        
+        if not latest:
+            self.handle_update_failure("无效的版本信息")
+            return
+        
+        # 保存缓存和检查时间
+        data["last_check_time"] = now
+        data["last_check_timestamp"] = time.time()
+        data["source"] = self.current_update_source
+        self.cached_data = data
+        self.save_cache(data)
+        
+        # 检查是否有新版本
+        if self.compare_versions(latest["version"], self.current_version) > 0:
+            # 有更新版本
+            self.has_newer_version = True
+            self.status_label.setText(f"发现新版本: {latest['version']}")
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+            
+            # 更新更新日志
+            self.update_release_notes(latest, True)
+            
+            # 发出更新信号
+            self.updateFound.emit(latest["version"], json.dumps(latest))
+        else:
+            # 已经是最新版本
+            self.has_newer_version = False
+            self.status_label.setText("您当前使用的已经是最新版本")
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+            
+            # 显示当前版本的更新日志
+            current_version_info = None
+            
+            # 如果当前版本是最新版本
+            if latest["version"] == self.current_version:
+                current_version_info = latest
+            # 否则从历史记录中查找
+            elif "history" in data and self.current_version in data["history"]:
+                current_version_info = data["history"][self.current_version]
+            
+            if current_version_info:
+                self.update_release_notes(current_version_info, False)
+            else:
+                # 清除原有内容
+                for i in reversed(range(self.log_layout.count())):
+                    item = self.log_layout.itemAt(i)
+                    if item.widget():
+                        item.widget().deleteLater()
+                
+                # 显示提示信息
+                no_log_label = QLabel("暂无当前版本的更新日志信息")
+                no_log_label.setStyleSheet("color: #9E9E9E; font-size: 14px; background-color: transparent;")
+                self.font_manager.apply_font(no_log_label)
+                self.log_layout.addWidget(no_log_label)
+                self.log_layout.addStretch()
+        
+        # 如果是次更新源，显示警告
+        if self.current_update_source == "secondary" and data.get("source_warning"):
+            self.status_label.setText(f"{self.status_label.text()} (使用次更新源)")
+            
+            # 添加次更新源警告提示
+            source_warning_label = QLabel(data["source_warning"])
+            source_warning_label.setStyleSheet("color: #FFC107; font-size: 12px; background-color: transparent;")
+            self.font_manager.apply_font(source_warning_label)
+            
+            # 在日志上方添加警告
+            if hasattr(self, 'log_layout') and self.log_layout.count() > 0:
+                # 找到合适的位置插入警告
+                first_item = self.log_layout.itemAt(0)
+                if first_item and first_item.widget():
+                    warning_container = QWidget()
+                    warning_layout = QHBoxLayout(warning_container)
+                    warning_layout.setContentsMargins(0, 5, 0, 5)
+                    warning_icon = QLabel()
+                    self.font_manager.apply_icon_font(warning_icon, 14)
+                    warning_icon.setText(self.font_manager.get_icon_text("warning"))
+                    warning_icon.setStyleSheet("color: #FFC107; background-color: transparent;")
+                    warning_layout.addWidget(warning_icon)
+                    warning_layout.addWidget(source_warning_label)
+                    warning_layout.addStretch()
+                    
+                    # 在布局的开头插入
+                    self.log_layout.insertWidget(0, warning_container)
+        
+        self.check_button.setEnabled(True)
     
     def update_release_notes(self, latest, show_download=True):
         # 清除原有内容
@@ -546,6 +901,11 @@ class UpdatePage(QWidget):
             required_label.setStyleSheet("color: #FF9800; font-size: 14px; font-weight: bold; background-color: transparent;")
             self.font_manager.apply_font(required_label)
             self.log_layout.addWidget(required_label)
+            
+            # 如果是强制更新，可能需要立即下载
+            if latest.get("force_update_action") == "immediate":
+                # 获取下载信息
+                self.download_update_immediately(latest)
         
         # 添加文件大小信息
         platform = "win"  # 这里可以根据实际系统判断
@@ -604,7 +964,11 @@ class UpdatePage(QWidget):
             # 检查下载链接有效性
             url = download_info["url"]
             if url and url not in ["Not Support", "NS", "N", ""]:
-                download_btn.clicked.connect(lambda: self.download_update(url))
+                # 保存下载相关信息供按钮使用
+                download_btn.setProperty("url", url)
+                download_btn.setProperty("filename", f"HanabiDM_{latest['version']}_update.exe")
+                download_btn.setProperty("filesize", download_info.get("size_bytes", 0))
+                download_btn.clicked.connect(self.on_download_button_clicked)
             else:
                 download_btn.clicked.connect(lambda: CustomMessageBox.warning(
                     self,
@@ -623,10 +987,160 @@ class UpdatePage(QWidget):
         
         self.log_layout.addStretch()
     
-    def download_update(self, url):
-        # 实际项目中应下载安装包或启动更新程序
-        self.status_label.setText(f"开始下载更新: {url}")
-        # 在实际项目中，你可能会使用内置下载引擎来下载更新
+    def on_download_button_clicked(self):
+        """下载按钮点击处理函数"""
+        button = self.sender()
+        if not button:
+            return
+            
+        url = button.property("url")
+        filename = button.property("filename")
+        filesize = button.property("filesize")
+        
+        if not url or not filename:
+            return
+        
+        # 直接获取主窗口实例并调用下载方法
+        try:
+            # 通过父级组件查找主窗口
+            main_window = None
+            parent = self.parent()
+            
+            # 向上查找主窗口
+            while parent:
+                if parent.__class__.__name__ == "DownloadManagerWindow":
+                    main_window = parent
+                    break
+                parent = parent.parent()
+            
+            # 如果找不到，尝试通过QApplication获取
+            if not main_window:
+                from PySide6.QtWidgets import QApplication
+                for widget in QApplication.topLevelWidgets():
+                    if widget.__class__.__name__ == "DownloadManagerWindow":
+                        main_window = widget
+                        break
+            
+            if main_window:
+                # 构建下载任务数据
+                task_data = {
+                    "url": url,
+                    "file_name": filename,
+                    "total_size": filesize,
+                    "progress": 0,
+                    "status": "初始化中",
+                    "speed": "0 B/s",
+                    "save_path": main_window.save_path,
+                    "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "source": "update",
+                    "request_id": f"update_{int(time.time() * 1000)}"
+                }
+                
+                # 请求格式，适配download方法的需求
+                download_data = {
+                    "url": url,
+                    "filename": filename,
+                    "headers": {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
+                    },
+                    "requestId": task_data["request_id"],
+                    "type": "update"
+                }
+                
+                # 直接调用添加下载任务的方法
+                success = main_window.start_download_with_data(task_data, download_data)
+                
+                if success:
+                    # 切换到下载页面
+                    main_window.switch_page(0)
+                    logging.info(f"已直接添加更新下载任务: {filename}")
+                    
+                    # 更新按钮状态 - 修复文字重叠问题
+                    button.setEnabled(False)
+                    
+                    # 查找按钮布局中的文本标签并更新内容
+                    button_layout = button.layout()
+                    if button_layout:
+                        for i in range(button_layout.count()):
+                            item = button_layout.itemAt(i)
+                            if item and item.widget():
+                                widget = item.widget()
+                                if isinstance(widget, QLabel) and widget != button_layout.itemAt(0).widget():  # 跳过图标标签
+                                    widget.setText("已添加到下载列表")
+                                    break
+                    
+                    # 提示用户
+                    self.status_label.setText(f"更新包已添加到下载列表")
+                else:
+                    # 添加失败
+                    self.status_label.setText(f"添加下载任务失败")
+                    logging.error(f"直接添加更新下载任务失败")
+            else:
+                # 找不到主窗口，使用原来的信号方式
+                self.addDownloadTask.emit(url, filename, filesize)
+                
+                # 更新按钮状态 - 修复文字重叠问题
+                button.setEnabled(False)
+                
+                # 查找按钮布局中的文本标签并更新内容
+                button_layout = button.layout()
+                if button_layout:
+                    for i in range(button_layout.count()):
+                        item = button_layout.itemAt(i)
+                        if item and item.widget():
+                            widget = item.widget()
+                            if isinstance(widget, QLabel) and widget != button_layout.itemAt(0).widget():  # 跳过图标标签
+                                widget.setText("已添加到下载列表")
+                                break
+                
+                # 提示用户
+                self.status_label.setText(f"更新包已添加到下载列表")
+        except Exception as e:
+            logging.error(f"直接添加下载任务失败: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            
+            # 出错时使用原来的信号方式
+            self.addDownloadTask.emit(url, filename, filesize)
+            
+            # 更新按钮状态 - 修复文字重叠问题
+            button.setEnabled(False)
+            
+            # 查找按钮布局中的文本标签并更新内容
+            button_layout = button.layout()
+            if button_layout:
+                for i in range(button_layout.count()):
+                    item = button_layout.itemAt(i)
+                    if item and item.widget():
+                        widget = item.widget()
+                        if isinstance(widget, QLabel) and widget != button_layout.itemAt(0).widget():  # 跳过图标标签
+                            widget.setText("已添加到下载列表")
+                            break
+            
+            # 提示用户
+            self.status_label.setText(f"更新包已添加到下载列表")
+    
+    def download_update_immediately(self, latest_info):
+        """立即下载更新（用于强制更新）"""
+        platform = "win"  # 这里可以根据实际系统判断
+        download_info = latest_info.get("download", {}).get(platform, {})
+        
+        if not download_info or not download_info.get("url"):
+            return
+            
+        url = download_info["url"]
+        filename = f"HanabiDM_{latest_info['version']}_update.exe"
+        filesize = download_info.get("size_bytes", 0)
+        
+        # 发送信号添加下载任务
+        self.addDownloadTask.emit(url, filename, filesize)
+        
+        # 显示强制更新提示
+        CustomMessageBox.warning(
+            self,
+            "强制更新通知",
+            f"当前版本需要强制更新到 {latest_info['version']}，更新包已添加到下载列表。"
+        )
     
     def toggle_auto_check(self, checked):
         self.config_manager.set_auto_check_update(checked)
@@ -753,4 +1267,35 @@ class UpdatePage(QWidget):
         result = (main_version, build_number, suffix_type, suffix_number)
         print(f"版本解析结果: {version_str} -> {result}")
         return result
+        
+    def get_proxy_settings(self):
+        """获取代理设置"""
+        if not hasattr(self.config_manager, 'get_proxy_settings'):
+            return None
+        
+        proxy_settings = self.config_manager.get_proxy_settings()
+        if not proxy_settings:
+            return None
+            
+        # 格式化代理URL
+        proxy_type = proxy_settings.get('type', 'http')
+        proxy_host = proxy_settings.get('host', '')
+        proxy_port = proxy_settings.get('port', '')
+        proxy_user = proxy_settings.get('username', '')
+        proxy_pass = proxy_settings.get('password', '')
+        
+        if not proxy_host or not proxy_port:
+            return None
+            
+        # 如果有用户名密码，添加认证信息
+        auth = f"{proxy_user}:{proxy_pass}@" if proxy_user and proxy_pass else ""
+        proxy_url = f"{proxy_type}://{auth}{proxy_host}:{proxy_port}"
+        
+        proxies = {
+            "http": proxy_url,
+            "https": proxy_url,
+        }
+        
+        logging.info(f"使用代理设置: {proxy_type}://{proxy_host}:{proxy_port}")
+        return proxies
         
