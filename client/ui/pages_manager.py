@@ -242,47 +242,88 @@ class PagesManager(QObject):
     
     def register_common_pages(self):
         """注册常用页面"""
-        # 这个方法将创建和注册下载管理器需要的基本页面
-
-        # 下载页面
+        # 清空旧有页面和按钮
+        if hasattr(self, 'pages'):
+            old_pages = list(self.pages.keys())
+            for page_id in old_pages:
+                self.remove_page(page_id)
+        
+        # 创建各个页面
+        try:
+            # 在函数内部导入HomeWindow，避免循环导入
+            from client.ui.client_interface.home_window import HomeWindow
+            home_page = HomeWindow()
+        except Exception as e:
+            print(f"创建首页失败: {e}")
+            home_page = self.create_generic_page()
+            home_page.content_widget.layout().addWidget(QLabel("首页加载失败，请检查日志"))
+        
         download_page = self.create_download_page()
-        
-        # 历史页面（以前是已完成页面）
-        history_page = self.create_history_page()
-        
-        # 尝试从主窗口获取特殊页面
-        settings_page = None
-        about_page = None
+        history_page = self.create_history_page()  # 使用内部方法创建历史页面
+        settings_page = self.main_window.settings_page if hasattr(self.main_window, 'settings_page') else None
+        about_page = self.main_window.about_page if hasattr(self.main_window, 'about_page') else None
         update_page = None
         
-        if self.main_window:
-            # 从主窗口获取设置页面和关于页面
-            if hasattr(self.main_window, 'settings_page'):
-                settings_page = self.main_window.settings_page
+        # 连接首页的导航信号
+        if hasattr(home_page, 'navigate_to'):
+            home_page.navigate_to.connect(self.switch_page)
+        
+        # 获取侧边栏布局
+        sidebar_layout = self.sidebar_widget.layout()
+        
+        # 清除侧边栏布局中的所有按钮，确保按照正确顺序添加
+        if sidebar_layout:
+            for i in reversed(range(sidebar_layout.count())):
+                item = sidebar_layout.itemAt(i)
+                if item and item.widget() and isinstance(item.widget(), CategoryButton):
+                    widget = item.widget()
+                    sidebar_layout.removeWidget(widget)
+                    widget.setParent(None)
+                    widget.deleteLater()
+        
+        # 添加中间弹性空间
+        if sidebar_layout:
+            # 确保只有一个弹性空间
+            has_stretch = False
+            for i in range(sidebar_layout.count()):
+                if sidebar_layout.itemAt(i) and sidebar_layout.itemAt(i).spacerItem():
+                    has_stretch = True
+                    break
             
-            if hasattr(self.main_window, 'about_page'):
-                about_page = self.main_window.about_page
-                
-            if hasattr(self.main_window, 'update_page'):
-                update_page = self.main_window.update_page
+            # 如果没有添加过弹性空间，添加一个
+            if not has_stretch:
+                sidebar_layout.addStretch()
         
-        # 使用Fluent图标添加页面到管理器
-        self.add_page("downloads", download_page, "ic_fluent_arrow_download_24_regular", "下载")
-        self.add_page("finished", history_page, "ic_fluent_history_24_regular", "历史")
+        # 直接按照固定顺序添加各个页面
+        # 1. 首页
+        if home_page:
+            self.add_page("home", home_page, "ic_fluent_home_24_regular", "首页", "top", 0)
         
+        # 2. 下载页面
+        if download_page:
+            self.add_page("downloads", download_page, "ic_fluent_arrow_download_24_regular", "下载", "top", 1)
+        
+        # 3. 历史页面
+        if history_page:
+            self.add_page("history", history_page, "ic_fluent_history_24_regular", "历史", "top", 2)
+        
+        # 4. 设置页面
         if settings_page:
-            self.add_page("settings", settings_page, "ic_fluent_settings_24_regular", "设置")
+            self.add_page("settings", settings_page, "ic_fluent_settings_24_regular", "设置", "bottom", 1)
         
+        # 5. 关于页面
         if about_page:
-            self.add_page("about", about_page, "ic_fluent_info_24_regular", "关于")
-            
-        if update_page:
-            self.add_page("update", update_page, "ic_fluent_arrow_sync_24_regular", "更新")
+            self.add_page("about", about_page, "ic_fluent_info_24_regular", "关于", "bottom", 0)
         
-        # 默认显示下载页面
-        self.switch_page("downloads")
+        # 6. 更新页面
+        if update_page:
+            self.add_page("update", update_page, "ic_fluent_arrow_sync_24_regular", "更新", "bottom", 2)
+        
+        # 默认显示首页
+        self.switch_page("home")
         
         return {
+            "home": home_page,
             "downloads": download_page,
             "history": history_page,
             "settings": settings_page,
@@ -326,23 +367,17 @@ class PagesManager(QObject):
         return generic_page
     
     def create_history_page(self):
-        """创建历史页面（原已完成页面）"""
-        # 创建历史页面
-        history_page = QWidget()
-        history_page_layout = QVBoxLayout(history_page)
-        history_page_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 创建历史窗口
-        history_window = HistoryWindow(self.font_manager)
-        
-        # 将历史窗口添加到页面
-        history_page_layout.addWidget(history_window)
-        
-        # 存储容器引用，方便主窗口使用
-        history_page.content_widget = history_window
-        history_page.content_layout = history_window.main_layout
-        
-        return history_page
+        """创建历史页面"""
+        try:
+            # 使用HistoryWindow类创建历史页面
+            history_page = HistoryWindow()
+            return history_page
+        except Exception as e:
+            # 如果创建失败，创建一个通用页面
+            print(f"创建历史页面失败: {e}")
+            generic_page = self.create_generic_page()
+            generic_page.content_widget.layout().addWidget(QLabel("加载历史记录失败，请检查日志"))
+            return generic_page
         
     def create_finished_page(self):
         """创建已完成页面（保留此方法以兼容现有代码）"""
@@ -544,8 +579,17 @@ class PagesManager(QObject):
         
         return download_page
     
-    def add_page(self, page_id, page_widget, icon_code, text):
-        """添加页面到管理器"""
+    def add_page(self, page_id, page_widget, icon_code, text, position="top", order=0):
+        """添加页面到管理器
+        
+        参数:
+            page_id: 页面ID
+            page_widget: 页面部件
+            icon_code: 图标代码
+            text: 按钮文本
+            position: 按钮位置，可以是"top"或"bottom"
+            order: 按钮顺序，数字越小越靠前
+        """
         self.pages[page_id] = page_widget
         
         # 创建侧边栏按钮
@@ -560,23 +604,57 @@ class PagesManager(QObject):
         # 获取侧边栏布局并添加按钮
         sidebar_layout = self.sidebar_widget.layout()
         if sidebar_layout:
-            # 尝试在倒数第二个位置添加按钮（通常紧接着现有按钮组的最后一个按钮）
-            count = sidebar_layout.count()
-            stretch_index = -1
-            
-            # 查找第一个拉伸项的位置
-            for i in range(count):
-                item = sidebar_layout.itemAt(i)
-                if item and item.spacerItem():
-                    stretch_index = i
-                    break
-            
-            if stretch_index >= 0:
-                # 在拉伸项之前插入
-                sidebar_layout.insertWidget(stretch_index, button)
-            else:
-                # 如果没有找到拉伸项，添加到布局末尾
-                sidebar_layout.addWidget(button)
+            if position == "top":
+                # 获取品牌容器的位置
+                brand_index = -1
+                for i in range(sidebar_layout.count()):
+                    item = sidebar_layout.itemAt(i)
+                    if item and item.widget() and item.widget().objectName() == "brand_container":
+                        brand_index = i
+                        break
+                    
+                # 根据顺序直接插入到指定位置，确保位置安全
+                insert_pos = brand_index + 1 + order
+                total_items = sidebar_layout.count()
+                
+                # 确保插入位置不超出布局范围
+                if insert_pos < total_items:
+                    try:
+                        sidebar_layout.insertWidget(insert_pos, button)
+                    except Exception as e:
+                        import logging
+                        logging.error(f"插入按钮失败: {e}, 位置: {insert_pos}, 最大索引: {total_items-1}")
+                        # 出错时使用安全的方式添加
+                        sidebar_layout.addWidget(button)
+                else:
+                    # 如果位置超出范围，直接添加到末尾
+                    sidebar_layout.addWidget(button)
+                
+            elif position == "bottom":
+                # 添加到底部区域，在弹性空间之后
+                stretch_index = -1
+                
+                # 查找最后一个拉伸项的位置
+                for i in range(sidebar_layout.count()):
+                    item = sidebar_layout.itemAt(i)
+                    if item and item.spacerItem():
+                        stretch_index = i
+                
+                total_items = sidebar_layout.count()
+                
+                if stretch_index >= 0:
+                    # 在拉伸项之后插入，确保位置安全
+                    insert_pos = min(stretch_index + 1 + order, total_items)
+                    try:
+                        sidebar_layout.insertWidget(insert_pos, button)
+                    except Exception as e:
+                        import logging
+                        logging.error(f"插入底部按钮失败: {e}, 位置: {insert_pos}, 最大索引: {total_items-1}")
+                        # 出错时直接添加到末尾
+                        sidebar_layout.addWidget(button)
+                else:
+                    # 如果没有找到拉伸项，添加到布局末尾
+                    sidebar_layout.addWidget(button)
         
         # 将页面添加到堆叠窗口
         self.stacked_widget.addWidget(page_widget) 

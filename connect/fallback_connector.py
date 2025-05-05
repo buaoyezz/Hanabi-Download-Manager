@@ -219,6 +219,41 @@ class FallbackConnector(QObject):
                     import threading
                     threading.Timer(0.1, self.process_queued_requests).start()
     
+    def is_running(self):
+        """检查连接器是否正在运行"""
+        try:
+            if hasattr(self, '_running'):
+                return self._running
+            
+            if hasattr(self, 'server') and self.server:
+                # 如果有WebSocket服务器对象，检查其状态
+                if hasattr(self.server, 'running'):
+                    return self.server.running
+                elif hasattr(self.server, 'is_alive'):
+                    # 检查is_alive是方法还是属性
+                    if callable(self.server.is_alive):
+                        return self.server.is_alive()
+                    else:
+                        return self.server.is_alive
+                elif hasattr(self.server, 'is_running'):
+                    # 检查is_running是方法还是属性
+                    if callable(self.server.is_running):
+                        return self.server.is_running()
+                    else:
+                        return self.server.is_running
+            
+            # 如果有_websocket_server_thread属性，检查线程状态
+            if hasattr(self, '_websocket_server_thread'):
+                thread = self._websocket_server_thread
+                if thread and thread.is_alive():
+                    return True
+            
+            return False
+        except Exception as e:
+            import logging
+            logging.error(f"检查连接器运行状态出错: {e}")
+            return False
+            
     def stop(self):
         """停止服务器"""
         if self.server:

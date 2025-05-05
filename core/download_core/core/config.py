@@ -9,7 +9,7 @@ from re import compile
 from PySide6.QtCore import QRect, QStandardPaths
 
 
-version = "1.0.2"
+version = "1.0.3"
 
 class ProxyValidator:
     PATTERN = compile(r'^(socks5|http|https):\/\/'

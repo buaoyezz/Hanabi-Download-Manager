@@ -8,28 +8,39 @@ import os
 import socket
 import sys
 from datetime import datetime
+import threading
+import logging
 
 class SingletonApp:
     _instance = None
     _socket = None
-    _port = 52764  # 选择一个不常用的端口号
+    _port = 52764  # 越来越没用的软件
+    _lock = threading.Lock()  # 添加线程锁确保线程安全
     
     @classmethod
     def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
+        with cls._lock:  # 使用线程锁确保线程安全
+            if cls._instance is None:
+                cls._instance = cls()
         return cls._instance
     
     def __init__(self):
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.settimeout(1.0)  # 设置超时，避免长时间阻塞
     
     def is_running(self):
+        """
+        检查应用程序是否已经在运行
+        返回值：
+            True: 应用程序已在运行
+            False: 应用程序未在运行
+        """
         try:
             # 尝试绑定到本地端口
             self._socket.bind(('127.0.0.1', self._port))
-            return False  # 成功绑定，说明是首次运行
+            return False  # 绑定成功，说明没有其他实例在运行
         except socket.error:
-            return True  # 绑定失败，说明已经有实例在运行
+            return True  # 绑定失败，说明已有实例正在运行
     
     def activate_existing_window(self):
         # 在Windows系统上使用powershell查找并激活现有窗口
@@ -38,6 +49,14 @@ class SingletonApp:
                 os.system('powershell -command "$p = Get-Process | Where-Object {$_.MainWindowTitle -like \'*版本信息生成器*\'} | Select-Object -First 1; if ($p) { [void][System.Reflection.Assembly]::LoadWithPartialName(\'System.Windows.Forms\'); [System.Windows.Forms.SetForegroundWindow]::Invoke($p.MainWindowHandle) }"')
             except:
                 pass
+    
+    def __del__(self):
+        """析构函数，确保套接字正确关闭"""
+        try:
+            if self._socket:
+                self._socket.close()
+        except:
+            pass
 
 class VersionSelectDialog(QDialog):
     def __init__(self, versions, parent=None):
@@ -71,6 +90,9 @@ class JsonMaker(QMainWindow):
         self.setMinimumWidth(800)
         self.setMinimumHeight(600)
         
+        # 使用缓存优化性能
+        self._cache = {}
+        
         # 当前编辑的版本类型（latest或history中的特定版本）
         self.editing_version_type = "latest"
         self.editing_version_key = None
@@ -98,6 +120,11 @@ class JsonMaker(QMainWindow):
         self.select_history_btn = QPushButton("选择历史版本")
         self.select_history_btn.clicked.connect(self.select_history_version)
         io_layout.addWidget(self.select_history_btn)
+        
+        # 添加导出按钮
+        self.export_btn = QPushButton("导出JSON")
+        self.export_btn.clicked.connect(self.export_json)
+        io_layout.addWidget(self.export_btn)
         
         io_layout.addStretch()
         layout.addLayout(io_layout)
@@ -237,10 +264,14 @@ class JsonMaker(QMainWindow):
             QMessageBox.critical(self, "错误", f"选择历史版本失败: {str(e)}")
     
     def load_version_data(self, version_data, version_type="latest", version_key=None):
+        """加载版本数据到表单"""
         try:
             # 记录当前正在编辑的版本类型和键
             self.editing_version_type = version_type
             self.editing_version_key = version_key
+            
+            # 缓存加载的数据
+            self._cache["current_data"] = version_data
             
             # 填充表单
             self.version_edit.setText(version_data.get("version", ""))
@@ -249,10 +280,30 @@ class JsonMaker(QMainWindow):
             date_str = version_data.get("date", "")
             if date_str:
                 try:
-                    date = QDate.fromString(date_str, "yyyy-MM-dd")
+                    # 支持多种日期格式
+                    formats = ["yyyy-MM-dd", "yyyy/MM/dd", "dd-MM-yyyy", "MM/dd/yyyy"]
+                    date = None
+                    
+                    for fmt in formats:
+                        date = QDate.fromString(date_str, fmt)
+                        if date.isValid():
+                            break
+                    
+                    if not date or not date.isValid():
+                        # 尝试解析ISO格式
+                        try:
+                            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                            date = QDate(dt.year, dt.month, dt.day)
+                        except:
+                            # 使用当前日期作为后备
+                            date = QDate.currentDate()
+                    
                     self.date_edit.setDate(date)
-                except:
-                    pass
+                except Exception as e:
+                    logging.warning(f"日期解析错误: {e}")
+                    self.date_edit.setDate(QDate.currentDate())
+            else:
+                self.date_edit.setDate(QDate.currentDate())
             
             # 设置强制更新
             self.force_update.setChecked(version_data.get("force_update", False))
@@ -497,6 +548,7 @@ class JsonMaker(QMainWindow):
                 return
                 
             # 获取文件大小（字节）
+            # 使用更高效的方法获取文件大小
             file_size_bytes = os.path.getsize(file_path)
             
             # 转换为MB并保留2位小数
@@ -509,7 +561,8 @@ class JsonMaker(QMainWindow):
                 # 如果URL为空，自动设置为文件名
                 if not self.win_url.text().strip():
                     file_name = os.path.basename(file_path)
-                    self.win_url.setText(f"https://github.com/buaoyezz/Hanabi-Download-Manager/releases/download/V{self.version_edit.text()}/{file_name}")
+                    version = self.version_edit.text().strip() or "latest"
+                    self.win_url.setText(f"https://github.com/buaoyezz/Hanabi-Download-Manager/releases/download/V{version}/{file_name}")
                     
             elif platform.lower() == "mac":
                 self.mac_size.setValue(file_size_mb)
@@ -517,12 +570,42 @@ class JsonMaker(QMainWindow):
                 # 如果URL为空，自动设置为文件名
                 if not self.mac_url.text().strip():
                     file_name = os.path.basename(file_path)
-                    self.mac_url.setText(f"https://github.com/buaoyezz/Hanabi-Download-Manager/releases/download/V{self.version_edit.text()}/{file_name}")
+                    version = self.version_edit.text().strip() or "latest"
+                    self.mac_url.setText(f"https://github.com/buaoyezz/Hanabi-Download-Manager/releases/download/V{version}/{file_name}")
+            
+            # 缓存文件路径，便于后续操作
+            self._cache[f"{platform}_file_path"] = file_path
             
             QMessageBox.information(self, "成功", f"文件大小: {file_size_mb:.2f} MB")
             
         except Exception as e:
             QMessageBox.warning(self, "警告", f"读取文件大小失败: {str(e)}")
+
+    def export_json(self):
+        """导出当前编辑的JSON到自定义文件"""
+        try:
+            # 生成JSON数据
+            data = self.generate_json()
+            
+            # 打开文件保存对话框
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "导出JSON文件",
+                f"{data['version']}.json",  # 默认使用版本号作为文件名
+                "JSON文件 (*.json)"
+            )
+            
+            if not file_path:
+                return
+                
+            # 保存JSON文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+                
+            QMessageBox.information(self, "成功", f"JSON已导出至: {file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
 
 if __name__ == "__main__":
     # 检查是否已有实例在运行
@@ -537,9 +620,22 @@ if __name__ == "__main__":
         QMessageBox.information(None, "提示", "版本信息生成器已经在运行中")
         sys.exit(0)
     else:
+        # 设置高DPI支持
+        if hasattr(QApplication, 'setHighDpiScaleFactorRoundingPolicy'):
+            QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        
         # 正常启动应用程序
-        app = QApplication([])
+        app = QApplication(sys.argv)
+        
+        # 设置应用程序样式
+        app.setStyle("Fusion")
+        
+        # 创建并显示主窗口
         window = JsonMaker()
         window.show()
-        app.exec()
+        
+        # 运行应用程序
+        sys.exit(app.exec())
 

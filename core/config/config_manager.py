@@ -21,6 +21,9 @@ class ConfigManager:
             "ui": {
                 "theme": "light",
                 "language": "en"
+            },
+            "user": {
+                "client_id": ""
             }
         }
         self.load_config()
@@ -70,5 +73,15 @@ class ConfigManager:
         if isinstance(values, dict):
             self.config[category].update(values)
     
+    def get_client_id(self):
+        """获取客户端唯一标识ID"""
+        return self.get("user", "client_id")
+    
+    def set_client_id(self, client_id):
+        """设置客户端唯一标识ID"""
+        self.set("user", "client_id", client_id)
+        self.save_config()
+        return True
+
 # Create singleton instance
 config = ConfigManager() 

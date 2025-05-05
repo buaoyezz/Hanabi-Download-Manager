@@ -64,6 +64,9 @@ SPARSE_SUPPORTED_FS = {
     'macos': {'apfs', 'hfs'}
 }
 
+# Windows平台Constants
+FSCTL_SET_SPARSE = 0x000900C4  # 常量定义，避免依赖win32con
+
 # def isWin11():
 #     return sys.platform == 'win32' and sys.getwindowsversion().build >= 22000
 
@@ -439,7 +442,6 @@ def createSparseFile(file_path: Union[str, Path], size: Optional[int] = None):
         # Windows 平台使用 DeviceIoControl
         try:
             import win32file
-            import win32con
             
             handle = win32file.CreateFile(
                 str(path),
@@ -454,14 +456,25 @@ def createSparseFile(file_path: Union[str, Path], size: Optional[int] = None):
             win32file.SetFilePointer(handle, size, 0)
             win32file.SetEndOfFile(handle)
             
-            # 设置为稀疏文件
-            win32file.DeviceIoControl(
-                handle, 
-                win32con.FSCTL_SET_SPARSE, 
-                None, 
-                0, 
-                None
-            )
+            # 设置为稀疏文件 - 使用全局定义的常量值
+            try:
+                win32file.DeviceIoControl(
+                    handle, 
+                    FSCTL_SET_SPARSE, 
+                    None, 
+                    0, 
+                    None
+                )
+            except Exception as e:
+                # 如果DeviceIoControl失败，尝试使用fsutil命令行工具
+                try:
+                    subprocess.run(
+                        ["fsutil", "sparse", "setflag", str(path)],
+                        check=True,
+                        capture_output=True
+                    )
+                except Exception as subp_e:
+                    logging.warning(f"设置稀疏文件标志失败: {subp_e}")
             
             win32file.CloseHandle(handle)
             

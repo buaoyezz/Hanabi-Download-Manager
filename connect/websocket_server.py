@@ -54,7 +54,7 @@ class WebSocketServer:
             # 发送版本信息
             version_info = {
                 "type": "version",
-                "ClientVersion": "1.0.2",
+                "ClientVersion": "1.0.3",
                 "LatestExtensionVersion": "1.0.1",
                 "ServerStatus": "ready"
             }
@@ -299,6 +299,58 @@ class WebSocketServer:
             except Exception as e:
                 self.logger.error(f"停止WebSocket服务器出错: {e}")
                 self.logger.error(traceback.format_exc())
+
+    def shutdown_gracefully(self):
+        """安全地关闭服务器和所有连接"""
+        try:
+            # 标记服务器为非运行状态
+            self.is_running = False
+            
+            if self.server:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                async def shutdown():
+                    # 关闭所有客户端连接
+                    if self.clients:
+                        self.logger.info(f"正在关闭 {len(self.clients)} 个客户端连接")
+                        close_tasks = []
+                        for client in list(self.clients):
+                            try:
+                                close_tasks.append(client.close())
+                            except:
+                                pass
+                        
+                        if close_tasks:
+                            await asyncio.gather(*close_tasks, return_exceptions=True)
+                    
+                    # 关闭服务器
+                    if self.server:
+                        self.logger.info("正在关闭WebSocket服务器")
+                        self.server.close()
+                        await self.server.wait_closed()
+                        self.server = None
+                
+                try:
+                    loop.run_until_complete(shutdown())
+                except Exception as e:
+                    self.logger.error(f"安全关闭服务器时出错: {e}")
+                finally:
+                    loop.close()
+            
+            # 等待服务器线程结束
+            if self.server_thread and self.server_thread.is_alive():
+                self.logger.info("等待服务器线程结束")
+                self.server_thread.join(timeout=2.0)
+            
+            self.clients.clear()
+            self.logger.info("WebSocket服务器已安全关闭")
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"关闭WebSocket服务器时出错: {e}")
+            self.logger.error(traceback.format_exc())
+            return False
 
 
 # 单例模式，全局访问点

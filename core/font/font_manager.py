@@ -1,6 +1,6 @@
-from PySide6.QtGui import QFont, QFontDatabase, QColor
+from PySide6.QtGui import QFont, QFontDatabase, QColor, QPixmap, QPainter, QIcon
 from PySide6.QtWidgets import QWidget, QApplication, QLabel, QPushButton
-from PySide6.QtCore import Qt, QThread, Signal, QEventLoop
+from PySide6.QtCore import Qt, QThread, Signal, QEventLoop, QSize, QRect
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 import platform
 import re
@@ -500,4 +500,55 @@ class FontManager:
     def get_fluent_icons(self):
         """获取所有Fluent图标"""
         return self.get_available_icons("ic_fluent_")
+
+    def get_icon_font(self):
+        """获取图标字体的字体族名称
+        
+        返回:
+            str: 图标字体的字体族名称
+        """
+        return self.fluent_icons_font
+
+    def apply_icon_to_icon(self, icon, icon_name, size=24, color="#FFFFFF"):
+        """将图标字体应用到QIcon对象
+        
+        参数:
+            icon (QIcon): 要应用图标的QIcon对象
+            icon_name (str): 图标名称
+            size (int): 图标大小
+            color (str): 图标颜色
+        """
+        from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
+        from PySide6.QtCore import Qt, QSize, QRect
+        
+        # 获取图标字体和字符
+        icon_font = self.get_icon_font()
+        icon_text = self.get_icon_text(icon_name)
+        
+        if not icon_font or not icon_text:
+            return
+        
+        # 创建临时QPixmap用于绘制图标
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        
+        # 设置画笔
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.TextAntialiasing)
+        
+        # 设置字体
+        font = QFont(icon_font)
+        font.setPixelSize(size)
+        painter.setFont(font)
+        
+        # 设置颜色
+        painter.setPen(QColor(color))
+        
+        # 绘制图标
+        painter.drawText(QRect(0, 0, size, size), Qt.AlignCenter, icon_text)
+        painter.end()
+        
+        # 应用到图标
+        icon.addPixmap(pixmap, QIcon.Normal, QIcon.Off)
 

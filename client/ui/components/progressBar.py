@@ -49,109 +49,87 @@ class ProgressBar(QWidget):
         
     def updateFromDownloadSegments(self, progress_data, file_size):
         """根据下载管理器提供的分段数据更新进度条显示"""
+        
         if not progress_data or file_size <= 0:
             return
             
-        # 打印进度数据用于调试
-        print(f"[DEBUG] ProgressBar接收到的进度数据: {progress_data[:2]}, 文件大小: {file_size}")
-            
-        segments = []
-        total_downloaded = 0
-        total_size = 0
-        
-        # 处理不同格式的进度数据
         try:
-            if isinstance(progress_data[0], dict):
-                for segment in progress_data:
-                    # 兼容多种可能的字段名称
-                    start_pos = segment.get('start_position', segment.get('start_pos', segment.get('startPos', 0)))
-                    end_pos = segment.get('end_position', segment.get('end_pos', segment.get('endPos', 0)))
-                    current = segment.get('current_position', segment.get('progress', start_pos))
-                    
-                    # 确保值有效
-                    start_pos = max(0, start_pos)
-                    end_pos = max(start_pos, end_pos)
-                    current = max(start_pos, min(end_pos, current))
-                    
-                    # 计算当前块的下载量和总大小
-                    current_downloaded = current - start_pos
-                    segment_size = end_pos - start_pos + 1
-                    
-                    # 累加已下载和总大小
-                    total_downloaded += current_downloaded
-                    total_size += segment_size
-                    
-                    # 避免除零错误
-                    if end_pos > start_pos and file_size > 0:
-                        start_percent = (start_pos / file_size) * 100
-                        end_percent = ((end_pos + 1) / file_size) * 100
-                        current_percent = (current / file_size) * 100
-                        
-                        # 添加已下载部分(绿色)
-                        if current > start_pos:
-                            segments.append((start_percent, current_percent, self.progressColor))
-                        
-                        # 添加未下载部分(灰色)
-                        if current < end_pos:
-                            segments.append((current_percent, end_percent, self.pendingColor))
-                            
-                    # 打印调试信息
-                    print(f"块 {start_pos}-{end_pos}, 当前={current}, 进度={((current-start_pos)/(end_pos-start_pos+1))*100:.1f}%")
-                    
-            elif isinstance(progress_data[0], (list, tuple)) and len(progress_data[0]) >= 3:
-                for segment in progress_data:
-                    start_pos = segment[0]
-                    current = segment[1]
-                    end_pos = segment[2]
-                    
-                    # 确保值有效
-                    start_pos = max(0, start_pos)
-                    end_pos = max(start_pos, end_pos)
-                    current = max(start_pos, min(end_pos, current))
-                    
-                    # 计算当前块的下载量和总大小
-                    current_downloaded = current - start_pos
-                    segment_size = end_pos - start_pos + 1
-                    
-                    # 累加已下载和总大小
-                    total_downloaded += current_downloaded
-                    total_size += segment_size
-                    
-                    # 避免除零错误
-                    if end_pos > start_pos and file_size > 0:
-                        start_percent = (start_pos / file_size) * 100
-                        end_percent = ((end_pos + 1) / file_size) * 100
-                        current_percent = (current / file_size) * 100
-                        
-                        # 添加已下载部分(绿色)
-                        if current > start_pos:
-                            segments.append((start_percent, current_percent, self.progressColor))
-                        
-                        # 添加未下载部分(灰色)
-                        if current < end_pos:
-                            segments.append((current_percent, end_percent, self.pendingColor))
-                            
-                    # 打印调试信息
-                    print(f"块 {start_pos}-{end_pos}, 当前={current}, 进度={((current-start_pos)/(end_pos-start_pos+1))*100:.1f}%")
+            # 初始计算
+            total_downloaded = 0
+            total_size = 0
             
-            # 使用直接计算的方式获取总进度
-            total_progress = 0
-            if total_size > 0:
-                # 确保使用浮点数计算
-                total_progress = (float(total_downloaded) / float(total_size)) * 100.0
-                print(f"[DEBUG] 进度条计算总进度: {total_progress:.2f}%, 已下载: {total_downloaded}, 总大小: {total_size}")
-                
-                # 确保进度大于0且不超过100
-                # 如果接近完成但未完全完成，限制在99%
-                if total_progress >= 99.5 and total_downloaded < total_size:
-                    total_progress = 99.0
+            # 收集所有块信息
+            segments = []
+            for seg in progress_data:
+                if isinstance(seg, dict):
+                    # 新格式：字典形式
+                    start = seg.get('start_position', seg.get('start_pos', seg.get('startPos', 0)))
+                    end = seg.get('end_position', seg.get('end_pos', seg.get('endPos', 0)))
+                    current = seg.get('current_position', seg.get('progress', start))
+                elif isinstance(seg, (list, tuple)) and len(seg) >= 3:
+                    # 旧格式：列表形式
+                    start, current, end = seg[:3]
                 else:
-                    total_progress = max(0.1, min(100.0, total_progress))
+                    continue
+                
+                # 确保数值类型
+                try:
+                    start = int(start)
+                    current = int(current)
+                    end = int(end)
+                except (ValueError, TypeError):
+                    continue
+                
+                # 确保逻辑正确
+                if start < 0 or end < start or current < start:
+                    continue
+                    
+                # 限制最大值
+                current = min(current, end)
+                
+                # 计算当前块的下载量和总大小
+                current_downloaded = current - start
+                segment_size = end - start + 1
+                
+                # 累加已下载和总大小
+                total_downloaded += current_downloaded
+                total_size += segment_size
+                
+                # 避免除零错误
+                if end > start and file_size > 0:
+                    start_percent = (start / file_size) * 100
+                    end_percent = ((end + 1) / file_size) * 100
+                    current_percent = (current / file_size) * 100
+                    
+                    # 添加已下载部分(绿色)
+                    if current > start:
+                        segments.append((start_percent, current_percent, self.progressColor))
+                    
+                    # 添加未下载部分(灰色)
+                    if current < end:
+                        segments.append((current_percent, end_percent, self.pendingColor))
+                        
+                # 打印调试信息
+                print(f"块 {start}-{end}, 当前={current}, 进度={((current-start)/(end-start+1))*100:.1f}%")
+            
+            # 计算进度百分比
+            if total_size > 0:
+                percentage = (total_downloaded / total_size) * 100
+                
+                # 处理接近完成情况
+                if percentage > 99.9 and percentage < 100:
+                    percentage = 100
+                
+                # 限制范围
+                percentage = max(0, min(100, percentage))
+                
+                # 调试输出
+                print(f"[DEBUG] 进度条计算总进度: {percentage:.2f}%, 已下载: {total_downloaded}, 总大小: {total_size}")
             
             # 设置分段和总进度
             if segments:
                 self.setSegments(segments)
-            self.setProgress(total_progress, False)
+            self.setProgress(percentage, False)
             
         except Exception as e:
             import traceback
