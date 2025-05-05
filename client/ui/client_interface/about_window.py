@@ -80,7 +80,7 @@ class AboutWindow(QWidget):
         header_layout.addStretch(1)
         
         # 版本信息
-        version_label = QLabel("版本 1.0.2 Release")
+        version_label = QLabel("版本 1.0.3 Release")
         version_label.setStyleSheet("color: #9E9E9E; font-size: 14px;")
         self.font_manager.apply_font(version_label)
         header_layout.addWidget(version_label)
@@ -107,12 +107,13 @@ class AboutWindow(QWidget):
         about_layout.addWidget(features_label)
         
         features_content = QLabel(
-            "• 多线程下载加速\n"
-            "• 自动调整线程数量\n"
-            "• 断点续传功能\n"
-            "• 浏览器扩展集成\n"
+            "• 现已经支持多线程下载\n"
+            "• 现已支持断点续传\n"
+            "• 全新下载内核\n"
+            "• 浏览器链接本地\n"
             "• 现代化界面设计\n"
-            "• 下载任务管理"
+            "• 下载任务管理\n"
+            "• 努力适配Ubuntu中!"
         )
         features_content.setStyleSheet("color: #E0E0E0; font-size: 14px; line-height: 1.6;")
         self.font_manager.apply_font(features_content)
@@ -130,7 +131,7 @@ class AboutWindow(QWidget):
         self.font_manager.apply_font(dev_label)
         about_layout.addWidget(dev_label)
         
-        dev_content = QLabel("本软件ZZBuAoYe开发,感谢使用")
+        dev_content = QLabel("Developer: ZZBuAoYe")
         dev_content.setWordWrap(True)
         dev_content.setStyleSheet("color: #E0E0E0; font-size: 14px;")
         self.font_manager.apply_font(dev_content)
@@ -241,8 +242,10 @@ class AboutWindow(QWidget):
             ("Microsoft Fluent UI Icons", "现代化图标系统", "https://github.com/microsoft/fluentui-system-icons"),
             ("HarmonyOS Sans", "华为鸿蒙字体", "https://developer.harmonyos.com/cn/design/resource"),
             ("Mulish", "开源无衬线字体", "https://fonts.google.com/specimen/Mulish"),
-            ("Xiaoy", "感谢晓宇提供服务器供我部署图标在线查询", "https://apiv2.xiaoy.asia/icons-page/"),
+            ("Xiaoy", "感谢晓宇提供服务器供我部署图标在线查询；感谢Xiaoy提供云服务", "https://apiv2.xiaoy.asia/icons-page/"),
+            ("SadIDC", "Sad IDC 提供云服务支持","https://sadidc.cn/"),
             ("ClutUI Next Generation", "使用了部分ClutUI NG的控件", "https://github.com/buaoyezz/ClutUI-Nextgen")
+
         ]
         
         for name, desc, url in resources:
