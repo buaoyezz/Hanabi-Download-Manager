@@ -134,6 +134,9 @@ class HomeWindow(QWidget):
         # 保存统计卡片的引用
         self.stat_cards = {}
         
+        # 请求处理记录集合
+        self._processed_requests = set()
+        
         # 初始化UI
         self.setup_ui()
         

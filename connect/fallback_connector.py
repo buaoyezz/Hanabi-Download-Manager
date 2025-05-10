@@ -250,10 +250,26 @@ class FallbackConnector(QObject):
             
             return False
         except Exception as e:
-            import logging
             logging.error(f"检查连接器运行状态出错: {e}")
             return False
+    
+    def has_active_connections(self):
+        """检查是否有活跃的浏览器连接"""
+        if not self.is_running():
+            return False
             
+        if hasattr(self.server, 'has_clients') and callable(self.server.has_clients):
+            return self.server.has_clients()
+            
+        # 如果服务器没有直接提供检测方法，尝试检查客户端列表
+        if hasattr(self.server, 'clients') and isinstance(self.server.clients, list):
+            return len(self.server.clients) > 0
+        elif hasattr(self.server, 'clients') and isinstance(self.server.clients, dict):
+            return len(self.server.clients) > 0
+            
+        # 保守默认，如果无法确定，返回False
+        return False
+    
     def stop(self):
         """停止服务器"""
         if self.server:

@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                               QLabel, QSizePolicy, QFrame, QMessageBox, QFileDialog, QSpacerItem)
 from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPoint, Property
-from PySide6.QtGui import QFont, QIcon, QColor, QPainter, QPainterPath, QBrush
+from PySide6.QtGui import QFont, QIcon, QColor, QPainter, QPainterPath, QBrush, QCursor
 
 import os
 import logging
@@ -9,12 +9,14 @@ import datetime
 import time
 import re
 import threading
+import webbrowser
 from urllib.parse import unquote, urlparse
 from pathlib import Path
 
 from core.font.font_manager import FontManager
 from client.ui.components.progressBar import ProgressBar
 from connect.fallback_connector import FallbackConnector
+from client.ui.extension_interface.pop_dialog import DownloadPopDialog
 
 class RoundedFrame(QFrame):
     """圆角边框容器"""
@@ -91,14 +93,8 @@ class ExtensionWindow(QWidget):
         # 状态框
         self._create_status_panel()
         
-        # 说明文本
-        self._create_instructions()
-        
-        # 设置框
-        self._create_settings_panel()
-        
-        # 下载预览区域
-        self._create_preview_area()
+        # 创建插件卡片
+        self._create_extension_card()
         
         # 添加伸缩项使内容靠上对齐
         self.main_layout.addStretch(1)
@@ -129,227 +125,95 @@ class ExtensionWindow(QWidget):
         
         self.main_layout.addWidget(status_frame)
 
-    def _create_instructions(self):
-        """创建使用说明区域"""
-        instruction_frame = RoundedFrame(radius=8, bg_color="#2C2C2C")
-        instruction_layout = QVBoxLayout(instruction_frame)
-        instruction_layout.setContentsMargins(15, 15, 15, 15)
+    def _create_extension_card(self):
+        """创建扩展插件卡片"""
+        # 扩展插件卡片容器
+        extension_frame = RoundedFrame(radius=8, bg_color="#2D2D2D")
+        extension_layout = QVBoxLayout(extension_frame)
+        extension_layout.setContentsMargins(15, 15, 15, 15)
+        extension_layout.setSpacing(10)
         
         # 标题
-        title = QLabel("浏览器扩展使用说明")
-        title.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: bold;")
-        self.font_manager.apply_font(title)
-        instruction_layout.addWidget(title)
+        title_label = QLabel("浏览器扩展")
+        title_label.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
+        self.font_manager.apply_font(title_label)
+        extension_layout.addWidget(title_label)
         
-        # 说明文本
-        instructions = [
-            "1. 你可以前往Github获取插件，本插件还在Edge Store进行审核",
-            "2. 点击扩展图标若右下角是X请单击展开并且，选择'重新连接'按钮[请确保HDM已启动]",
-            "3. 网页中的下载任务将自动拦截到Hanabi下载管理器，请注意关闭其他下载器的浏览器插件例如[IDM NDM]等，否则可能连不到任务",
-            "4. 点击保存路径按钮可以更改文件保存位置",
-            "5. 本页面暂时还在PreView测试阶段，下载列表是错误的，请不要参考"
-        ]
+        # 描述
+        desc_label = QLabel("使用浏览器扩展可以直接从网页拦截并管理下载。")
+        desc_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
+        desc_label.setWordWrap(True)
+        self.font_manager.apply_font(desc_label)
+        extension_layout.addWidget(desc_label)
         
-        for text in instructions:
-            instr = QLabel(text)
-            instr.setStyleSheet("color: #CCCCCC; font-size: 13px;")
-            instr.setWordWrap(True)
-            self.font_manager.apply_font(instr)
-            instruction_layout.addWidget(instr)
+        # 卡片按钮 - 点击跳转到Edge扩展商店
+        extension_button = self._create_clickable_card(
+            "安装 Edge 浏览器扩展",
+            "点击跳转到 Microsoft Edge 扩展商店安装 Hanabi Download Manager Extension",
+            "https://microsoftedge.microsoft.com/addons/detail/hanabi-download-manager-e/nifalaonnaeobogcnhfoeaklpihcaeia"
+        )
+        extension_layout.addWidget(extension_button)
         
-        self.main_layout.addWidget(instruction_frame)
+        # 声明卡片
+        declaration_frame = RoundedFrame(radius=6, bg_color="#363636")
+        declaration_layout = QVBoxLayout(declaration_frame)
+        declaration_layout.setContentsMargins(10, 10, 10, 10)
+        
+        declaration_label = QLabel("> 感谢使用HDM，本扩展 Dev By ZZBUAOYE 由ZZBuAoYe维护和更新")
+        declaration_label.setStyleSheet("color: #9E9E9E; font-size: 12px;")
+        declaration_label.setWordWrap(True)
+        self.font_manager.apply_font(declaration_label)
+        declaration_layout.addWidget(declaration_label)
+        
+        extension_layout.addWidget(declaration_frame)
+        
+        # 添加到主布局
+        self.main_layout.addWidget(extension_frame)
     
-    def _create_settings_panel(self):
-        """创建设置面板，包含保存路径设置"""
-        settings_frame = RoundedFrame(radius=8, bg_color="#2C2C2C")
-        settings_layout = QVBoxLayout(settings_frame)
-        settings_layout.setContentsMargins(15, 15, 15, 15)
+    def _create_clickable_card(self, title, description, url):
+        """创建可点击的卡片按钮"""
+        card = RoundedFrame(radius=6, bg_color="#363636")
+        card.setCursor(QCursor(Qt.PointingHandCursor))
+        card.setMinimumHeight(80)
+        
+        # 添加点击事件
+        def mousePressEvent(event):
+            if event.button() == Qt.LeftButton:
+                webbrowser.open(url)
+        
+        # 鼠标悬停效果
+        def enterEvent(event):
+            card.bg_color = "#404040"
+            card.update()
+        
+        def leaveEvent(event):
+            card.bg_color = "#363636"
+            card.update()
+        
+        # 绑定事件处理方法
+        card.mousePressEvent = mousePressEvent
+        card.enterEvent = enterEvent
+        card.leaveEvent = leaveEvent
+        
+        # 卡片内容布局
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(15, 10, 15, 10)
         
         # 标题
-        title = QLabel("下载设置")
-        title.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: bold;")
-        self.font_manager.apply_font(title)
-        settings_layout.addWidget(title)
+        title_label = QLabel(title)
+        title_label.setStyleSheet("color: #FFFFFF; font-size: 14px; font-weight: bold;")
+        self.font_manager.apply_font(title_label)
+        layout.addWidget(title_label)
         
-        # 保存路径行
-        path_layout = QHBoxLayout()
-        path_layout.setSpacing(15)
+        # 描述
+        desc_label = QLabel(description)
+        desc_label.setStyleSheet("color: #AAAAAA; font-size: 12px;")
+        desc_label.setWordWrap(True)
+        self.font_manager.apply_font(desc_label)
+        layout.addWidget(desc_label)
         
-        # 路径标签
-        path_label = QLabel("保存位置:")
-        path_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
-        self.font_manager.apply_font(path_label)
-        path_layout.addWidget(path_label)
-        
-        # 当前路径
-        self.path_display = QLabel(self.save_path)
-        self.path_display.setStyleSheet("color: #AAAAAA; font-size: 13px;")
-        self.font_manager.apply_font(self.path_display)
-        self.path_display.setWordWrap(True)
-        path_layout.addWidget(self.path_display, 1)
-        
-        # 选择按钮
-        self.path_btn = QPushButton("更改")
-        self.path_btn.setFixedSize(80, 30)
-        self.path_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }
-            QPushButton:hover {
-                background-color: #3E3E42;
-                border: 1px solid #B39DDB;
-            }
-            QPushButton:pressed {
-                background-color: #252526;
-            }
-        """)
-        self.font_manager.apply_font(self.path_btn)
-        self.path_btn.clicked.connect(self._on_change_path)
-        path_layout.addWidget(self.path_btn)
-        
-        settings_layout.addLayout(path_layout)
-        self.main_layout.addWidget(settings_frame)
-    
-    def _create_preview_area(self):
-        """创建下载预览区域"""
-        preview_frame = RoundedFrame(radius=8, bg_color="#2C2C2C")
-        preview_layout = QVBoxLayout(preview_frame)
-        preview_layout.setContentsMargins(15, 15, 15, 15)
-        
-        # 标题
-        title = QLabel("最近下载")
-        title.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: bold;")
-        self.font_manager.apply_font(title)
-        preview_layout.addWidget(title)
-        
-        # 最近下载项容器
-        self.recent_downloads_layout = QVBoxLayout()
-        self.recent_downloads_layout.setSpacing(8)
-        
-        # 添加几个空白项，表示无下载状态
-        self._add_empty_download_item()
-        
-        preview_layout.addLayout(self.recent_downloads_layout)
-        self.main_layout.addWidget(preview_frame)
-    
-    def _add_empty_download_item(self):
-        """添加空白下载项"""
-        # 清空现有项
-        while self.recent_downloads_layout.count():
-            item = self.recent_downloads_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
-        # 添加空提示
-        empty_label = QLabel("暂无浏览器扩展下载任务")
-        empty_label.setStyleSheet("color: #666666; font-size: 13px; padding: 15px;")
-        empty_label.setAlignment(Qt.AlignCenter)
-        self.font_manager.apply_font(empty_label)
-        self.recent_downloads_layout.addWidget(empty_label)
-    
-    def _add_download_preview_item(self, download_data):
-        """添加下载预览项"""
-        # 移除空白提示
-        if self.recent_downloads_layout.count() == 1:
-            item = self.recent_downloads_layout.takeAt(0)
-            if item.widget() and isinstance(item.widget(), QLabel):
-                item.widget().deleteLater()
-        
-        # 限制显示的项数
-        if self.recent_downloads_layout.count() >= 5:
-            item = self.recent_downloads_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
-        # 创建新的下载项
-        download_item = RoundedFrame(radius=6, bg_color="#252526")
-        item_layout = QVBoxLayout(download_item)
-        item_layout.setContentsMargins(10, 10, 10, 10)
-        item_layout.setSpacing(5)
-        
-        # 获取文件名
-        filename = download_data.get("filename", "")
-        if not filename:
-            url = download_data.get("url", "")
-            filename = self._extract_filename_from_url(url)
-        
-        # 文件名
-        filename_label = QLabel(filename)
-        filename_label.setStyleSheet("color: #FFFFFF; font-size: 14px;")
-        filename_label.setWordWrap(True)
-        self.font_manager.apply_font(filename_label)
-        item_layout.addWidget(filename_label)
-        
-        # URL
-        url_text = download_data.get("url", "")
-        if len(url_text) > 60:
-            url_text = url_text[:57] + "..."
-        url_label = QLabel(url_text)
-        url_label.setStyleSheet("color: #888888; font-size: 12px;")
-        url_label.setWordWrap(True)
-        self.font_manager.apply_font(url_label)
-        item_layout.addWidget(url_label)
-        
-        # 状态
-        status_label = QLabel("正在下载...")
-        status_label.setStyleSheet("color: #4CAF50; font-size: 12px;")
-        self.font_manager.apply_font(status_label)
-        item_layout.addWidget(status_label)
-        
-        # 添加到布局
-        self.recent_downloads_layout.insertWidget(0, download_item)
-        
-        # 给新添加的项添加高亮动画效果
-        self._highlight_item(download_item)
-    
-    def _highlight_item(self, widget):
-        """为新添加的项添加高亮动画效果"""
-        try:
-            from PySide6.QtCore import QPropertyAnimation, QEasingCurve
-            
-            # 原始背景色
-            original_color = QColor("#252526")
-            # 高亮颜色
-            highlight_color = QColor("#3E3E42")
-            
-            # 创建属性动画
-            self.highlight_animation = QPropertyAnimation(widget, b"background_color")
-            self.highlight_animation.setDuration(800)  # 持续800毫秒
-            self.highlight_animation.setStartValue(highlight_color)
-            self.highlight_animation.setEndValue(original_color)
-            self.highlight_animation.setEasingCurve(QEasingCurve.OutCubic)
-            
-            # 定义更新函数
-            def update_color(color):
-                if hasattr(widget, "bg_color"):
-                    widget.bg_color = color.name()
-                    widget.update()
-            
-            # 连接信号
-            self.highlight_animation.valueChanged.connect(update_color)
-            
-            # 启动动画
-            self.highlight_animation.start()
-        except Exception as e:
-            logging.warning(f"创建高亮动画失败: {e}")
-    
-    def _on_change_path(self):
-        """更改保存路径"""
-        folder_path = QFileDialog.getExistingDirectory(self, "选择保存位置", self.save_path)
-        if folder_path:
-            self.save_path = folder_path
-            self.path_display.setText(folder_path)
-            
-            # 保存到配置
-            if self.config_manager:
-                self.config_manager.set_save_path(folder_path)
-            
-            logging.info(f"浏览器扩展下载保存路径已更新: {folder_path}")
-    
+        return card
+
     def _init_connector(self):
         """初始化浏览器连接器"""
         try:
@@ -464,7 +328,7 @@ class ExtensionWindow(QWidget):
         try:
             # 记录请求
             request_id = download_data.get("requestId", f"ext_{int(time.time() * 1000)}")
-            logging.info(f"收到浏览器扩展下载请求 [ID: {request_id}]: {download_data.get('url', '未知URL')}")
+            logging.info(f"[extension_window.py] 收到浏览器扩展下载请求 [ID: {request_id}]: {download_data.get('url', '未知URL')}")
             
             # 处理下载数据
             processed_data = self._process_download_data(download_data)
@@ -472,8 +336,13 @@ class ExtensionWindow(QWidget):
             # 添加到预览区
             self._add_download_preview_item(download_data)
             
-            # 发送到主线程处理
-            self.extensionDownloadReceived.emit(processed_data)
+            # 为保证弹窗只创建一次，直接在本地处理，不发送信号给主窗口
+            # 添加一个标记防止重复处理
+            processed_data["download_source"] = "client/ui/extension_interface/extension_window.py:_handle_browser_download"
+            processed_data["handled_by_extension"] = True
+            
+            # 直接调用处理方法
+            self.start_download_from_extension(processed_data)
             
             # 返回处理结果
             return True
@@ -594,10 +463,23 @@ class ExtensionWindow(QWidget):
                 logging.error("下载数据无效或缺少URL")
                 return False
             
+            # 记录请求ID并进行日志记录
+            request_id = download_data.get("requestId", f"ext_{int(time.time() * 1000)}")
+            download_source = download_data.get("download_source", "未知来源")
+            logging.info(f"[extension_window.py] 启动浏览器扩展下载任务 [ID: {request_id}] [来源: {download_source}]")
+            
+            # 只有在特定情况下才创建下载弹窗
+            if download_data.get("handled_by_extension", False):
+                # 创建下载弹窗时添加来源信息
+                download_data["download_source"] = "client/ui/extension_interface/extension_window.py:start_download_from_extension"
+                from client.ui.extension_interface.pop_dialog import DownloadPopDialog
+                dialog = DownloadPopDialog.create_and_show(download_data, self, auto_start=True)
+                logging.info(f"[extension_window.py] 已为下载请求 [ID: {request_id}] 创建弹窗")
+            
             # 添加下载预览项
             self._add_download_preview_item(download_data)
             
-            # 创建下载管理器
+            # 创建下载管理器 (保留这部分来确保下载进度可以追踪)
             connector = FallbackConnector()
             download_manager = connector.create_download_task(download_data)
             
@@ -633,7 +515,7 @@ class ExtensionWindow(QWidget):
             # 发送下载开始信号
             self.downloadStarted.emit(download_data)
             
-            logging.info(f"已开始浏览器扩展下载任务 [ID: {task_id}]: {download_data.get('filename', '未知文件')}")
+            logging.info(f"[extension_window.py] 已开始浏览器扩展下载任务 [ID: {task_id}]: {download_data.get('filename', '未知文件')}")
             return True
         except Exception as e:
             logging.error(f"启动浏览器扩展下载任务失败: {e}")
@@ -832,3 +714,45 @@ class ExtensionWindow(QWidget):
             logging.info(f"已将浏览器扩展下载任务添加到历史记录: {history_item['filename']}")
         except Exception as e:
             logging.error(f"添加历史记录失败: {e}")
+
+    def _add_download_preview_item(self, download_data):
+        """添加下载预览项"""
+        # 修改方法为空实现，保留API兼容性
+        pass
+
+    def _create_extension_detector(self):
+        """创建浏览器插件检测面板"""
+        # 删除整个方法内容
+        pass
+    
+    def _start_extension_detector(self):
+        """启动插件检测定时器"""
+        # 删除整个方法内容
+        pass
+    
+    def _check_extension_installed(self):
+        """检查浏览器插件是否已安装"""
+        # 删除整个方法内容
+        pass
+    
+    def _on_download_extension(self):
+        """打开浏览器下载插件"""
+        # 删除整个方法内容
+        pass
+    
+    def _create_settings_panel(self):
+        """创建设置面板，包含保存路径设置"""
+        # 删除整个方法内容
+        pass
+    
+    def _on_change_path(self):
+        """更改保存路径"""
+        folder_path = QFileDialog.getExistingDirectory(self, "选择保存位置", self.save_path)
+        if folder_path:
+            self.save_path = folder_path
+            
+            # 保存到配置
+            if self.config_manager:
+                self.config_manager.set_save_path(folder_path)
+            
+            logging.info(f"浏览器扩展下载保存路径已更新: {folder_path}")

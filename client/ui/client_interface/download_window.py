@@ -600,7 +600,8 @@ class DownloadWindow(QWidget):
                 "save_path": self.save_path,
                 "multi_thread": True,
                 "source": "history",
-                "request_id": f"history_{int(time.time() * 1000)}"
+                "request_id": f"history_{int(time.time() * 1000)}",
+                "download_source": "client/ui/client_interface/download_window.py:redownload_from_history"
             }
             
             # 显示下载弹窗
@@ -610,6 +611,9 @@ class DownloadWindow(QWidget):
             # 连接信号
             dialog.downloadRequested.connect(self._on_dialog_download_requested)
             dialog.downloadCompleted.connect(self._on_dialog_download_completed)
+            
+            # 记录创建的弹窗
+            logging.info(f"[download_window.py] 已为历史记录下载 [URL: {task_data['url']}] 创建下载弹窗")
             
             return 0  # 返回成功
             
@@ -672,11 +676,16 @@ class DownloadWindow(QWidget):
             
             # 显示下载弹窗
             from client.ui.extension_interface.pop_dialog import DownloadPopDialog
+            # 添加来源信息到任务数据
+            task_data["download_source"] = "client/ui/client_interface/download_window.py:handle_browser_download_request"
             dialog = DownloadPopDialog.create_and_show(task_data, self, auto_start=True)  # 自动开始下载
             
             # 连接信号
             dialog.downloadRequested.connect(self._on_dialog_download_requested)
             dialog.downloadCompleted.connect(self._on_dialog_download_completed)
+            
+            # 记录创建的弹窗
+            logging.info(f"[download_window.py] 已为下载请求 [ID: {request_id}] 创建下载弹窗")
             
             return True
             

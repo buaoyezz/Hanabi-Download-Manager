@@ -25,16 +25,20 @@ class UpdatePage(QWidget):
         self.font_manager = FontManager()
         
         # 软件当前版本
-        self.current_version = "1.0.3"
+        self.current_version = "1.0.4"
         
         # 更新源配置
-        self.primary_api_url = "https://apiv2.xiaoy.asia"  # 修正主更新源URL
+        self.primary_api_url = "https://apiv2.xiaoy.asia"  # 主更新源URL
         # 次更新源 - 已知目前可能有连接问题
         self.secondary_api_url = "https://zzbuaoye.dpdns.org"  
         
         # 更新源端点
-        self.primary_endpoint = "/hdm/version.json"
+        self.primary_endpoint = "/custody-project/hdm/api/version.php"  # 新的API地址
         self.secondary_endpoint = "/HanabiDM/version.json"
+        
+        # 主更新源尝试次数和连接参数
+        self.primary_max_retries = 3  # 主更新源重试次数更多
+        self.primary_retry_delay = 1  # 秒
         
         # 次更新源尝试次数和连接参数
         self.secondary_max_retries = 2
@@ -100,14 +104,13 @@ class UpdatePage(QWidget):
         # 加载上次检查时间
         self.load_last_check_time()
         
-        # 如果启用了自动检查更新，程序启动后自动检查
-        if self.config_manager.get_auto_check_update():
-            # 如果上次检查距今已超过24小时，则重新检查
-            if self.should_check_again():
-                QTimer.singleShot(3000, self.check_update)
-            else:
-                # 否则直接使用缓存数据
-                self.update_ui_from_cache()
+        # 总是先从缓存加载数据显示
+        self.update_ui_from_cache()
+        
+        # 如果启用了自动检查更新且符合条件，在后台自动检查
+        if self.config_manager.get_auto_check_update() and self.should_check_again():
+            # 延迟3秒后自动检查更新
+            QTimer.singleShot(3000, lambda: self.check_update(silent=True))
     
     def should_check_again(self):
         last_check = self.cached_data.get("last_check_timestamp", 0)
@@ -306,6 +309,54 @@ class UpdatePage(QWidget):
         self.check_button.clicked.connect(self.check_update)
         button_layout.addWidget(self.check_button)
         
+        # 清除缓存按钮
+        self.clear_cache_button = QPushButton()
+        self.clear_cache_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2D2D30;
+                color: #FFFFFF;
+                border: 1px solid #3C3C3C;
+                border-radius: 6px;
+                padding: 8px 16px;
+                min-width: 120px;
+                max-width: 160px;
+            }
+            QPushButton:hover {
+                background-color: #3E3E42;
+                border: 1px solid #B39DDB;
+            }
+            QPushButton:pressed {
+                background-color: #252526;
+            }
+        """)
+        self.clear_cache_button.setFixedHeight(36)
+        
+        # 使用布局方式添加图标
+        clear_button_layout = QHBoxLayout(self.clear_cache_button)
+        clear_button_layout.setContentsMargins(10, 0, 10, 0)
+        clear_button_layout.setSpacing(8)
+        
+        # 图标
+        clear_icon = QLabel()
+        self.font_manager.apply_icon_font(clear_icon, 16)
+        clear_icon.setText(self.font_manager.get_icon_text("delete"))
+        clear_icon.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                background-color: transparent;
+            }
+        """)
+        clear_button_layout.addWidget(clear_icon)
+        
+        # 文本
+        clear_text = QLabel("清除缓存")
+        clear_text.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+        self.font_manager.apply_font(clear_text)
+        clear_button_layout.addWidget(clear_text)
+        
+        self.clear_cache_button.clicked.connect(self.clear_update_cache)
+        button_layout.addWidget(self.clear_cache_button)
+        
         # 自动检查更新选项
         self.auto_check_button = QPushButton()
         self.auto_check_button.setStyleSheet("""
@@ -452,14 +503,21 @@ class UpdatePage(QWidget):
         """)
         return card
     
-    def check_update(self):
-        self.check_button.setEnabled(False)
-        self.status_label.setText("正在检查更新...")
-        self.status_label.setStyleSheet("color: #B39DDB; font-size: 13px; background-color: transparent;")
+    def check_update(self, silent=False):
+        """检查更新
+        
+        Args:
+            silent (bool, optional): 是否为静默检查（自动后台检查），静默检查不更新UI状态. Defaults to False.
+        """
+        if not silent:
+            self.check_button.setEnabled(False)
+            self.status_label.setText("正在检查更新...")
+            self.status_label.setStyleSheet("color: #B39DDB; font-size: 13px; background-color: transparent;")
         
         # 记录检查时间
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.last_check_label.setText(f"上次检查：{now}")
+        if not silent:
+            self.last_check_label.setText(f"上次检查：{now}")
         
         # 优先使用缓存的更新源
         if self.cached_data and self.cached_data.get("working_source"):
@@ -469,83 +527,194 @@ class UpdatePage(QWidget):
             if source == "primary":
                 logging.info("使用缓存中记录的主更新源")
                 self.primary_endpoint = endpoint
-                self.try_primary_source(now)
+                self.try_primary_source(now, silent)
             else:
                 logging.info("使用缓存中记录的次更新源")
                 self.secondary_endpoint = endpoint
-                self.try_secondary_source(now)
+                self.try_secondary_source(now, silent)
         else:
             # 没有缓存的可用源，按正常顺序尝试
-            self.try_primary_source(now)
+            self.try_primary_source(now, silent)
     
-    def try_primary_source(self, now):
+    def try_primary_source(self, now, silent=False):
         """尝试从主更新源获取更新信息"""
-        try:
-            primary_url = f"{self.primary_api_url}{self.primary_endpoint}"
-            logging.info(f"正在从主更新源获取更新信息: {primary_url}")
-            
-            # 使用更强大的异常处理和重试
+        retry_count = 0
+        
+        # 禁止不安全连接警告 - 仅在此函数中禁用
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        while retry_count <= self.primary_max_retries:
             try:
-                response = requests.get(
-                    primary_url, 
+                primary_url = f"{self.primary_api_url}{self.primary_endpoint}"
+                logging.info(f"正在从主更新源获取更新信息 [尝试 {retry_count+1}/{self.primary_max_retries+1}]: {primary_url}")
+                
+                # 准备代理设置
+                proxy_info = ""
+                if self.use_proxy and self.proxy_settings:
+                    proxy_info = f"（使用代理）"
+                    logging.info(f"使用代理访问主更新源")
+                else:
+                    logging.info(f"直接连接主更新源（不使用代理）")
+                
+                logging.info(f"主更新源请求开始 {proxy_info}")
+                
+                # 创建新的会话对象
+                session = requests.Session()
+                
+                # 设置代理（如果启用）
+                if self.use_proxy and self.proxy_settings:
+                    session.proxies.update(self.proxy_settings)
+                
+                # 模拟浏览器头部
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", 
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Connection": "close",
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                    "Sec-Fetch-User": "?1",
+                    "Upgrade-Insecure-Requests": "1",
+                    "DNT": "1"
+                }
+                
+                # 使用requests
+                response = session.get(
+                    primary_url,
+                    headers=headers,
                     timeout=10,
-                    headers={
-                        "User-Agent": "HanabiDownloadManager/1.0.3",
-                        "Accept": "application/json"
-                    }
+                    verify=False,  # 禁用SSL验证
+                    allow_redirects=True,
+                    proxies=self.proxy_settings if self.use_proxy else None
                 )
-                response.raise_for_status()  # 抛出HTTP错误以便捕获
                 
-                # 成功获取主源数据
-                self.current_update_source = "primary"
-                logging.info("主更新源连接成功")
-                self.process_update_data(response.json(), now)
-                return  # 成功后直接返回，不需要尝试次源
-                
-            except requests.exceptions.HTTPError as http_err:
-                logging.warning(f"主更新源HTTP错误: {http_err}")
-                # 尝试备用主源路径
-                try:
+                # 检查响应
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        
+                        # 标记为主源
+                        self.current_update_source = "primary"
+                        logging.info("主更新源连接成功")
+                        
+                        # 保存工作的源信息
+                        data["working_source"] = "primary"
+                        data["working_endpoint"] = self.primary_endpoint
+                        
+                        # 处理数据
+                        self.process_update_data(data, now, silent)
+                        return  # 成功后返回
+                    except json.JSONDecodeError as json_err:
+                        logging.error(f"响应不是有效的JSON: {json_err}")
+                        # 这里尝试打印响应内容以便调试
+                        logging.debug(f"响应内容: {response.text[:200]}...")
+                        
+                        # 尝试检查并手动解析响应内容
+                        if response.content and len(response.content) > 0:
+                            # 检查是否有BOM标记或其他编码问题
+                            try:
+                                text = response.content.decode('utf-8-sig')
+                                logging.info("尝试使用utf-8-sig解码响应内容")
+                                data = json.loads(text)
+                                logging.info("成功使用utf-8-sig解析JSON")
+                                
+                                # 保存和处理数据
+                                self.current_update_source = "primary"
+                                data["working_source"] = "primary"
+                                data["working_endpoint"] = self.primary_endpoint
+                                self.process_update_data(data, now, silent)
+                                return
+                            except Exception as decode_err:
+                                logging.error(f"尝试替代解码方法失败: {decode_err}")
+                        raise
+                else:
+                    logging.warning(f"主更新源返回状态码: {response.status_code}")
+                    
+                    # 尝试备用路径
                     alternate_url = f"{self.primary_api_url}/version.json"
                     logging.info(f"尝试备用主源路径: {alternate_url}")
-                    alt_response = requests.get(
-                        alternate_url,
-                        timeout=10,
-                        headers={
-                            "User-Agent": "HanabiDownloadManager/1.0.3",
-                            "Accept": "application/json"
-                        }
-                    )
-                    alt_response.raise_for_status()
                     
-                    # 如果成功，保存正确的端点
-                    self.primary_endpoint = "/version.json"
-                    # 成功获取主源数据
-                    self.current_update_source = "primary"
-                    logging.info("主更新源备用路径连接成功")
-                    self.process_update_data(alt_response.json(), now)
-                    return
-                except Exception as alt_err:
-                    logging.warning(f"备用主源路径也失败: {alt_err}")
+                    alt_response = session.get(
+                        alternate_url,
+                        headers=headers,
+                        timeout=10,
+                        verify=False,
+                        allow_redirects=True,
+                        proxies=self.proxy_settings if self.use_proxy else None
+                    )
+                    
+                    if alt_response.status_code == 200:
+                        try:
+                            data = alt_response.json()
+                            
+                            # 更新端点
+                            self.primary_endpoint = "/version.json"
+                            
+                            # 标记为主源
+                            self.current_update_source = "primary"
+                            logging.info("主更新源备用路径连接成功")
+                            
+                            # 保存工作的源信息
+                            data["working_source"] = "primary"
+                            data["working_endpoint"] = self.primary_endpoint
+                            
+                            # 处理数据
+                            self.process_update_data(data, now, silent)
+                            return  # 成功后返回
+                        except json.JSONDecodeError:
+                            logging.error(f"备用路径响应不是有效的JSON")
+                            # 尝试手动解码
+                            try:
+                                text = alt_response.content.decode('utf-8-sig')
+                                data = json.loads(text)
+                                logging.info("备用路径使用utf-8-sig解析成功")
+                                
+                                # 处理数据
+                                self.primary_endpoint = "/version.json"
+                                self.current_update_source = "primary"
+                                data["working_source"] = "primary"
+                                data["working_endpoint"] = self.primary_endpoint
+                                self.process_update_data(data, now, silent)
+                                return
+                            except Exception as alt_decode_err:
+                                logging.error(f"备用路径解码失败: {alt_decode_err}")
+                            raise
+                    else:
+                        logging.warning(f"备用主源路径返回状态码: {alt_response.status_code}")
+                
             except requests.exceptions.ConnectionError as conn_err:
-                logging.warning(f"主更新源连接错误: {conn_err}")
+                logging.error(f"主更新源连接错误 [尝试 {retry_count+1}]: {conn_err}")
             except requests.exceptions.Timeout as timeout_err:
-                logging.warning(f"主更新源连接超时: {timeout_err}")
-            except requests.exceptions.RequestException as req_err:
-                logging.warning(f"主更新源请求异常: {req_err}")
+                logging.error(f"主更新源连接超时 [尝试 {retry_count+1}]: {timeout_err}")
             except ValueError as json_err:
-                logging.warning(f"主更新源JSON解析错误: {json_err}")
+                logging.error(f"主更新源JSON解析错误: {json_err}")
+                # JSON解析错误不重试，直接尝试次源
+                break
+            except Exception as e:
+                logging.error(f"主更新源连接尝试过程中出现未预期错误: {e}")
+            finally:
+                # 确保关闭session
+                if 'session' in locals():
+                    session.close()
             
-            # 如果走到这里，说明主源失败，尝试次源
-            logging.warning(f"主更新源获取失败，尝试使用次更新源")
-            self.try_secondary_source(now)
+            # 增加重试计数
+            retry_count += 1
             
-        except Exception as e:
-            # 主源请求异常，尝试次源
-            logging.error(f"主更新源连接出现未预期错误: {str(e)}，尝试使用次更新源")
-            self.try_secondary_source(now)
+            # 如果还有重试机会，等待一段时间再重试
+            if retry_count <= self.primary_max_retries:
+                retry_delay = self.primary_retry_delay * retry_count  # 逐次增加等待时间
+                logging.info(f"等待 {retry_delay} 秒后重试主更新源连接...")
+                time.sleep(retry_delay)
+        
+        # 所有主源重试都失败了，尝试次源
+        logging.warning("主更新源所有尝试均失败，切换到次更新源")
+        self.try_secondary_source(now, silent)
     
-    def try_secondary_source(self, now):
+    def try_secondary_source(self, now, silent=False):
         """从次更新源获取更新信息，支持多次重试，模拟浏览器行为，支持代理"""
         retry_count = 0
         
@@ -625,7 +794,7 @@ class UpdatePage(QWidget):
                                 data["source_warning"] = "次更新源数据可能不是最新的"
                             
                             # 处理数据
-                            self.process_update_data(data, now)
+                            self.process_update_data(data, now, silent)
                             return  # 成功后返回
                         except json.JSONDecodeError as json_err:
                             logging.error(f"响应不是有效的JSON: {json_err}")
@@ -648,7 +817,7 @@ class UpdatePage(QWidget):
                                     if not data.get("warning_shown", False):
                                         data["warning_shown"] = True
                                         data["source_warning"] = "次更新源数据可能不是最新的"
-                                    self.process_update_data(data, now)
+                                    self.process_update_data(data, now, silent)
                                     return
                                 except Exception as decode_err:
                                     logging.error(f"尝试替代解码方法失败: {decode_err}")
@@ -690,7 +859,7 @@ class UpdatePage(QWidget):
                                     data["source_warning"] = "次更新源数据可能不是最新的"
                                 
                                 # 处理数据
-                                self.process_update_data(data, now)
+                                self.process_update_data(data, now, silent)
                                 return  # 成功后返回
                             except json.JSONDecodeError:
                                 logging.error(f"备用路径响应不是有效的JSON")
@@ -708,7 +877,7 @@ class UpdatePage(QWidget):
                                     if not data.get("warning_shown", False):
                                         data["warning_shown"] = True
                                         data["source_warning"] = "次更新源数据可能不是最新的"
-                                    self.process_update_data(data, now)
+                                    self.process_update_data(data, now, silent)
                                     return
                                 except Exception as alt_decode_err:
                                     logging.error(f"备用路径解码失败: {alt_decode_err}")
@@ -757,28 +926,30 @@ class UpdatePage(QWidget):
         if self.cached_data and self.cached_data.get("latest"):
             logging.info("使用缓存的更新数据")
             # 设置缓存数据来源提示
-            self.status_label.setText("无法连接到更新服务器，使用缓存数据")
-            self.status_label.setStyleSheet("color: #FFC107; font-size: 13px; background-color: transparent;")
-            # 更新UI使用缓存数据
-            self.update_ui_from_cache()
+            if not silent:
+                self.status_label.setText("无法连接到更新服务器，使用缓存数据")
+                self.status_label.setStyleSheet("color: #FFC107; font-size: 13px; background-color: transparent;")
+                # 更新UI使用缓存数据
+                self.update_ui_from_cache()
             self.check_button.setEnabled(True)
         else:
             # 没有缓存数据可用
-            self.handle_update_failure("所有更新源连接失败，且无缓存数据可用")
+            self.handle_update_failure("所有更新源连接失败，且无缓存数据可用", silent)
     
-    def handle_update_failure(self, error_msg):
+    def handle_update_failure(self, error_msg, silent=False):
         """处理更新失败"""
-        self.status_label.setText(f"检查更新失败: {error_msg}")
-        self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
+        if not silent:
+            self.status_label.setText(f"检查更新失败: {error_msg}")
+            self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
         self.updateError.emit(error_msg)
         self.check_button.setEnabled(True)
     
-    def process_update_data(self, data, now):
+    def process_update_data(self, data, now, silent=False):
         """处理获取到的更新数据"""
         latest = data.get("latest", {})
         
         if not latest:
-            self.handle_update_failure("无效的版本信息")
+            self.handle_update_failure("无效的版本信息", silent)
             return
         
         # 保存缓存和检查时间
@@ -792,48 +963,50 @@ class UpdatePage(QWidget):
         if self.compare_versions(latest["version"], self.current_version) > 0:
             # 有更新版本
             self.has_newer_version = True
-            self.status_label.setText(f"发现新版本: {latest['version']}")
-            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
-            
-            # 更新更新日志
-            self.update_release_notes(latest, True)
+            if not silent:
+                self.status_label.setText(f"发现新版本: {latest['version']}")
+                self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+                
+                # 更新更新日志
+                self.update_release_notes(latest, True)
             
             # 发出更新信号
             self.updateFound.emit(latest["version"], json.dumps(latest))
         else:
             # 已经是最新版本
             self.has_newer_version = False
-            self.status_label.setText("您当前使用的已经是最新版本")
-            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
-            
-            # 显示当前版本的更新日志
-            current_version_info = None
-            
-            # 如果当前版本是最新版本
-            if latest["version"] == self.current_version:
-                current_version_info = latest
-            # 否则从历史记录中查找
-            elif "history" in data and self.current_version in data["history"]:
-                current_version_info = data["history"][self.current_version]
-            
-            if current_version_info:
-                self.update_release_notes(current_version_info, False)
-            else:
-                # 清除原有内容
-                for i in reversed(range(self.log_layout.count())):
-                    item = self.log_layout.itemAt(i)
-                    if item.widget():
-                        item.widget().deleteLater()
+            if not silent:
+                self.status_label.setText("您当前使用的已经是最新版本")
+                self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
                 
-                # 显示提示信息
-                no_log_label = QLabel("暂无当前版本的更新日志信息")
-                no_log_label.setStyleSheet("color: #9E9E9E; font-size: 14px; background-color: transparent;")
-                self.font_manager.apply_font(no_log_label)
-                self.log_layout.addWidget(no_log_label)
-                self.log_layout.addStretch()
+                # 显示当前版本的更新日志
+                current_version_info = None
+                
+                # 如果当前版本是最新版本
+                if latest["version"] == self.current_version:
+                    current_version_info = latest
+                # 否则从历史记录中查找
+                elif "history" in data and self.current_version in data["history"]:
+                    current_version_info = data["history"][self.current_version]
+                
+                if current_version_info:
+                    self.update_release_notes(current_version_info, False)
+                else:
+                    # 清除原有内容
+                    for i in reversed(range(self.log_layout.count())):
+                        item = self.log_layout.itemAt(i)
+                        if item.widget():
+                            item.widget().deleteLater()
+                    
+                    # 显示提示信息
+                    no_log_label = QLabel("暂无当前版本的更新日志信息")
+                    no_log_label.setStyleSheet("color: #9E9E9E; font-size: 14px; background-color: transparent;")
+                    self.font_manager.apply_font(no_log_label)
+                    self.log_layout.addWidget(no_log_label)
+                    self.log_layout.addStretch()
         
         # 如果是次更新源，显示警告
-        if self.current_update_source == "secondary" and data.get("source_warning"):
+        if not silent and self.current_update_source == "secondary" and data.get("source_warning"):
             self.status_label.setText(f"{self.status_label.text()} (使用次更新源)")
             
             # 添加次更新源警告提示
@@ -860,7 +1033,8 @@ class UpdatePage(QWidget):
                     # 在布局的开头插入
                     self.log_layout.insertWidget(0, warning_container)
         
-        self.check_button.setEnabled(True)
+        if not silent:
+            self.check_button.setEnabled(True)
     
     def update_release_notes(self, latest, show_download=True):
         # 清除原有内容
@@ -1144,6 +1318,67 @@ class UpdatePage(QWidget):
     
     def toggle_auto_check(self, checked):
         self.config_manager.set_auto_check_update(checked)
+    
+    def clear_update_cache(self):
+        """清除更新缓存并强制从主源获取数据"""
+        try:
+            # 删除缓存文件
+            if os.path.exists(self.cache_file):
+                os.remove(self.cache_file)
+                self.cached_data = {}
+                self.current_update_source = None
+                
+                # 更新UI
+                self.status_label.setText("已清除更新缓存，将从主源获取数据")
+                self.status_label.setStyleSheet("color: #64B5F6; font-size: 13px; background-color: transparent;")
+                
+                # 更新最后检查时间显示
+                self.last_check_label.setText("上次检查：从未检查")
+                
+                # 清空日志显示
+                for i in reversed(range(self.log_layout.count())):
+                    item = self.log_layout.itemAt(i)
+                    if item.widget():
+                        item.widget().deleteLater()
+                
+                # 显示默认内容
+                default_log = QLabel("""
+                <html>
+                <body style="color: #9E9E9E;">
+                <p>已清除更新日志信息</p>
+                <p>请点击检查更新按钮从主更新源获取最新信息</p>
+                </body>
+                </html>
+                """)
+                default_log.setTextFormat(Qt.RichText)
+                default_log.setWordWrap(True)
+                default_log.setStyleSheet("background-color: transparent;")
+                self.font_manager.apply_font(default_log)
+                self.log_layout.addWidget(default_log)
+                self.log_layout.addStretch()
+                
+                # 弹出提示
+                CustomMessageBox.information(
+                    self,
+                    "操作成功",
+                    "已成功清除更新缓存，请点击检查更新按钮从主更新源获取最新数据。"
+                )
+            else:
+                self.status_label.setText("无需清除，更新缓存不存在")
+                CustomMessageBox.information(
+                    self,
+                    "提示",
+                    "无需清除，更新缓存不存在。"
+                )
+                
+        except Exception as e:
+            self.status_label.setText(f"清除缓存失败: {str(e)}")
+            self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
+            CustomMessageBox.warning(
+                self,
+                "操作失败",
+                f"清除更新缓存失败: {str(e)}"
+            )
     
     def compare_versions(self, version1, version2):
         """

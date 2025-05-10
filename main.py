@@ -168,12 +168,17 @@ if __name__ == "__main__":
     window = DownloadManagerWindow()
     
     try:
-        # 创建连接器，同时连接到主窗口和弹窗处理器
+        # 创建连接器，只连接到一个处理器，避免重复处理
         connector = Connector()
+        
+        # 选择一个处理方式：
+        # 1. 使用全局处理器 - 创建独立下载弹窗，不会拉起主窗口[推荐]
         connector.downloadRequestReceived.connect(download_handler.handle_download_request)
-        # 同时将下载请求发送给主窗口的下载页面处理
-        if hasattr(window, 'download_window'):
-            connector.downloadRequestReceived.connect(window.download_window.handle_browser_download_request)
+        
+        # 2. 使用主窗口的下载窗口处理 - 会在主窗口中显示下载任务[拉起主窗口不推荐]
+        # if hasattr(window, 'download_window'):
+        #     connector.downloadRequestReceived.connect(window.download_window.handle_browser_download_request)
+        
         connector.start()
         log.info("浏览器下载连接器已成功启动")
     except Exception as e:

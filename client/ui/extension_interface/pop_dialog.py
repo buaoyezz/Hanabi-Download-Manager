@@ -1,17 +1,20 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
-                                QLabel, QProgressBar, QFrame, QFileDialog, QLineEdit,
-                                QGraphicsDropShadowEffect, QSpacerItem, QSizePolicy, QCheckBox,
-                                QScrollArea, QApplication)
-from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QFont, QIcon
-
 import os
+import sys
 import time
-import logging
+import json
 import threading
 import datetime
+import logging
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
+                               QLabel, QProgressBar, QFrame, QFileDialog, QLineEdit,
+                               QGraphicsDropShadowEffect, QSpacerItem, QSizePolicy, QCheckBox,
+                               QScrollArea, QApplication, QMessageBox, QTableWidget,
+                               QTableWidgetItem, QHeaderView)
+from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QThread
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QFont, QIcon, QPixmap
 
 from core.download_core.download_kernel_reformed import DownloadEngine
 from connect.fallback_connector import FallbackConnector
@@ -105,7 +108,25 @@ class DownloadPopDialog(QDialog):
         返回:
             DownloadPopDialog: 创建的弹窗对象
         """
+        # 记录弹窗创建的来源
+        download_source = "未知来源"
+        request_id = "无ID"
+        
+        if download_data:
+            download_source = download_data.get("download_source", "未知来源")
+            request_id = download_data.get("requestId", "无ID")
+            logging.info(f"[pop_dialog.py] 创建下载弹窗 [ID: {request_id}] [来源: {download_source}]")
+        
         dialog = DownloadPopDialog(parent)
+        
+        # 设置为非模态对话框，避免阻塞主窗口
+        dialog.setModal(False)
+        
+        # 检查下载数据来源，浏览器扩展请求默认设置更安全的窗口属性
+        is_browser_extension = download_data and download_data.get("source") == "browser_extension"
+        if is_browser_extension:
+            # 使用Dialog标志，但不使用WindowStaysOnTopHint，避免一直置顶
+            dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         
         if download_data:
             # 预处理下载数据
@@ -138,15 +159,19 @@ class DownloadPopDialog(QDialog):
                 # 保存任务数据，以便下载按钮使用
                 dialog.pending_task_data = task_data
         
+        # 显示为非阻塞对话框
         dialog.show()
         return dialog
     
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # 设置无边框窗口
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog | Qt.WindowStaysOnTopHint)
+        # 设置无边框窗口，但不强制模态性
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # 不再在这里设置模态，由create_and_show方法控制
+        # self.setModal(True)
         
         # 窗口大小 - 根据不同状态动态设置
         # 注意：不再设置固定的最小尺寸，而是在各个创建UI的方法中设置具体尺寸
@@ -198,41 +223,78 @@ class DownloadPopDialog(QDialog):
         return super().eventFilter(obj, event)
     
     def closeEvent(self, event):
-        """关闭事件处理"""
-        # 停止下载引擎
-        with self.thread_lock:
-            if hasattr(self, 'download_engine') and self.download_engine and hasattr(self.download_engine, 'is_running') and self.download_engine.is_running:
-                try:
-                    self.download_engine.stop()
-                    # 等待线程安全停止
-                    if hasattr(self.download_engine, 'wait'):
-                        self.download_engine.wait(300)  # 等待最多300ms
-                except Exception as e:
-                    logging.error(f"停止下载引擎失败: {e}")
-                
-        # 停止定时器
-        if hasattr(self, 'progress_timer') and self.progress_timer.isActive():
-            self.progress_timer.stop()
-        if hasattr(self, 'auto_close_timer') and self.auto_close_timer.isActive():
-            self.auto_close_timer.stop()
-        
-        # 断开所有信号连接
+        """关闭窗口事件处理"""
         try:
+            # 关闭前停止所有定时器
+            if hasattr(self, 'auto_close_timer') and self.auto_close_timer:
+                self.auto_close_timer.stop()
+                
+            if hasattr(self, 'progress_timer') and self.progress_timer:
+                self.progress_timer.stop()
+                
+            # 停止下载引擎
             if hasattr(self, 'download_engine') and self.download_engine:
-                self.download_engine.initialized.disconnect()
-                self.download_engine.block_progress_updated.disconnect()
-                self.download_engine.speed_updated.disconnect()
-                self.download_engine.download_completed.disconnect()
-                self.download_engine.error_occurred.disconnect()
-                self.download_engine.file_name_changed.disconnect()
-        except Exception:
-            pass  # 忽略断开连接时的错误
-        
-        # 接受关闭事件
-        event.accept()
-        
-        # 使用计时器延迟删除，确保所有待处理事件已处理
-        QTimer.singleShot(100, self.deleteLater)
+                try:
+                    # 如果是下载中状态，先尝试暂停下载
+                    if self.current_state == "downloading" and hasattr(self, 'pause_resume_btn'):
+                        # 暂停并等待
+                        self.download_engine.pause()
+                        time.sleep(0.1)  # 给暂停操作一点时间
+                        
+                    # 断开下载引擎的信号 - 先断开信号再停止，防止停止时触发信号导致问题
+                    try:
+                        if hasattr(self.download_engine, 'initialized'):
+                            self.download_engine.initialized.disconnect()
+                        if hasattr(self.download_engine, 'block_progress_updated'):
+                            self.download_engine.block_progress_updated.disconnect()
+                        if hasattr(self.download_engine, 'speed_updated'):
+                            self.download_engine.speed_updated.disconnect()
+                        if hasattr(self.download_engine, 'download_completed'):
+                            self.download_engine.download_completed.disconnect()
+                        if hasattr(self.download_engine, 'error_occurred'):
+                            self.download_engine.error_occurred.disconnect()
+                        if hasattr(self.download_engine, 'file_name_changed'):
+                            self.download_engine.file_name_changed.disconnect()
+                    except:
+                        pass
+
+                    # 停止下载引擎，释放资源
+                    self.download_engine.stop()
+                    
+                    # 等待下载线程完全结束 - 使用QThread的wait方法
+                    if self.download_engine.isRunning():
+                        # 最多等待3秒，避免阻塞UI
+                        if not self.download_engine.wait(3000):
+                            logging.warning("等待下载线程结束超时")
+                    
+                    # 确保下载引擎被正确终止
+                    self.download_engine.quit()
+                    if self.download_engine.isRunning():
+                        self.download_engine.terminate()
+                        if not self.download_engine.wait(1000):
+                            logging.warning("强制终止下载线程后等待超时")
+                        
+                except Exception as e:
+                    logging.error(f"关闭时停止下载引擎失败: {e}")
+                
+                # 清除引用
+                self.download_engine = None
+                    
+                if hasattr(self, 'progress_timer'):
+                    del self.progress_timer
+                    
+                # 清除布局内容
+                self._clear_content()
+            
+            # 允许关闭事件继续传递
+            event.accept()
+            
+        except Exception as e:
+            # 捕获所有异常，确保窗口能被关闭
+            logging.error(f"关闭窗口时发生意外错误: {e}")
+            import traceback
+            traceback.print_exc()
+            event.accept()  # 仍然接受关闭事件
     
     def _setup_ui(self):
         """初始化UI"""
@@ -1079,6 +1141,9 @@ class DownloadPopDialog(QDialog):
                     smart_threading=multi_thread
                 )
                 
+                # 设置线程优先级为低优先级，使其更容易被系统中断
+                self.download_engine.setPriority(QThread.LowPriority)
+                
                 # 连接信号
                 self.download_engine.initialized.connect(self._on_download_initialized)
                 self.download_engine.block_progress_updated.connect(self._on_progress_updated)
@@ -1494,7 +1559,21 @@ class DownloadPopDialog(QDialog):
         with self.thread_lock:
             if hasattr(self, 'download_engine') and self.download_engine:
                 try:
+                    # 停止下载引擎
                     self.download_engine.stop()
+                    
+                    # 等待下载线程结束 - 使用QThread的wait方法
+                    if self.download_engine.isRunning():
+                        # 最多等待2秒
+                        if not self.download_engine.wait(2000):
+                            logging.warning("等待下载线程结束超时")
+                            # 如果超时，尝试强制终止
+                            self.download_engine.terminate()
+                            if not self.download_engine.wait(1000):
+                                logging.warning("强制终止下载线程后等待超时")
+                            
+                    # 确保资源被释放
+                    self.download_engine = None
                 except Exception as e:
                     logging.error(f"停止下载引擎失败: {e}")
                 
@@ -1936,54 +2015,86 @@ class DownloadPopDialog(QDialog):
     
     def _on_pause_resume(self):
         """暂停/继续按钮点击处理"""
-        if self.is_paused:
-            # 恢复下载
-            self.download_button.setText("暂停")
-            self.download_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #8A7CEC;
-                    color: #FFFFFF;
-                    border: none;
-                    border-radius: 8px;
-                    padding: 4px 12px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    text-align: center;
-                }
-                QPushButton:hover {
-                    background-color: #9E8FEF;
-                }
-                QPushButton:pressed {
-                    background-color: #7A6CD8;
-                }
-            """)
-            self.download_button.clicked.connect(self._on_pause_resume)
-            self.is_paused = False
-            self.download_engine.resume()
-        else:
-            # 暂停下载
-            self.download_button.setText("继续")
-            self.download_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #8A7CEC;
-                    color: #FFFFFF;
-                    border: none;
-                    border-radius: 8px;
-                    padding: 4px 12px;
-                    font-size: 14px;
-                    font-weight: bold;
-                    text-align: center;
-                }
-                QPushButton:hover {
-                    background-color: #9E8FEF;
-                }
-                QPushButton:pressed {
-                    background-color: #7A6CD8;
-                }
-            """)
-            self.download_button.clicked.connect(self._on_pause_resume)
-            self.is_paused = True
-            self.download_engine.pause()
+        # 检查下载引擎是否存在
+        if not hasattr(self, 'download_engine') or self.download_engine is None:
+            logging.error("无法暂停/继续下载：下载引擎不存在")
+            return
+            
+        try:
+            if self.is_paused:
+                # 恢复下载
+                self.download_button.setText("暂停")
+                self.download_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #8A7CEC;
+                        color: #FFFFFF;
+                        border: none;
+                        border-radius: 8px;
+                        padding: 4px 12px;
+                        font-size: 14px;
+                        font-weight: bold;
+                        text-align: center;
+                    }
+                    QPushButton:hover {
+                        background-color: #9E8FEF;
+                    }
+                    QPushButton:pressed {
+                        background-color: #7A6CD8;
+                    }
+                """)
+                # 断开之前的连接再重新连接，避免多次连接
+                try:
+                    self.download_button.clicked.disconnect()
+                except:
+                    pass
+                self.download_button.clicked.connect(self._on_pause_resume)
+                self.is_paused = False
+                
+                # 恢复下载
+                logging.info("恢复下载任务")
+                self.download_engine.resume()
+                
+                # 更新状态提示
+                self.status_label.setText("下载中...")
+            else:
+                # 暂停下载
+                self.download_button.setText("继续")
+                self.download_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #8A7CEC;
+                        color: #FFFFFF;
+                        border: none;
+                        border-radius: 8px;
+                        padding: 4px 12px;
+                        font-size: 14px;
+                        font-weight: bold;
+                        text-align: center;
+                    }
+                    QPushButton:hover {
+                        background-color: #9E8FEF;
+                    }
+                    QPushButton:pressed {
+                        background-color: #7A6CD8;
+                    }
+                """)
+                # 断开之前的连接再重新连接，避免多次连接
+                try:
+                    self.download_button.clicked.disconnect()
+                except:
+                    pass
+                self.download_button.clicked.connect(self._on_pause_resume)
+                self.is_paused = True
+                
+                # 暂停下载
+                logging.info("暂停下载任务")
+                self.download_engine.pause()
+                
+                # 更新状态提示
+                self.status_label.setText("已暂停")
+        except Exception as e:
+            logging.error(f"暂停/继续下载失败: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _on_url_changed(self, url):
         """URL输入变化处理"""
@@ -2274,3 +2385,50 @@ class DownloadPopDialog(QDialog):
             self.auto_close_timer.start(5000)
         else:
             self.auto_close_timer.stop()
+    
+    def __del__(self):
+        """析构函数，确保资源释放"""
+        try:
+            # 停止所有定时器
+            if hasattr(self, 'auto_close_timer') and self.auto_close_timer:
+                self.auto_close_timer.stop()
+                
+            if hasattr(self, 'progress_timer') and self.progress_timer:
+                self.progress_timer.stop()
+                
+            # 安全停止下载引擎
+            if hasattr(self, 'download_engine') and self.download_engine:
+                try:
+                    # 断开下载引擎的信号
+                    try:
+                        if hasattr(self.download_engine, 'initialized'):
+                            self.download_engine.initialized.disconnect()
+                        if hasattr(self.download_engine, 'block_progress_updated'):
+                            self.download_engine.block_progress_updated.disconnect()
+                        if hasattr(self.download_engine, 'speed_updated'):
+                            self.download_engine.speed_updated.disconnect()
+                        if hasattr(self.download_engine, 'download_completed'):
+                            self.download_engine.download_completed.disconnect()
+                        if hasattr(self.download_engine, 'error_occurred'):
+                            self.download_engine.error_occurred.disconnect()
+                        if hasattr(self.download_engine, 'file_name_changed'):
+                            self.download_engine.file_name_changed.disconnect()
+                    except:
+                        pass
+                    
+                    # 停止下载引擎
+                    self.download_engine.stop()
+                    
+                    # 等待下载线程完全结束 - 使用QThread的wait方法
+                    # 在析构方法中使用较短的超时时间，避免阻塞过久
+                    if self.download_engine.isRunning():
+                        if not self.download_engine.wait(1000):
+                            # 如果等待超时，尝试强制终止
+                            self.download_engine.terminate()
+                    
+                    # 清除引用，帮助垃圾回收
+                    self.download_engine = None
+                except Exception as e:
+                    logging.error(f"析构函数中停止下载引擎失败: {e}")
+        except Exception as e:
+            logging.error(f"析构函数执行失败: {e}")

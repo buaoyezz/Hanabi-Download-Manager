@@ -730,15 +730,32 @@ class DownloadManagerWindow(QMainWindow):
                 logging.error("下载请求缺少URL")
                 return False
             
+            # 防止重复处理同一请求 - 使用请求ID或URL+时间戳作为唯一标识
+            request_id = download_data.get("requestId", "")
+            if not request_id:
+                request_id = f"req_{url}_{int(time.time() * 1000)}"
+                download_data["requestId"] = request_id
+                
+            # 初始化处理过的请求集合（如果不存在）
+            if not hasattr(self, '_processed_extension_requests'):
+                self._processed_extension_requests = set()
+                
+            # 检查请求是否已处理
+            if request_id in self._processed_extension_requests:
+                logging.warning(f"跳过重复的扩展下载请求 [ID: {request_id}]")
+                return False
+                
+            # 记录此请求ID
+            self._processed_extension_requests.add(request_id)
+            # 添加自动清理机制，防止集合无限增长
+            if len(self._processed_extension_requests) > 100:
+                self._processed_extension_requests = set(list(self._processed_extension_requests)[-50:])
+            
             # 确保headers字段存在
             if "headers" not in download_data:
                 download_data["headers"] = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
                 }
-            
-            # 添加请求ID用于跟踪
-            if "requestId" not in download_data:
-                download_data["requestId"] = f"req_{int(time.time() * 1000)}"
             
             # 标记为浏览器扩展类型，用于区分手动添加
             download_data["type"] = "browser_extension"
@@ -763,9 +780,6 @@ class DownloadManagerWindow(QMainWindow):
             # 如果还是没有文件名，使用URL的一部分
             if not filename:
                 filename = url[:30] + "..." if len(url) > 30 else url
-            
-            # 防止拉起主进程
-            #self.show_toast(f"从浏览器接收到下载: {filename}")
             
             # 使用扩展窗口处理下载
             if hasattr(self, 'extension_page') and self.extension_page:
@@ -856,70 +870,58 @@ class DownloadManagerWindow(QMainWindow):
     def _process_browser_download(self, download_data):
         """处理浏览器下载请求（在主线程中）"""
         try:
-            # 记录请求ID
+            # 记录请求ID和来源
             request_id = download_data.get("requestId", f"manual_{int(time.time() * 1000)}")
-            logging.info(f"主线程处理下载请求 [ID: {request_id}]")
+            download_source = download_data.get("download_source", "未知来源")
+            logging.info(f"[main_window.py] 主线程处理下载请求 [ID: {request_id}] [来源: {download_source}]")
             
             # 获取URL
             url = download_data.get("url", "")
             if not url:
-                logging.error(f"下载请求 [ID: {request_id}] 缺少URL")
+                logging.error(f"[main_window.py] 下载请求 [ID: {request_id}] 缺少URL")
                 return
             
             # 确保路径有效
             if not self.save_path or not os.path.isdir(self.save_path):
                 self.save_path = os.path.expanduser("~/Downloads")
                 os.makedirs(self.save_path, exist_ok=True)
-                logging.info(f"已设置默认保存路径: {self.save_path}")
                 
-                # 更新下载窗口的保存路径
-                if hasattr(self, 'download_window'):
-                    self.download_window.set_save_path(self.save_path)
+            # 设置保存路径
+            download_data["save_path"] = self.save_path
             
-            # 判断来源 - 确定是否是浏览器扩展
-            is_browser_extension = "type" in download_data and download_data["type"] == "browser_extension"
+            # 为了避免重复创建弹窗，检查是否已经被扩展页面处理
+            if download_data.get("handled_by_extension", False):
+                logging.info(f"[main_window.py] 下载请求 [ID: {request_id}] 已经被扩展页面处理，主窗口不再处理")
+                return
+                
+            # 如果是由扩展页面发送的信号，但扩展页面已经或将要创建弹窗，则跳过
+            if download_source.startswith("client/ui/extension_interface/extension_window.py"):
+                logging.info(f"[main_window.py] 下载请求 [ID: {request_id}] 来自扩展页面，主窗口不再处理")
+                return
             
-            # 使用下载窗口处理浏览器扩展下载
-            if hasattr(self, 'download_window'):
-                try:
-                    # 使用下载窗口的处理方法
-                    success = self.download_window.handle_browser_download_request(download_data)
-                    
-                    # 显示通知
-                    if success:
-                        logging.info(f"下载任务已成功添加 [ID: {request_id}]")
-                        
-                        # 只有手动添加的任务才显示弹窗提示
-                        if not is_browser_extension:
-                            filename = download_data.get("filename", "未知文件")
-                            if not filename:
-                                filename = url[:30] + "..." if len(url) > 30 else url
-                            self.show_toast(f"已添加下载任务: {filename}")
-                            
-                        # 如果窗口最小化或不可见，显示系统通知
-                        if self.is_minimized_to_tray or not self.isVisible():
-                            self._show_system_notification("新下载任务", f"已添加下载任务: {download_data.get('filename', '未知文件')}")
-                    else:
-                        logging.error(f"添加下载任务失败 [ID: {request_id}]")
-                        
+            # 处理文件名
+            filename = download_data.get("filename", "")
+            if not filename:
+                filename = self._extract_filename_from_url(url)
+                download_data["filename"] = filename
+            
+            # 处理下载请求
+            if hasattr(self, 'download_window') and self.download_window:
+                # 添加来源标记
+                download_data["download_source"] = "client/ui/client_interface/main_window.py:_process_browser_download"
+                
+                # 使用下载窗口处理
+                success = self.download_window.handle_browser_download_request(download_data)
+                if success:
+                    logging.info(f"[main_window.py] 已由download_window处理下载请求 [ID: {request_id}]")
                     # 记录下载请求
                     self._count_download_request()
-                    return success
-                    
-                except Exception as e:
-                    logging.error(f"处理下载请求时发生错误: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    return False
-            else:
-                logging.error("下载窗口未初始化")
-                return False
-                
+                    # 切换到下载页面
+                    self.pages_manager.switch_page("download")
         except Exception as e:
             logging.error(f"处理浏览器下载请求失败: {e}")
             import traceback
-            traceback.print_exc()
-            return False
+            logging.error(traceback.format_exc())
     
     def start_download_with_data(self, task_data, download_data):
         """使用提供的数据开始下载任务"""
@@ -1455,6 +1457,15 @@ class DownloadManagerWindow(QMainWindow):
                 QMessageBox.Ok
             )
         
+        # 关闭所有可能的弹窗
+        try:
+            for widget in QApplication.topLevelWidgets():
+                if widget != self and widget.isVisible() and isinstance(widget, QDialog):
+                    logging.info(f"关闭子对话框: {widget.__class__.__name__}")
+                    widget.close()
+        except Exception as e:
+            logging.error(f"关闭子对话框失败: {e}")
+        
         # 停止浏览器下载监听器
         if hasattr(self, 'connector') and self.connector:
             try:
@@ -1867,18 +1878,29 @@ class DownloadManagerWindow(QMainWindow):
         try:
             # 处理浏览器下载事件
             if isinstance(event, BrowserDownloadEvent):
-                logging.info("收到浏览器下载事件")
+                logging.info("[main_window.py] 收到浏览器下载事件")
                 download_data = event.download_data
                 
                 # 防止重复处理相同请求
                 request_id = download_data.get("requestId", "")
-                if hasattr(self, '_processed_browser_requests') and request_id in self._processed_browser_requests:
-                    logging.warning(f"跳过重复的下载请求 [ID: {request_id}]")
-                    return True
+                if not request_id:
+                    url = download_data.get("url", "")
+                    request_id = f"req_{url}_{int(time.time() * 1000)}"
+                    download_data["requestId"] = request_id
                 
                 # 初始化处理过的请求集合（如果不存在）
                 if not hasattr(self, '_processed_browser_requests'):
                     self._processed_browser_requests = set()
+                    
+                # 检查请求是否已处理
+                if request_id in self._processed_browser_requests:
+                    logging.warning(f"[main_window.py] 跳过重复的下载事件请求 [ID: {request_id}]")
+                    return True
+                    
+                # 检查是否已在扩展请求记录中
+                if hasattr(self, '_processed_extension_requests') and request_id in self._processed_extension_requests:
+                    logging.warning(f"[main_window.py] 该请求已被扩展处理过，跳过事件请求 [ID: {request_id}]")
+                    return True
                     
                 # 记录此请求ID
                 if request_id:
@@ -1887,16 +1909,23 @@ class DownloadManagerWindow(QMainWindow):
                     if len(self._processed_browser_requests) > 100:
                         self._processed_browser_requests = set(list(self._processed_browser_requests)[-50:])
                 
+                # 添加来源标识
+                download_data["download_source"] = "client/ui/client_interface/main_window.py:event"
+                
                 # 如果有扩展页面，优先使用扩展页面处理
                 if hasattr(self, 'extension_page') and self.extension_page:
+                    logging.info(f"[main_window.py] 转交下载事件到扩展页面处理 [ID: {request_id}]")
                     # 切换到扩展页面
                     self.pages_manager.switch_page("extension")
                     # 使用计时器延迟处理下载，确保UI已经完全更新
+                    # 设置标记表示不要创建新弹窗
+                    download_data["handled_by_extension"] = False
                     QTimer.singleShot(200, lambda: self._safe_extension_download(download_data))
                     return True
                 
                 # 如果没有扩展页面，使用主窗口处理
                 # 延迟处理以确保UI刷新
+                logging.info(f"[main_window.py] 使用主窗口处理下载事件 [ID: {request_id}]")
                 QTimer.singleShot(100, lambda: self._process_browser_download(download_data))
                 return True
         except Exception as e:
@@ -1908,17 +1937,43 @@ class DownloadManagerWindow(QMainWindow):
     def _safe_extension_download(self, download_data):
         """安全地调用扩展页面的下载处理方法"""
         try:
+            # 检查请求ID，防止重复处理
+            request_id = download_data.get("requestId", "")
+            if not request_id:
+                url = download_data.get("url", "")
+                request_id = f"req_{url}_{int(time.time() * 1000)}"
+                download_data["requestId"] = request_id
+                
+            # 如果请求已被处理，则直接跳过
+            if hasattr(self, '_processed_extension_requests') and request_id in self._processed_extension_requests:
+                logging.warning(f"[main_window.py] 该请求已被处理过，跳过扩展下载 [ID: {request_id}]")
+                return
+                
             # 再次检查扩展页面是否存在
             if not hasattr(self, 'extension_page') or not self.extension_page:
-                logging.warning("扩展页面不可用，回退到主窗口处理下载")
+                logging.warning("[main_window.py] 扩展页面不可用，回退到主窗口处理下载")
                 self._process_browser_download(download_data)
                 return
                 
             # 检查扩展页面是否有下载方法
             if hasattr(self.extension_page, 'start_download_from_extension'):
+                # 记录请求，防止重复处理
+                if not hasattr(self, '_processed_extension_requests'):
+                    self._processed_extension_requests = set()
+                    
+                self._processed_extension_requests.add(request_id)
+                if len(self._processed_extension_requests) > 100:
+                    self._processed_extension_requests = set(list(self._processed_extension_requests)[-50:])
+                
+                # 为下载数据添加标记，表明它是从主窗口安全调用的，不需要创建新弹窗
+                download_data["download_source"] = "client/ui/client_interface/main_window.py:_safe_extension_download"
+                download_data["handled_by_extension"] = False
+                
+                # 执行下载 - 交由扩展页面处理
+                logging.info(f"[main_window.py] 转交下载请求至扩展页面处理 [ID: {request_id}]")
                 self.extension_page.start_download_from_extension(download_data)
             else:
-                logging.warning("扩展页面缺少下载方法，回退到主窗口处理")
+                logging.warning("[main_window.py] 扩展页面缺少下载方法，回退到主窗口处理")
                 self._process_browser_download(download_data)
         except Exception as e:
             logging.error(f"通过扩展页面处理下载时出错: {e}")
@@ -2068,8 +2123,9 @@ class DownloadManagerWindow(QMainWindow):
     def _connect_extension_page(self):
         """连接浏览器扩展页面信号"""
         if hasattr(self, 'extension_page') and self.extension_page:
-            # 连接下载请求信号到主窗口处理函数
-            self.extension_page.extensionDownloadReceived.connect(self._process_browser_download)
+            # 不再连接下载请求信号，而是让extension_window自己处理下载
+            # 避免重复创建弹窗
+            # self.extension_page.extensionDownloadReceived.connect(self._process_browser_download)
             
             # 连接连接状态变化信号
             self.extension_page.connectionStatusChanged.connect(self._on_extension_connection_changed)
@@ -2114,4 +2170,50 @@ class DownloadManagerWindow(QMainWindow):
                     )
         except Exception as e:
             logging.error(f"显示系统通知失败: {e}")
+        
+    def _extract_filename_from_url(self, url):
+        """从URL中提取文件名
+        
+        参数:
+            url (str): 下载链接
+            
+        返回:
+            str: 提取的文件名，如果无法提取则返回一个基于时间戳的默认文件名
+        """
+        try:
+            if not url:
+                return f"download_{int(time.time())}.bin"
+                
+            # 解析URL
+            parsed_url = urlparse(url)
+            path = parsed_url.path
+            
+            # 从路径中提取文件名
+            if path:
+                filename = os.path.basename(path)
+                if filename:
+                    # 去除查询参数
+                    if '?' in filename:
+                        filename = filename.split('?')[0]
+                        
+                    # URL解码
+                    try:
+                        decoded_filename = unquote(filename)
+                        if decoded_filename != filename:
+                            filename = decoded_filename
+                    except:
+                        pass
+                        
+                    # 确保文件有扩展名
+                    if '.' in filename:
+                        return filename
+            
+            # 如果无法提取有效文件名，创建默认名称
+            timestamp = int(time.time())
+            return f"download_{timestamp}.bin"
+            
+        except Exception as e:
+            logging.warning(f"从URL提取文件名失败: {e}")
+            timestamp = int(time.time())
+            return f"download_{timestamp}.bin"
         
