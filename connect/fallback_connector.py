@@ -8,34 +8,35 @@ import time
 from PySide6.QtCore import Qt, QObject, Signal, Slot
 
 # 定义服务器类型标记
-USE_WEBSOCKET = True
-SERVER_TYPE = "WebSocket"
+USE_WEBSOCKET = False
+SERVER_TYPE = "TCP"  # 强制使用TCP服务器
 
-# 尝试导入WebSocket服务器，如果失败再导入TCP服务器
+# 提前导入TCP服务器，确保它总是可用作为后备选项
 try:
-    # 先尝试导入websockets.legacy模块，确保它存在
-    try:
-        import websockets.legacy
-        logging.info("成功导入websockets.legacy模块")
-    except (ImportError, ModuleNotFoundError) as e:
-        logging.warning(f"导入websockets.legacy模块失败: {e}")
-        USE_WEBSOCKET = False
-        SERVER_TYPE = "TCP"
-        raise ImportError("websockets.legacy模块不可用")
-        
-    from connect.websocket_server import get_server_instance as get_ws_server
-    logging.info("成功导入WebSocket服务器")
+    from connect.tcp_server import get_server_instance as get_tcp_server
+    logging.info("已导入TCP服务器作为后备选项")
 except (ImportError, ModuleNotFoundError) as e:
-    logging.warning(f"导入WebSocket服务器失败: {e}")
-    USE_WEBSOCKET = False
-    SERVER_TYPE = "TCP"
+    logging.error(f"导入TCP服务器失败: {e}")
+    logging.error(traceback.format_exc())
+    raise
+
+# WebSocket相关导入放在这里，但不使用
+try:
+    import websockets.legacy
+    logging.info("检测到websockets.legacy模块可用，但已配置为不使用")
+    
+    # 不再设置USE_WEBSOCKET为True
+    # USE_WEBSOCKET = True
+    # SERVER_TYPE = "WebSocket"
+    
     try:
-        from connect.tcp_server import get_server_instance as get_tcp_server
-        logging.info("已回退到TCP服务器")
+        from connect.websocket_server import get_server_instance as get_ws_server
+        logging.info("WebSocket服务器可用，但当前配置为使用TCP")
     except (ImportError, ModuleNotFoundError) as e:
-        logging.error(f"导入TCP服务器也失败了: {e}")
-        logging.error(traceback.format_exc())
-        raise
+        logging.warning(f"导入WebSocket服务器实现失败: {e}")
+except Exception as e:
+    logging.warning(f"WebSocket服务器检测过程中出错: {e}")
+    # 这里不需改变值，因为默认已经是False和TCP
 
 from core.download_core.download_kernel_reformed import DownloadEngine
 
@@ -64,45 +65,20 @@ class FallbackConnector(QObject):
             self.downloadRequestReceived.connect(self._download_handler)
     
     def initialize_server(self):
-        """初始化服务器，尝试WebSocket，如失败则使用TCP"""
+        """初始化服务器，使用TCP"""
         try:
-            if USE_WEBSOCKET:
-                self.logger.info("尝试初始化WebSocket服务器...")
-                try:
-                    # 再次检查websockets.legacy模块是否可用
-                    try:
-                        import websockets.legacy
-                    except (ImportError, ModuleNotFoundError):
-                        self.logger.warning("运行时检测到websockets.legacy模块不可用，强制使用TCP服务器")
-                        raise ImportError("websockets.legacy模块不可用")
-                        
-                    self.server = get_ws_server(port=20971)
-                    self.logger.info("使用WebSocket服务器连接器")
-                except Exception as ws_error:
-                    self.logger.error(f"初始化WebSocket服务器失败: {ws_error}")
-                    self.logger.error(traceback.format_exc())
-                    # WebSocket失败，尝试TCP
-                    try:
-                        from connect.tcp_server import get_server_instance as get_tcp_server
-                        self.server = get_tcp_server(port=20971)
-                        self.logger.info("已回退到TCP服务器")
-                    except Exception as tcp_error:
-                        self.logger.error(f"初始化TCP服务器也失败了: {tcp_error}")
-                        self.logger.error(traceback.format_exc())
-            else:
-                # 直接使用TCP服务器
-                self.server = get_tcp_server(port=20971)
-                self.logger.info("使用TCP服务器连接器")
+            # 直接使用TCP服务器，不尝试WebSocket
+            self.server = get_tcp_server(port=20971)
+            self.logger.info("使用TCP服务器连接器")
         except Exception as e:
             self.logger.error(f"服务器初始化失败: {e}")
             self.logger.error(traceback.format_exc())
-            # 最后尝试一次TCP服务器
+            # 再次尝试TCP服务器
             try:
-                from connect.tcp_server import get_server_instance as get_tcp_server
                 self.server = get_tcp_server(port=20971)
-                self.logger.info("最终回退到TCP服务器成功")
+                self.logger.info("重新尝试TCP服务器成功")
             except Exception as final_error:
-                self.logger.error(f"最终回退到TCP服务器也失败了: {final_error}")
+                self.logger.error(f"TCP服务器初始化失败: {final_error}")
                 self.logger.error(traceback.format_exc())
         
         # 设置下载处理程序
@@ -120,8 +96,7 @@ class FallbackConnector(QObject):
                 
                 # 获取实际使用的端口（可能已被自动切换）
                 actual_port = getattr(self.server, 'port', 20971)
-                server_type = "WebSocket" if USE_WEBSOCKET else "TCP"
-                self.logger.info(f"{server_type}服务器已启动，端口: {actual_port}")
+                self.logger.info(f"TCP服务器已启动，端口: {actual_port}")
                 
                 # 处理之前积压的请求
                 self.process_queued_requests()
@@ -129,49 +104,34 @@ class FallbackConnector(QObject):
                 self.logger.error(f"启动服务器失败: {e}")
                 self.logger.error(traceback.format_exc())
                 
-                # 如果是WebSocket服务器启动失败，尝试回退到TCP服务器
-                if USE_WEBSOCKET:
-                    self.logger.info("尝试回退到TCP服务器...")
-                    try:
-                        from connect.tcp_server import get_server_instance as get_tcp_server
-                        self.server = get_tcp_server(port=20971)
-                        self.server.set_download_handler(self.handle_download_request)
-                        self.server.start()
-                        self.logger.info("成功回退到TCP服务器")
-                        
-                        # 再次尝试处理队列
-                        self.process_queued_requests()
-                    except Exception as tcp_error:
-                        self.logger.error(f"回退到TCP服务器也失败了: {tcp_error}")
-                        self.logger.error(traceback.format_exc())
+                # 如果启动失败，再次尝试
+                self.logger.info("尝试重新启动TCP服务器...")
+                try:
+                    self.server = get_tcp_server(port=20971)
+                    self.server.set_download_handler(self.handle_download_request)
+                    self.server.start()
+                    self.logger.info("成功重启TCP服务器")
+                    
+                    # 再次尝试处理队列
+                    self.process_queued_requests()
+                except Exception as retry_error:
+                    self.logger.error(f"重启TCP服务器也失败了: {retry_error}")
+                    self.logger.error(traceback.format_exc())
         else:
             self.logger.error("没有可用的服务器，无法启动")
             # 再次尝试初始化服务器
             try:
-                # 尝试重新初始化WebSocket服务器
-                if USE_WEBSOCKET:
-                    try:
-                        from connect.websocket_server import get_server_instance as get_ws_server
-                        self.server = get_ws_server(port=20971)
-                        self.logger.info("重新初始化WebSocket服务器成功")
-                    except Exception as ws_error:
-                        self.logger.error(f"重新初始化WebSocket服务器失败: {ws_error}")
-                        # 回退到TCP
-                        from connect.tcp_server import get_server_instance as get_tcp_server
-                        self.server = get_tcp_server(port=20971)
-                        self.logger.info("回退到TCP服务器")
-                else:
-                    # 直接初始化TCP服务器
-                    from connect.tcp_server import get_server_instance as get_tcp_server
-                    self.server = get_tcp_server(port=20971)
+                # 直接初始化TCP服务器
+                self.server = get_tcp_server(port=20971)
                 
                 # 设置下载处理程序
-                self.server.set_download_handler(self.handle_download_request)
-                self.server.start()
-                self.logger.info("重试初始化服务器成功")
-                
-                # 再次尝试处理队列
-                self.process_queued_requests()
+                if self.server:
+                    self.server.set_download_handler(self.handle_download_request)
+                    self.server.start()
+                    self.logger.info("重试初始化服务器成功")
+                    
+                    # 再次尝试处理队列
+                    self.process_queued_requests()
             except Exception as retry_error:
                 self.logger.error(f"重试初始化服务器失败: {retry_error}")
                 self.logger.error(traceback.format_exc())
@@ -226,7 +186,7 @@ class FallbackConnector(QObject):
                 return self._running
             
             if hasattr(self, 'server') and self.server:
-                # 如果有WebSocket服务器对象，检查其状态
+                # 检查服务器状态
                 if hasattr(self.server, 'running'):
                     return self.server.running
                 elif hasattr(self.server, 'is_alive'):
@@ -275,8 +235,7 @@ class FallbackConnector(QObject):
         if self.server:
             try:
                 self.server.stop()
-                server_type = "WebSocket" if USE_WEBSOCKET else "TCP"
-                self.logger.info(f"{server_type}服务器已停止")
+                self.logger.info("TCP服务器已停止")
             except Exception as e:
                 self.logger.error(f"停止服务器出错: {e}")
                 self.logger.error(traceback.format_exc())
