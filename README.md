@@ -52,9 +52,11 @@ HanabiDownloadManager/
 
 ## 技术细节
 
-- 使用 Python 3.13 开发
+- 使用 Python 3.12.6 开发
 - 依赖 PySide6 提供 UI 框架
 - 使用 requests 库处理 HTTP 请求
+- 通过 TCP 连接插件
+- 使用 Nuitka 打包本体
 - 使用线程池进行并发下载
 - 支持稀疏文件创建，预分配文件空间
 
