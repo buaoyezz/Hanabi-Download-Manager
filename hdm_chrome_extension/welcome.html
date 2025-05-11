@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hey Welcome to Hanabi Download Manager</title>
+    <style>
+        body {
+            font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #1a1a2e;
+            color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            flex: 1;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+            background-color: #16213e;
+            border-bottom: 3px solid #ff6e7f;
+            color: white;
+            box-shadow: 0 4px 15px rgba(255, 110, 127, 0.2);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            text-shadow: 0 0 10px rgba(255, 110, 127, 0.6);
+        }
+        
+        .logo {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 15px;
+            filter: drop-shadow(0 0 8px rgba(255, 110, 127, 0.6));
+        }
+        
+        .step-container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .step {
+            background-color: #16213e;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            border-left: 4px solid #ff6e7f;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .step:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(255, 110, 127, 0.2);
+        }
+        
+        .step h2 {
+            color: #ff6e7f;
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+        }
+        
+        .step-number {
+            background: linear-gradient(135deg, #ff6e7f, #c580ff);
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            margin-right: 10px;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(255, 110, 127, 0.4);
+        }
+        
+        .step p {
+            margin-bottom: 0;
+            line-height: 1.6;
+        }
+        
+        .connection-status {
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            text-align: center;
+            background-color: #1f2940;
+            transition: background-color 0.3s;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+        
+        .connection-status.connected {
+            background-color: #1e3b3b;
+            color: #7accac;
+            border-left: 4px solid #7accac;
+        }
+        
+        .connection-status.disconnected {
+            background-color: #3b1e2e;
+            color: #ff6e7f;
+            border-left: 4px solid #ff6e7f;
+        }
+        
+        .actions {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 25px;
+            background: linear-gradient(135deg, #ff6e7f, #c580ff);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(255, 110, 127, 0.3);
+        }
+        
+        .button:hover {
+            background: linear-gradient(135deg, #ff8393, #d396ff);
+            transform: translateY(-3px);
+            box-shadow: 0 7px 20px rgba(255, 110, 127, 0.4);
+        }
+        
+        .button:active {
+            transform: translateY(1px);
+        }
+        
+        .secondary-button {
+            background: linear-gradient(135deg, #2e3a5a, #1a1a2e);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+        
+        .secondary-button:hover {
+            background: linear-gradient(135deg, #3a4b73, #252542);
+        }
+        
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background-color: #16213e;
+            border-top: 2px solid #ff6e7f;
+            font-size: 14px;
+            color: #c0c0c0;
+        }
+        
+        ul {
+            list-style-type: none;
+            padding-left: 20px;
+        }
+        
+        ul li {
+            position: relative;
+            padding-left: 25px;
+            margin-bottom: 10px;
+        }
+        
+        ul li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 5px;
+            width: 15px;
+            height: 15px;
+            background-color: #ff6e7f;
+            border-radius: 50%;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="icon128.png" alt="Hanabi Download Manager" class="logo">
+        <h1>Welcome</h1>
+        <h1>Hanabi Download Manager</h1>
+    </div>
+    
+    <div class="container">
+        <div class="step-container">
+            <div class="step">
+                <h2><span class="step-number">1</span>Hanabi Download Manager</h2>
+                <p>INSTALL SUCCESS THANKS FOR YOUR USE</p>
+                <p>Developed by ZZBuAoYe</p>
+                <p>Bug Report: <a href="https://github.com/buaoyezz/Hanabi-Download-Manager/issues" target="_blank" style="color: #ff6e7f;">GitHub Issues</a></p>
+            </div>
+            
+            <div class="step">
+                <h2><span class="step-number">2</span>Extension Status</h2>
+                <p>The extension program needs to connect to the main program of Hanabi Download Manager to work. Please ensure that you have installed and started the Hanabi Download Manager application.</p>
+                <div id="connection-status" class="connection-status">
+                    Checking connection status...
+                </div>
+            </div>
+            
+            <div class="step">
+                <h2><span class="step-number">3</span>USE METHOD</h2>
+                <p>Please ensure that HDM is running in the background of your system</p>
+                <ul>
+                    <li>1.0.4 version and later, the software side uses TCP to connect to the plugin more stably</li>
+                    <li>Click the plugin icon to manage the extension</li>
+                    <li>You can quickly paste download links through the extension pop-up window</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <a href="https://github.com/buaoyezz/Hanabi-Download-Manager" target="_blank" class="button">Github</a>
+            <button id="checkConnection" class="button">Check Connection</button>
+            <button id="closeWindow" class="button secondary-button">Close</button>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>Hanabi Download Manager ©2025 Developed by ZZBuAoYe | Version: <span id="version">Loading...</span></p>
+    </div>
+
+    <script src="welcome.js"></script>
+</body>
+</html> 

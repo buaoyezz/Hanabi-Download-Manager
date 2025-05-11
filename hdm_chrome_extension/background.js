@@ -12,6 +12,20 @@ const RECONNECT_INTERVAL = 3000; // 3秒
 self.reconnectAttempts = reconnectAttempts;
 self.connectWebSocket = connectWebSocket;
 
+// 监听扩展安装或更新事件
+chrome.runtime.onInstalled.addListener(function(details) {
+    // 当扩展被安装或更新时
+    if (details.reason === "install") {
+        console.log("扩展安装完成，打开欢迎页面");
+        // 安装时打开欢迎页面
+        chrome.tabs.create({ url: "welcome.html" });
+    } else if (details.reason === "update") {
+        console.log("扩展更新完成，从版本", details.previousVersion);
+        // 更新时也可以打开欢迎页面，或者打开更新日志页面
+        // chrome.tabs.create({ url: "welcome.html" });
+    }
+});
+
 // 创建 WebSocket 连接
 function connectWebSocket() {
     try {
@@ -124,6 +138,15 @@ function updateConnectionStatus(connected) {
     isConnected = connected;
     updateBadge(connected ? "connected" : "disconnected");
     updateStatus(connected);
+    
+    // 通知所有打开的页面连接状态发生变化
+    chrome.runtime.sendMessage({
+        action: "connectionChanged",
+        isConnected: connected
+    }).catch(error => {
+        // 忽略没有页面监听的错误
+        console.debug("发送连接状态变化消息时出错:", error);
+    });
 }
 
 // 更新扩展图标徽章
@@ -340,6 +363,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 error: "未连接到下载管理器，请确保应用程序正在运行" 
             });
         }
+        return true;
+    }
+    else if (message.action === "getConnectionStatus") {
+        // 返回当前连接状态
+        sendResponse({
+            isConnected: isConnected,
+            reconnectAttempts: reconnectAttempts
+        });
         return true;
     }
 });

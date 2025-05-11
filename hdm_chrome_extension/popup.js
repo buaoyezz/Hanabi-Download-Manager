@@ -11,7 +11,7 @@ function updateStatus() {
     chrome.storage.local.get(["isConnected", "connectionError"], (data) => {
         if (data.isConnected) {
             statusText.textContent = "连接成功";
-            statusText.style.color = "#4CAF50"; // 绿色
+            statusText.style.color = "#7accac"; // 淡绿色
             
             // 清除错误消息
             if (document.getElementById("error-message")) {
@@ -24,13 +24,13 @@ function updateStatus() {
             }
         } else {
             statusText.textContent = "连接已断开";
-            statusText.style.color = "#F44336"; // 红色
+            statusText.style.color = "#ff6e7f"; // 粉红色
             
             // 显示错误消息（如果有）
             if (data.connectionError && !document.getElementById("error-message")) {
                 const errorDiv = document.createElement("div");
                 errorDiv.id = "error-message";
-                errorDiv.style.color = "#F44336";
+                errorDiv.style.color = "#ff6e7f";
                 errorDiv.style.fontSize = "12px";
                 errorDiv.style.marginTop = "5px";
                 errorDiv.textContent = data.connectionError;
@@ -42,7 +42,6 @@ function updateStatus() {
                     retryButton.id = "retry-button";
                     retryButton.textContent = "重试连接";
                     retryButton.style.marginTop = "10px";
-                    retryButton.style.backgroundColor = "#2196F3"; // 蓝色
                     retryButton.onclick = retryConnection;
                     
                     errorDiv.parentNode.insertBefore(retryButton, errorDiv.nextSibling);
@@ -74,7 +73,7 @@ function retryConnection() {
         
         // 更新UI
         statusText.textContent = "正在重新连接...";
-        statusText.style.color = "#FF9800"; // 黄色
+        statusText.style.color = "#c580ff"; // 紫色
         
         // 移除重试按钮
         if (document.getElementById("retry-button")) {
@@ -132,21 +131,18 @@ function isVersionNewer(v1, v2) {
 }
 
 // 打印插件版本到插件页面
-// 打印插件版本到插件页面
 document.addEventListener('DOMContentLoaded', () => {
-
     const ExtensionVersion = chrome.runtime.getManifest().version;
 
     // 获取客户端版本和最新插件版本
     chrome.storage.local.get(["ClientVersion", "LatestExtensionVersion"], (result) => {
         const ClientVersion = result.ClientVersion || "Unknown";
         const LatestExtensionVersion = result.LatestExtensionVersion || "Unknown";
-        // console.log(ExtensionVersion, ClientVersion, LatestExtensionVersion);
 
         if (isVersionNewer(LatestExtensionVersion, ExtensionVersion)) {
-            document.getElementById('version').innerHTML = `插件版本: ${ExtensionVersion}&nbsp;&nbsp客户端版本: ${ClientVersion}<br/><span style="color: palevioletred;">插件有新版本，请前往客户端手动更新!</span>`;
+            document.getElementById('version').innerHTML = `插件版本: ${ExtensionVersion}&nbsp;&nbsp;客户端版本: ${ClientVersion}<br/><span style="color: #ff6e7f;">插件有新版本，请前往客户端手动更新!</span>`;
         } else {
-            document.getElementById('version').innerHTML = `插件版本: ${ExtensionVersion}&nbsp;&nbsp客户端版本: ${ClientVersion}`;
+            document.getElementById('version').innerHTML = `插件版本: ${ExtensionVersion}&nbsp;&nbsp;客户端版本: ${ClientVersion}`;
         }
     });
 
@@ -163,46 +159,3 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (ev
 
 // 更新状态
 updateStatus();
-
-// 添加下载按钮点击事件监听器
-document.getElementById('download-button').addEventListener('click', () => {
-    const urlInput = document.getElementById('url-input');
-    const url = urlInput.value.trim();
-    
-    if (!url) {
-        alert('请输入有效的下载链接');
-        return;
-    }
-    
-    // 获取当前标签页URL作为referrer
-    chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
-        const currentTab = tabs[0];
-        const referrer = currentTab ? currentTab.url : '';
-        
-        // 从URL中提取文件名
-        let filename = url.split('/').pop();
-        if (filename.includes('?')) {
-            filename = filename.split('?')[0];
-        }
-        
-        // 准备下载信息
-        const downloadInfo = {
-            url: url,
-            filename: filename,
-            referrer: referrer
-        };
-        
-        // 发送消息给后台脚本处理下载
-        chrome.runtime.sendMessage({
-            action: 'manualDownload',
-            downloadInfo: downloadInfo
-        }, (response) => {
-            if (response && response.success) {
-                urlInput.value = '';
-                alert('下载任务已添加');
-            } else {
-                alert('添加下载任务失败：' + (response ? response.error : '未知错误'));
-            }
-        });
-    });
-});

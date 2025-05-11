@@ -1,8 +1,8 @@
 {
   "name": "Hanabi Download Manager Extension",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "manifest_version": 3,
-  "description": "Hanabi Download Manager - 花火下载管理器",
+  "description": "Hanabi Download Manager - HDM Browser Extension",
   "background": {
     "service_worker": "background.js"
   },
@@ -19,6 +19,12 @@
     "48": "icon48.png",
     "128": "icon128.png"
   },
-  "permissions": ["downloads", "webRequest", "activeTab", "storage", "notifications"],
-  "host_permissions": ["<all_urls>"]
+  "permissions": ["downloads", "webRequest", "activeTab", "storage", "notifications", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [
+    {
+      "resources": ["welcome.html", "welcome.js", "icon128.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
