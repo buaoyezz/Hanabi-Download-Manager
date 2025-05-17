@@ -154,6 +154,21 @@ class ExtensionWindow(QWidget):
         )
         extension_layout.addWidget(extension_button)
         
+        # 添加源码跳转卡片
+        source_code_button = self._create_clickable_card(
+            "查看项目源码",
+            "点击跳转到 GitHub 查看 Hanabi Download Manager 的开源代码",
+            "https://github.com/buaoyezz/Hanabi-Download-Manager"
+        )
+        extension_layout.addWidget(source_code_button)
+
+        friend_link_button = self._create_clickable_card(
+            "XiaoY API",
+            "感谢XiaoY提供API和云计算服务",
+            "https://apiv2.xiaoy.asia"
+        )
+        extension_layout.addWidget(friend_link_button)
+        
         # 声明卡片
         declaration_frame = RoundedFrame(radius=6, bg_color="#363636")
         declaration_layout = QVBoxLayout(declaration_frame)
