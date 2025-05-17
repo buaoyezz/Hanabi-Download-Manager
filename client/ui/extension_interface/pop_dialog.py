@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import gc
 import threading
 import datetime
 import logging
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
 from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QThread
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QFont, QIcon, QPixmap
 
-from core.download_core.download_kernel_reformed import DownloadEngine
+from core.download_core.Hanabi_NSF_Kernel import DownloadEngine
 from connect.fallback_connector import FallbackConnector
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
@@ -117,16 +118,49 @@ class DownloadPopDialog(QDialog):
             request_id = download_data.get("requestId", "无ID")
             logging.info(f"[pop_dialog.py] 创建下载弹窗 [ID: {request_id}] [来源: {download_source}]")
         
-        dialog = DownloadPopDialog(parent)
+        # 检查父窗口状态
+        parent_minimized = False
+        has_parent = False
+        if parent and hasattr(parent, 'isMinimized'):
+            has_parent = True
+            try:
+                parent_minimized = parent.isMinimized()
+            except Exception:
+                pass
+                
+        # 关键修改: 当主窗口最小化时，完全不设置父窗口关系
+        # 这是解决问题的核心 - 创建完全独立的顶级窗口
+        if has_parent and parent_minimized:
+            # 创建完全独立的窗口，没有父子关系
+            dialog = DownloadPopDialog(None)  # 显式传入None
+            
+            # 保存原始父窗口引用只用于通信，不建立Qt父子关系
+            dialog.original_parent = parent
+            
+            # 标记为在最小化状态创建
+            dialog.parent_was_minimized = True
+            
+            # 显式设置为顶级窗口 - 核心修复
+            dialog.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            
+            # 确保这个窗口不会被当作应用程序的主窗口
+            dialog.setAttribute(Qt.WA_QuitOnClose, False)
+        else:
+            # 正常情况下创建对话框
+            dialog = DownloadPopDialog(parent)
+            dialog.parent_was_minimized = False
+            
+            # 设置为非模态对话框
+            dialog.setModal(False)
         
-        # 设置为非模态对话框，避免阻塞主窗口
-        dialog.setModal(False)
+        # 通用窗口设置
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)  # 确保关闭时删除自身
         
-        # 检查下载数据来源，浏览器扩展请求默认设置更安全的窗口属性
-        is_browser_extension = download_data and download_data.get("source") == "browser_extension"
-        if is_browser_extension:
-            # 使用Dialog标志，但不使用WindowStaysOnTopHint，避免一直置顶
-            dialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        # 记录当前创建时的窗口状态，便于后续处理
+        dialog.was_created_when_minimized = parent_minimized
+        
+        # 标记需要移除置顶标志的属性
+        dialog.remove_top_hint = True
         
         if download_data:
             # 预处理下载数据
@@ -159,19 +193,64 @@ class DownloadPopDialog(QDialog):
                 # 保存任务数据，以便下载按钮使用
                 dialog.pending_task_data = task_data
         
-        # 显示为非阻塞对话框
-        dialog.show()
+        # 显示窗口
+        dialog.showNormal()
+        
+        # 强制激活窗口
+        dialog.raise_()
+        dialog.activateWindow()
+        
         return dialog
     
     def __init__(self, parent=None):
-        super().__init__(parent)
-        
-        # 设置无边框窗口，但不强制模态性
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        
-        # 不再在这里设置模态，由create_and_show方法控制
-        # self.setModal(True)
+        # 先处理最小化状态
+        parent_minimized = False
+        if parent and hasattr(parent, 'isMinimized'):
+            try:
+                parent_minimized = parent.isMinimized()
+            except Exception:
+                pass
+
+        # 如果父窗口已最小化，我们需要特殊处理
+        if parent_minimized:
+            # === 关键修复：对于最小化状态，创建完全独立的窗口 ===
+            # 初始化为独立窗口，没有父子关系，避免级联关闭问题
+            super().__init__(None)  # 显式传入None作为父窗口
+            
+            # 保存原始父窗口引用，只用于通信，不建立Qt父子关系
+            import weakref
+            self._parent_ref_strong = parent  # 保留一个强引用用于通信
+            self.original_parent = parent
+            
+            # 标记为在最小化状态创建
+            self.parent_was_minimized = True
+            
+            # 额外的关键设置：确保窗口不会影响应用程序生命周期
+            self.setAttribute(Qt.WA_QuitOnClose, False)  # 关闭时不会退出应用程序
+            
+            # 设置为顶级窗口，完全独立于父窗口
+            # 使用Qt.Window确保窗口完全独立
+            self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+            
+            # 允许窗口显示但不强制激活，避免干扰用户
+            self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+            
+            # 启用透明背景
+            self.setAttribute(Qt.WA_TranslucentBackground)
+        else:
+            # 正常情况下维持父子关系
+            super().__init__(parent)
+            self.original_parent = parent
+            self.parent_was_minimized = False
+            
+            # 窗口属性配置
+            self.setAttribute(Qt.WA_TranslucentBackground)
+            
+            # 使用对话框标志，但不添加Qt.Tool标志，它可能引起关闭问题
+            self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+            
+            # 即使是常规对话框，也确保关闭时不会影响应用程序
+            self.setAttribute(Qt.WA_QuitOnClose, False)
         
         # 窗口大小 - 根据不同状态动态设置
         # 注意：不再设置固定的最小尺寸，而是在各个创建UI的方法中设置具体尺寸
@@ -225,60 +304,128 @@ class DownloadPopDialog(QDialog):
     def closeEvent(self, event):
         """关闭窗口事件处理"""
         try:
+            # ===== 关键修复 =====
+            # 第一步：确保窗口不会导致应用程序退出
+            # 1. 显式标记此窗口关闭时不会退出应用程序
+            self.setAttribute(Qt.WA_QuitOnClose, False)
+            
+            # 2. 显式设置为独立窗口，确保关闭事件不会级联到父窗口
+            if hasattr(self, 'parent_was_minimized') and self.parent_was_minimized:
+                current_flags = self.windowFlags()
+                if not (current_flags & Qt.Window):
+                    self.setWindowFlags(current_flags | Qt.Window)
+            
+            # 3. 清除任何可能的Qt.WA_DeleteOnClose属性，使其不会被立即销毁
+            # 由我们的代码决定何时销毁，避免Qt框架自动处理
+            self.setAttribute(Qt.WA_DeleteOnClose, False)
+            
+            # ==== 常规清理逻辑 ====
             # 关闭前停止所有定时器
             if hasattr(self, 'auto_close_timer') and self.auto_close_timer:
-                self.auto_close_timer.stop()
+                try:
+                    self.auto_close_timer.stop()
+                except Exception:
+                    pass
                 
             if hasattr(self, 'progress_timer') and self.progress_timer:
-                self.progress_timer.stop()
+                try:
+                    self.progress_timer.stop()
+                except Exception:
+                    pass
                 
             # 停止下载引擎
             if hasattr(self, 'download_engine') and self.download_engine:
                 try:
                     # 如果是下载中状态，先尝试暂停下载
                     if self.current_state == "downloading" and hasattr(self, 'pause_resume_btn'):
-                        # 暂停并等待
+                        # 暂停下载，不使用sleep以避免阻塞UI线程
                         self.download_engine.pause()
-                        time.sleep(0.1)  # 给暂停操作一点时间
+                    
+                    # 如果下载已完成，删除可能存在的断点续传文件
+                    if self.current_state == "completed" and self.download_engine.file_name:
+                        try:
+                            import os
+                            from pathlib import Path
+                            file_path = Path(self.download_engine.save_path) / self.download_engine.file_name
+                            resume_file = file_path.with_suffix(file_path.suffix + '.resume')
+                            if resume_file.exists():
+                                resume_file.unlink()
+                                logging.info(f"窗口关闭时已删除断点续传文件: {resume_file}")
+                        except Exception as resume_e:
+                            logging.warning(f"窗口关闭时删除断点续传文件失败: {resume_e}")
                         
-                    # 断开下载引擎的信号 - 先断开信号再停止，防止停止时触发信号导致问题
+                    # 断开下载引擎的信号 - 使用更安全的方式
                     try:
-                        if hasattr(self.download_engine, 'initialized'):
-                            self.download_engine.initialized.disconnect()
-                        if hasattr(self.download_engine, 'block_progress_updated'):
-                            self.download_engine.block_progress_updated.disconnect()
-                        if hasattr(self.download_engine, 'speed_updated'):
-                            self.download_engine.speed_updated.disconnect()
-                        if hasattr(self.download_engine, 'download_completed'):
-                            self.download_engine.download_completed.disconnect()
-                        if hasattr(self.download_engine, 'error_occurred'):
-                            self.download_engine.error_occurred.disconnect()
-                        if hasattr(self.download_engine, 'file_name_changed'):
-                            self.download_engine.file_name_changed.disconnect()
-                    except:
-                        pass
+                        if hasattr(self.download_engine, 'initialized') and self.download_engine.initialized:
+                            try:
+                                self.download_engine.initialized.disconnect(self._on_download_initialized)
+                            except (TypeError, RuntimeError):
+                                pass
+                                
+                        if hasattr(self.download_engine, 'block_progress_updated') and self.download_engine.block_progress_updated:
+                            try:
+                                self.download_engine.block_progress_updated.disconnect(self._on_progress_updated)
+                            except (TypeError, RuntimeError):
+                                pass
+                                
+                        if hasattr(self.download_engine, 'speed_updated') and self.download_engine.speed_updated:
+                            try:
+                                self.download_engine.speed_updated.disconnect(self._on_speed_updated)
+                            except (TypeError, RuntimeError):
+                                pass
+                                
+                        if hasattr(self.download_engine, 'download_completed') and self.download_engine.download_completed:
+                            try:
+                                self.download_engine.download_completed.disconnect(self._on_download_completed)
+                            except (TypeError, RuntimeError):
+                                pass
+                                
+                        if hasattr(self.download_engine, 'error_occurred') and self.download_engine.error_occurred:
+                            try:
+                                self.download_engine.error_occurred.disconnect(self._on_download_error)
+                            except (TypeError, RuntimeError):
+                                pass
+                                
+                        if hasattr(self.download_engine, 'file_name_changed') and self.download_engine.file_name_changed:
+                            try:
+                                self.download_engine.file_name_changed.disconnect(self._on_filename_changed)
+                            except (TypeError, RuntimeError):
+                                pass
+                    except Exception as signal_ex:
+                        logging.warning(f"断开下载引擎信号时出错: {signal_ex}")
 
-                    # 停止下载引擎，释放资源
-                    self.download_engine.stop()
+                    # 安全地停止下载引擎，避免强制终止
+                    try:
+                        self.download_engine.stop()
+                    except Exception as stop_ex:
+                        logging.warning(f"停止下载引擎时出错: {stop_ex}")
                     
-                    # 等待下载线程完全结束 - 使用QThread的wait方法
+                    # 等待下载线程完全结束 - 使用QThread的wait方法，但避免长时间等待
                     if self.download_engine.isRunning():
-                        # 最多等待3秒，避免阻塞UI
-                        if not self.download_engine.wait(3000):
-                            logging.warning("等待下载线程结束超时")
-                    
-                    # 确保下载引擎被正确终止
-                    self.download_engine.quit()
-                    if self.download_engine.isRunning():
-                        self.download_engine.terminate()
+                        # 最多等待1秒钟，避免阻塞UI
                         if not self.download_engine.wait(1000):
-                            logging.warning("强制终止下载线程后等待超时")
+                            logging.warning("等待下载线程结束超时，不强制终止")
+                    
+                    # 只在必要时使用quit而不是terminate，避免强制终止导致资源泄漏
+                    if self.download_engine.isRunning():
+                        try:
+                            self.download_engine.quit()
+                            # 等待极短时间
+                            if not self.download_engine.wait(500):
+                                logging.warning("线程退出后等待超时，将继续执行")
+                        except Exception as quit_ex:
+                            logging.warning(f"退出下载线程时出错: {quit_ex}")
                         
                 except Exception as e:
                     logging.error(f"关闭时停止下载引擎失败: {e}")
                 
-                # 清除引用
+                # 使用弱引用避免循环引用
+                import weakref
+                engine_ref = weakref.ref(self.download_engine)
                 self.download_engine = None
+                
+                # 在UI线程空闲时再清理引用
+                QTimer.singleShot(100, lambda: gc.collect())
                     
                 if hasattr(self, 'progress_timer'):
                     del self.progress_timer
@@ -286,9 +433,82 @@ class DownloadPopDialog(QDialog):
                 # 清除布局内容
                 self._clear_content()
             
-            # 允许关闭事件继续传递
+            # === 最终的安全关闭处理 ===
+            try:
+                # 保存关键状态
+                parent_was_minimized = False
+                if hasattr(self, 'parent_was_minimized'):
+                    parent_was_minimized = self.parent_was_minimized
+                
+                # 断开与UI的所有连接
+                # 彻底分离信号和槽
+                try:
+                    # 分离所有已知信号 - 只断开已连接的信号
+                    for signal_name in ['downloadRequested', 'downloadCancelled', 'downloadPaused', 
+                                       'downloadResumed', 'fileOpened', 'folderOpened', 'downloadCompleted']:
+                        if hasattr(self, signal_name):
+                            signal = getattr(self, signal_name)
+                            if hasattr(signal, 'disconnect') and callable(signal.disconnect):
+                                # 检查信号是否有连接
+                                try:
+                                    # 使用receivers方法检查是否有连接的槽
+                                    if hasattr(signal, 'receivers') and signal.receivers() > 0:
+                                        signal.disconnect()  # 只有在有接收者时断开
+                                except (TypeError, RuntimeError, AttributeError):
+                                    # 静默失败，继续处理其他信号
+                                    pass
+                except Exception as e:
+                    logging.debug(f"断开信号连接时出错: {e}")
+                
+                # 最彻底的处理：如果是在最小化状态创建的窗口
+                if parent_was_minimized:
+                    # 1. 强制使其成为独立窗口
+                    self.setParent(None)
+                    self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+                    
+                    # 2. 清除所有可能导致应用程序退出的属性
+                    self.setAttribute(Qt.WA_QuitOnClose, False)
+                    
+                    # 3. 使用延迟销毁，确保与主窗口完全分离
+                    self.setAttribute(Qt.WA_DeleteOnClose, False)  # 暂时禁用自动删除
+                    
+                    # 4. 清除原始父窗口引用 - 使用弱引用保留必要信息
+                    if hasattr(self, 'original_parent') and self.original_parent:
+                        import weakref
+                        self._parent_ref_weak = weakref.ref(self.original_parent)
+                        self.original_parent = None
+                    
+                    # 5. 使用独立的完全销毁顺序
+                    # 首先隐藏窗口，使其对用户不可见
+                    self.hide()
+                    
+                    # 6. 安排延迟销毁，确保完全脱离事件循环
+                    def delayed_destroy():
+                        try:
+                            # 使用Qt的deleteLater方法彻底销毁窗口
+                            self.deleteLater()
+                        except:
+                            pass
+                    
+                    # 延迟200毫秒执行销毁
+                    QTimer.singleShot(200, delayed_destroy)
+                else:
+                    # 对于普通状态创建的对话框，使用标准关闭流程
+                    # 断开父窗口关系
+                    if self.parent():
+                        self.setParent(None)
+                    
+                    # 设置自动删除标志，让Qt处理销毁
+                    self.setAttribute(Qt.WA_DeleteOnClose, True)
+                
+                # 强制触发垃圾回收
+                QTimer.singleShot(500, gc.collect)
+                
+            except Exception as e:
+                logging.debug(f"处理主窗口关系时出错: {e}")
+                
+            # 始终接受关闭事件
             event.accept()
-            
         except Exception as e:
             # 捕获所有异常，确保窗口能被关闭
             logging.error(f"关闭窗口时发生意外错误: {e}")
@@ -1130,6 +1350,26 @@ class DownloadPopDialog(QDialog):
             multi_thread = task_data.get("multi_thread", True)
             max_concurrent = 8 if multi_thread else 1
             
+            # 从配置中获取默认分段数和是否启用智能线程管理
+            default_segments = 8  # 默认值
+            smart_threading = multi_thread  # 默认智能线程与多线程设置一致
+            
+            try:
+                # 导入配置管理器
+                from client.ui.client_interface.settings.config import config
+                
+                # 获取默认分段数
+                default_segments = config.get_setting("download", "default_segments", 8)
+                
+                # 只有在多线程模式下才可能启用智能线程管理
+                if multi_thread:
+                    # 读取智能线程管理设置
+                    smart_threading = config.get_setting("download", "dynamic_threads", True)
+                    if not smart_threading:
+                        logging.info(f"智能线程管理已关闭，将使用固定分段数: {default_segments}")
+            except Exception as e:
+                logging.warning(f"获取配置失败，使用默认值: {e}")
+            
             # 创建下载引擎
             with self.thread_lock:
                 self.download_engine = DownloadEngine(
@@ -1138,7 +1378,8 @@ class DownloadPopDialog(QDialog):
                     max_concurrent=max_concurrent,
                     save_path=save_path,
                     file_name=file_name,
-                    smart_threading=multi_thread
+                    smart_threading=smart_threading,  # 根据配置决定是否使用智能线程管理
+                    default_segments=default_segments  # 使用从配置获取的分段数
                 )
                 
                 # 设置线程优先级为低优先级，使其更容易被系统中断
@@ -1164,7 +1405,7 @@ class DownloadPopDialog(QDialog):
                 # 更新UI状态
                 self.status_label.setText("初始化中...")
                 
-                logging.info(f"弹窗已启动下载任务: {url}")
+                logging.info(f"弹窗已启动下载任务: {url}, 智能线程管理: {smart_threading}, 默认分段数: {default_segments}")
                 
         except Exception as e:
             logging.error(f"启动下载任务失败: {e}")
@@ -1354,6 +1595,20 @@ class DownloadPopDialog(QDialog):
         """延迟创建完成界面，确保UI刷新"""
         # 更新UI - 显示下载完成界面
         self._create_completed_ui(task_data)
+        
+        # 清理断点续传文件
+        try:
+            file_name = task_data.get("file_name", "")
+            save_path = task_data.get("save_path", "")
+            if file_name and save_path:
+                from pathlib import Path
+                file_path = Path(save_path) / file_name
+                resume_file = file_path.with_suffix(file_path.suffix + '.resume')
+                if resume_file.exists():
+                    resume_file.unlink()
+                    logging.info(f"完成界面创建后已删除断点续传文件: {resume_file}")
+        except Exception as e:
+            logging.warning(f"完成界面创建后删除断点续传文件失败: {e}")
         
         # 强制更新UI
         self.repaint()
@@ -1556,35 +1811,103 @@ class DownloadPopDialog(QDialog):
     
     def _on_cancel_download(self):
         """取消下载"""
-        with self.thread_lock:
-            if hasattr(self, 'download_engine') and self.download_engine:
-                try:
-                    # 停止下载引擎
-                    self.download_engine.stop()
+        try:
+            # 记录最小化状态，这是关键
+            parent_was_minimized = False
+            if hasattr(self, 'parent_was_minimized'):
+                parent_was_minimized = self.parent_was_minimized
+            
+            # 先停止下载，确保所有资源在关闭前释放
+            with self.thread_lock:
+                if hasattr(self, 'download_engine') and self.download_engine:
+                    try:
+                        # 停止下载引擎
+                        self.download_engine.stop()
+                        
+                        # 等待下载线程结束 - 使用QThread的wait方法
+                        if self.download_engine.isRunning():
+                            # 最多等待2秒
+                            if not self.download_engine.wait(2000):
+                                logging.warning("等待下载线程结束超时")
+                                # 如果超时，尝试强制终止
+                                self.download_engine.terminate()
+                                if not self.download_engine.wait(1000):
+                                    logging.warning("强制终止下载线程后等待超时")
+                                
+                        # 确保资源被释放
+                        self.download_engine = None
+                    except Exception as e:
+                        logging.error(f"停止下载引擎失败: {e}")
                     
-                    # 等待下载线程结束 - 使用QThread的wait方法
-                    if self.download_engine.isRunning():
-                        # 最多等待2秒
-                        if not self.download_engine.wait(2000):
-                            logging.warning("等待下载线程结束超时")
-                            # 如果超时，尝试强制终止
-                            self.download_engine.terminate()
-                            if not self.download_engine.wait(1000):
-                                logging.warning("强制终止下载线程后等待超时")
-                            
-                    # 确保资源被释放
-                    self.download_engine = None
-                except Exception as e:
-                    logging.error(f"停止下载引擎失败: {e}")
-                
-            if self.task_id:
+                if self.task_id:
+                    try:
+                        self.downloadCancelled.emit(self.task_id)
+                    except Exception as e:
+                        logging.error(f"发送取消下载信号失败: {e}")
+            
+            # === 关键的安全关闭逻辑 ===
+            # 确保不会影响主应用程序
+            self.setAttribute(Qt.WA_QuitOnClose, False)
+            
+            # 最小化状态特殊处理
+            if parent_was_minimized:
+                                # 1. 彻底分离所有信号连接
                 try:
-                    self.downloadCancelled.emit(self.task_id)
+                    for signal_name in ['downloadRequested', 'downloadCancelled', 'downloadPaused', 
+                                         'downloadResumed', 'fileOpened', 'folderOpened', 'downloadCompleted']:
+                        if hasattr(self, signal_name):
+                            signal = getattr(self, signal_name)
+                            if hasattr(signal, 'disconnect') and callable(signal.disconnect):
+                                # 检查信号是否真的有连接
+                                try:
+                                    # 使用receivers方法检查有无连接的槽
+                                    if hasattr(signal, 'receivers') and signal.receivers() > 0:
+                                        signal.disconnect()  # 只有在有接收者时断开
+                                except (TypeError, RuntimeError, AttributeError):
+                                    # 静默失败，不影响流程
+                                    pass
                 except Exception as e:
-                    logging.error(f"发送取消下载信号失败: {e}")
-        
-        # 关闭窗口
-        self.close()
+                    logging.debug(f"断开信号连接时出错: {e}")
+                
+                # 2. 使其成为独立窗口
+                self.setParent(None)
+                self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+                
+                # 3. 禁用自动删除，由我们控制删除过程
+                self.setAttribute(Qt.WA_DeleteOnClose, False)
+                
+                # 4. 安全保存原始父窗口的弱引用并清除强引用
+                if hasattr(self, 'original_parent') and self.original_parent:
+                    import weakref
+                    self._parent_ref_weak = weakref.ref(self.original_parent)
+                    self.original_parent = None
+                
+                # 5. 先隐藏窗口，防止闪烁
+                self.hide()
+                
+                # 6. 使用延迟删除，确保完全脱离事件循环
+                def complete_destruction():
+                    try:
+                        # 最终销毁窗口
+                        self.deleteLater()
+                        # 强制垃圾回收
+                        gc.collect()
+                    except:
+                        pass
+                
+                # 稍长一些的延迟，确保完全脱离
+                QTimer.singleShot(300, complete_destruction)
+            else:
+                # 正常状态下，可以使用标准关闭流程
+                self.setAttribute(Qt.WA_DeleteOnClose, True)
+                self.close()
+                
+        except Exception as e:
+            logging.error(f"取消下载时出错: {e}")
+            # 确保窗口能被关闭，即使出现错误
+            # 使用deleteLater而非close，更安全地销毁窗口
+            self.hide()
+            self.deleteLater()
     
     def _toggle_segments_display(self):
         """切换分段信息显示状态"""
@@ -2357,6 +2680,12 @@ class DownloadPopDialog(QDialog):
         if not folder_path:
             return
             
+        # 获取文件名，用于选中文件
+        file_name = ""
+        if hasattr(self, 'download_engine') and self.download_engine:
+            if hasattr(self.download_engine, 'file_name'):
+                file_name = self.download_engine.file_name
+                
         # 发送信号
         self.folderOpened.emit(folder_path)
         
@@ -2367,11 +2696,32 @@ class DownloadPopDialog(QDialog):
             import platform
             
             if platform.system() == "Windows":
-                os.startfile(folder_path)
+                if file_name:
+                    # 使用/select参数打开文件夹并选中文件
+                    full_path = os.path.join(folder_path, file_name)
+                    subprocess.run(['explorer', '/select,', full_path])
+                else:
+                    # 仅打开文件夹
+                    os.startfile(folder_path)
             elif platform.system() == "Darwin":  # macOS
-                subprocess.call(["open", folder_path])
+                if file_name:
+                    # 在macOS上选中文件
+                    full_path = os.path.join(folder_path, file_name)
+                    subprocess.call(["open", "-R", full_path])
+                else:
+                    subprocess.call(["open", folder_path])
             else:  # Linux
-                subprocess.call(["xdg-open", folder_path])
+                if file_name:
+                    # 尝试在Linux上选中文件（不同文件管理器命令不同）
+                    try:
+                        full_path = os.path.join(folder_path, file_name)
+                        # 尝试使用nautilus（GNOME）
+                        subprocess.call(["nautilus", "--select", full_path])
+                    except:
+                        # 如果失败，只打开文件夹
+                        subprocess.call(["xdg-open", folder_path])
+                else:
+                    subprocess.call(["xdg-open", folder_path])
                 
         except Exception as e:
             logging.error(f"打开文件夹失败: {e}")
@@ -2389,46 +2739,161 @@ class DownloadPopDialog(QDialog):
     def __del__(self):
         """析构函数，确保资源释放"""
         try:
-            # 停止所有定时器
-            if hasattr(self, 'auto_close_timer') and self.auto_close_timer:
-                self.auto_close_timer.stop()
+            # 停止所有定时器 - 使用更安全的方式检查
+            try:
+                if hasattr(self, 'auto_close_timer') and self.auto_close_timer is not None:
+                    # 使用hasattr检查是否存在stop方法，确保对象没有被销毁
+                    if hasattr(self.auto_close_timer, 'stop') and callable(self.auto_close_timer.stop):
+                        self.auto_close_timer.stop()
+            except (RuntimeError, ReferenceError, TypeError) as e:
+                # 忽略QTimer已被删除的错误
+                pass
                 
-            if hasattr(self, 'progress_timer') and self.progress_timer:
-                self.progress_timer.stop()
+            try:
+                if hasattr(self, 'progress_timer') and self.progress_timer is not None:
+                    # 使用hasattr检查是否存在stop方法，确保对象没有被销毁
+                    if hasattr(self.progress_timer, 'stop') and callable(self.progress_timer.stop):
+                        self.progress_timer.stop()
+            except (RuntimeError, ReferenceError, TypeError) as e:
+                # 忽略QTimer已被删除的错误
+                pass
                 
             # 安全停止下载引擎
-            if hasattr(self, 'download_engine') and self.download_engine:
+            if hasattr(self, 'download_engine') and self.download_engine is not None:
                 try:
-                    # 断开下载引擎的信号
+                    # 断开下载引擎的信号 - 使用更安全的方式检查
                     try:
-                        if hasattr(self.download_engine, 'initialized'):
+                        if (hasattr(self.download_engine, 'initialized') and 
+                            hasattr(self.download_engine.initialized, 'disconnect')):
                             self.download_engine.initialized.disconnect()
-                        if hasattr(self.download_engine, 'block_progress_updated'):
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'block_progress_updated') and 
+                            hasattr(self.download_engine.block_progress_updated, 'disconnect')):
                             self.download_engine.block_progress_updated.disconnect()
-                        if hasattr(self.download_engine, 'speed_updated'):
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'speed_updated') and 
+                            hasattr(self.download_engine.speed_updated, 'disconnect')):
                             self.download_engine.speed_updated.disconnect()
-                        if hasattr(self.download_engine, 'download_completed'):
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'download_completed') and 
+                            hasattr(self.download_engine.download_completed, 'disconnect')):
                             self.download_engine.download_completed.disconnect()
-                        if hasattr(self.download_engine, 'error_occurred'):
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'error_occurred') and 
+                            hasattr(self.download_engine.error_occurred, 'disconnect')):
                             self.download_engine.error_occurred.disconnect()
-                        if hasattr(self.download_engine, 'file_name_changed'):
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'file_name_changed') and 
+                            hasattr(self.download_engine.file_name_changed, 'disconnect')):
                             self.download_engine.file_name_changed.disconnect()
                     except:
                         pass
                     
-                    # 停止下载引擎
-                    self.download_engine.stop()
+                    # 检查stop方法是否存在
+                    if hasattr(self.download_engine, 'stop') and callable(self.download_engine.stop):
+                        self.download_engine.stop()
                     
-                    # 等待下载线程完全结束 - 使用QThread的wait方法
-                    # 在析构方法中使用较短的超时时间，避免阻塞过久
-                    if self.download_engine.isRunning():
-                        if not self.download_engine.wait(1000):
-                            # 如果等待超时，尝试强制终止
-                            self.download_engine.terminate()
+                    # 等待下载线程完全结束 - 先检查isRunning方法是否存在
+                    if (hasattr(self.download_engine, 'isRunning') and 
+                        callable(self.download_engine.isRunning) and 
+                        self.download_engine.isRunning()):
+                        # 检查wait方法是否存在
+                        if hasattr(self.download_engine, 'wait') and callable(self.download_engine.wait):
+                            if not self.download_engine.wait(500):  # 减少等待时间，避免阻塞过久
+                                # 检查terminate方法是否存在
+                                if hasattr(self.download_engine, 'terminate') and callable(self.download_engine.terminate):
+                                    self.download_engine.terminate()
                     
                     # 清除引用，帮助垃圾回收
                     self.download_engine = None
                 except Exception as e:
-                    logging.error(f"析构函数中停止下载引擎失败: {e}")
+                    # 忽略析构中的错误
+                    pass
         except Exception as e:
-            logging.error(f"析构函数执行失败: {e}")
+            # 完全忽略析构中的任何错误
+            pass
+    
+    def showEvent(self, event):
+        """显示窗口时确保窗口处于正确的状态"""
+        super().showEvent(event)
+        
+        try:
+            # 检查是否需要特殊处理主窗口最小化的情况
+            if self.parent_was_minimized:
+                # 对于最小化主窗口创建的对话框，确保它能正确独立显示
+                self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+                
+                # 确保窗口置顶和活跃
+                self.raise_()
+                self.activateWindow()
+                
+                # 单独定时器确保窗口可见
+                QTimer.singleShot(100, self._ensure_window_active)
+            
+            # 如果当前是自动启动下载，则确保进度更新定时器启动
+            if self.current_state == "downloading" and not self.progress_timer.isActive():
+                self.progress_timer.start(1000)  # 每秒更新一次下载信息
+        except Exception as e:
+            logging.warning(f"处理窗口显示事件时出错: {e}")
+    
+    def _ensure_window_active(self):
+        """确保窗口处于可见和活跃状态"""
+        try:
+            # 确保窗口可见
+            if not self.isVisible():
+                self.show()
+                
+            # 置于顶层
+            self.raise_()
+            self.activateWindow()
+            
+            # 检查是否需要移除置顶标志
+            if self.windowFlags() & Qt.WindowStaysOnTopHint:
+                # 10秒后移除置顶标志
+                QTimer.singleShot(10000, self._remove_always_on_top)
+        except Exception as e:
+            logging.debug(f"确保窗口活跃时出错: {e}")
+    
+    def _remove_always_on_top(self):
+        """移除窗口置顶标志"""
+        try:
+            if self.isVisible() and (self.windowFlags() & Qt.WindowStaysOnTopHint):
+                # 保存当前位置
+                current_pos = self.pos()
+                
+                # 移除置顶标志
+                self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
+                
+                # 重新显示窗口在原来位置
+                self.move(current_pos)
+                self.show()
+        except Exception as e:
+            logging.debug(f"移除窗口置顶标志时出错: {e}")
+    
+    def focusOutEvent(self, event):
+        """窗口失去焦点事件处理"""
+        try:
+            super().focusOutEvent(event)
+            
+            # 当窗口失去焦点时，尝试移除置顶标志
+            if hasattr(self, 'remove_top_hint') and self.remove_top_hint:
+                # 使用静态方法创建单次触发的定时器
+                QTimer.singleShot(100, self._remove_always_on_top)
+        except Exception as e:
+            # 忽略焦点事件处理中的错误
+            pass

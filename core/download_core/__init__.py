@@ -1,4 +1,4 @@
 # Download core module initialization
-from .download_kernel_reformed import DownloadEngine, DownloadBlock
+from .Hanabi_NSF_Kernel import DownloadEngine, DownloadBlock
 
 __all__ = ['DownloadEngine', 'DownloadBlock'] 

@@ -6,7 +6,7 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFontDatabase, QFont, QIcon
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot, Qt
 from client.ui.client_interface.main_window import DownloadManagerWindow
 # 使用FallbackConnector作为默认连接器
 from connect.fallback_connector import FallbackConnector as Connector
@@ -25,6 +25,9 @@ class BrowserDownloadHandler(QObject):
         super().__init__(parent)
         self.active_dialogs = []  # 保存活跃的弹窗列表
         self.active_requests = {}  # 追踪活跃的下载请求
+        
+        # BrowserDownloadHandler 继承自 QObject，不是 QWidget
+        # 所以不能使用 setAttribute 方法
         
     @Slot(dict)
     def handle_download_request(self, download_data):
@@ -72,20 +75,52 @@ class BrowserDownloadHandler(QObject):
                 if "Referer" not in task_data["headers"]:
                     task_data["headers"]["Referer"] = download_data["referrer"]
             
-            # 创建下载弹窗
-            dialog = DownloadPopDialog.create_and_show(task_data, auto_start=True)
+            # 获取父窗口引用，检查其状态
+            parent_window = None
+            if hasattr(self, 'parent') and self.parent():
+                parent_window = self.parent()
+                
+            # 检查主窗口最小化状态
+            parent_minimized = False
+            if parent_window and hasattr(parent_window, 'isMinimized'):
+                try:
+                    parent_minimized = parent_window.isMinimized()
+                except Exception:
+                    pass
             
-            # 保存弹窗引用
-            self.active_dialogs.append(dialog)
+            # 创建弹窗 - 优化后的创建方式
+            # DownloadPopDialog.create_and_show 方法会根据最小化状态正确处理父窗口关系
+            dialog = DownloadPopDialog.create_and_show(task_data, parent=parent_window, auto_start=True)
             
-            # 连接下载完成信号
-            dialog.downloadCompleted.connect(self._on_download_completed)
-            
-            # 当弹窗关闭时从列表中移除
-            dialog.destroyed.connect(lambda obj=dialog, req_id=request_id: self._remove_dialog(obj, req_id))
-            
-            log.info(f"已为下载请求 [ID: {request_id}] 创建下载弹窗")
-            return True
+            # 确保弹窗记录了主窗口最小化的状态
+            if dialog:
+                # 额外确保正确记录了最小化状态
+                dialog.parent_was_minimized = parent_minimized
+                
+                # 显式设置不要在关闭时退出应用程序 - 弹窗不应影响应用生命周期
+                if hasattr(dialog, 'setAttribute') and hasattr(Qt, 'WA_QuitOnClose'):
+                    dialog.setAttribute(Qt.WA_QuitOnClose, False)
+                
+                # 使用弱引用保存弹窗，避免循环引用
+                import weakref
+                self.active_dialogs.append(weakref.ref(dialog))
+                
+                # 连接下载完成信号 - 确保使用Qt.QueuedConnection避免阻塞
+                dialog.downloadCompleted.connect(self._on_download_completed, Qt.QueuedConnection)
+                
+                # 当弹窗关闭时从列表中移除 - 使用QueuedConnection确保在UI线程处理
+                # 使用lambda捕获当前值，避免引用变化
+                dialog.destroyed.connect(
+                    lambda obj=None, dlg=dialog, req_id=request_id: self._remove_dialog(dlg, req_id), 
+                    Qt.QueuedConnection
+                )
+                
+                log.info(f"已为下载请求 [ID: {request_id}] 创建下载弹窗")
+                return True
+            else:
+                log.error(f"创建下载弹窗失败 [ID: {request_id}]")
+                return False
+                
         except Exception as e:
             log.error(f"处理下载请求失败: {e}")
             import traceback
@@ -107,13 +142,34 @@ class BrowserDownloadHandler(QObject):
     
     def _remove_dialog(self, dialog, request_id=None):
         """从活跃列表中移除弹窗"""
-        if dialog in self.active_dialogs:
-            self.active_dialogs.remove(dialog)
-            
-        # 清理请求跟踪
-        if request_id and request_id in self.active_requests:
-            self.active_requests.pop(request_id, None)
-            log.debug(f"已清理下载请求跟踪 [ID: {request_id}]")
+        try:
+            # 清理弱引用 - 安全地检查每个引用
+            new_active_dialogs = []
+            for ref in self.active_dialogs:
+                try:
+                    # 检查引用是否有效
+                    dlg = ref()
+                    if dlg is not None and dlg != dialog:
+                        new_active_dialogs.append(ref)
+                except Exception:
+                    # 忽略任何引用错误
+                    pass
+                    
+            # 更新列表
+            self.active_dialogs = new_active_dialogs
+                
+            # 清理请求跟踪
+            if request_id and request_id in self.active_requests:
+                self.active_requests.pop(request_id, None)
+                log.debug(f"已清理下载请求跟踪 [ID: {request_id}]")
+                
+            # 强制垃圾回收，确保资源被释放
+            import gc
+            gc.collect()
+                
+        except Exception as e:
+            # 确保即使出错也不会影响主程序
+            log.error(f"清理弹窗引用时出错: {e}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

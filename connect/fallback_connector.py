@@ -38,7 +38,7 @@ except Exception as e:
     logging.warning(f"WebSocket服务器检测过程中出错: {e}")
     # 这里不需改变值，因为默认已经是False和TCP
 
-from core.download_core.download_kernel_reformed import DownloadEngine
+from core.download_core.Hanabi_NSF_Kernel import DownloadEngine
 
 class FallbackConnector(QObject):
     """

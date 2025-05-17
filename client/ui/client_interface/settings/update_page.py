@@ -25,7 +25,7 @@ class UpdatePage(QWidget):
         self.font_manager = FontManager()
         
         # 软件当前版本
-        self.current_version = "1.0.4"
+        self.current_version = "1.0.5"
         
         # 更新源配置
         self.primary_api_url = "https://apiv2.xiaoy.asia"  # 主更新源URL
