@@ -22,6 +22,7 @@ class ConfigManager:
                 "dynamic_threads": True,      # 是否启用动态线程
                 "max_thread_count": 32,       # 最大线程数限制
                 "min_segment_size": 10,       # 最小分段大小(MB)
+                "default_segments": 8,        # 默认分段数
                 "save_path": str(Path.home() / "Downloads"),  # 默认保存路径
                 "max_tasks": 5,               # 最大同时下载任务数
                 "buffer_size": 8192,          # 缓冲区大小 (bytes)
@@ -236,6 +237,16 @@ class ConfigManager:
     
     def set_auto_check_update(self, enabled):
         success = self.set_setting("startup", "check_update", bool(enabled))
+        if success:
+            self.save_config()
+        return success
+    
+    def get_default_segments(self):
+        return self.get_setting("download", "default_segments", 8)
+    
+    def set_default_segments(self, segments):
+        segments = max(1, min(32, segments))  # 限制在1-32之间
+        success = self.set_setting("download", "default_segments", segments)
         if success:
             self.save_config()
         return success
