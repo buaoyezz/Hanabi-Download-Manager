@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QIcon, QPixmap, QFont
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from core.history.history_manager import HistoryManager
+from client.ui.extension_interface.extension_window import ExtensionWindow
 
 class StatCard(QFrame):
     """统计信息卡片"""
@@ -196,13 +197,13 @@ class HomeWindow(QWidget):
         welcome_layout.setSpacing(15)
         
         # 欢迎标题
-        welcome_title = QLabel("欢迎使用 Hanabi 下载管理器")
+        welcome_title = QLabel("Hanabi Download Manager")
         welcome_title.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: bold;")
         self.font_manager.apply_font(welcome_title)
         welcome_layout.addWidget(welcome_title)
         
         # 欢迎信息
-        welcome_text = QLabel("轻松管理您的下载任务，支持多线程下载和浏览器集成")
+        welcome_text = QLabel("Stable Channel 1.0.5 Released")
         welcome_text.setStyleSheet("color: #B0B0B0; font-size: 14px;")
         welcome_text.setWordWrap(True)
         self.font_manager.apply_font(welcome_text)
@@ -212,7 +213,7 @@ class HomeWindow(QWidget):
         
     def _add_stats_section(self, parent_layout):
         # 统计信息标题
-        stats_title = QLabel("下载统计")
+        stats_title = QLabel("| 下载统计")
         stats_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
         self.font_manager.apply_font(stats_title)
         parent_layout.addWidget(stats_title)
@@ -239,7 +240,7 @@ class HomeWindow(QWidget):
         
     def _add_features_section(self, parent_layout):
         # 功能标题
-        features_title = QLabel("主要功能")
+        features_title = QLabel("| 主要功能")
         features_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
         self.font_manager.apply_font(features_title)
         parent_layout.addWidget(features_title)
@@ -260,7 +261,7 @@ class HomeWindow(QWidget):
                 "title": "浏览器集成", 
                 "description": "直接从浏览器添加下载任务", 
                 "icon": "ic_fluent_slide_text_24_regular",
-                "page": "downloads"
+                "page": "extension"
             },
             {
                 "title": "历史记录", 

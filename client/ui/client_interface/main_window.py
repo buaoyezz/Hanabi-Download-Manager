@@ -31,8 +31,10 @@ import time
 import logging
 import requests
 import uuid
+import gc
 import platform
 import inspect
+import weakref
 from urllib.parse import urlparse, unquote
 
 # 字体管理器已经在font_manager.py中集成，支持Fluent图标系统
@@ -162,6 +164,12 @@ class DownloadManagerWindow(QMainWindow):
         # 设置窗口样式
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # === 重要：确保主窗口关闭时应用程序才会退出 ===
+        # 这是修复最小化状态下关闭弹窗引起应用关闭的关键
+        # 明确指定只有主窗口关闭时才退出应用，子窗口关闭不影响
+        self.setAttribute(Qt.WA_QuitOnClose, True)
+        
         # 应用全局字体
         self.apply_global_font()
         # 加载应用图标
@@ -668,12 +676,36 @@ class DownloadManagerWindow(QMainWindow):
             if hasattr(self, 'connector') and self.connector and self.connector.is_running():
                 logging.info("连接器已存在且正在运行，跳过初始化")
                 return
+            
+            # 销毁旧的处理器（如果存在）
+            if hasattr(self, 'download_handler') and self.download_handler:
+                try:
+                    # 先断开信号
+                    if hasattr(self.download_handler, 'downloadCompleted'):
+                        try:
+                            self.download_handler.downloadCompleted.disconnect()
+                        except (TypeError, RuntimeError):
+                            pass
+                    
+                    # 强制清理引用
+                    import gc
+                    self.download_handler = None
+                    gc.collect()
+                except Exception as e:
+                    logging.error(f"清理旧的下载处理器失败: {e}")
+                
+            # 创建下载处理器
+            from main import BrowserDownloadHandler
+            self.download_handler = BrowserDownloadHandler(self)
+            
+            # 连接处理器的下载完成信号
+            self.download_handler.downloadCompleted.connect(self._on_extension_download_completed, Qt.QueuedConnection)
                 
             # 创建连接器
             self.connector = FallbackConnector()
             
-            # 连接下载请求信号 - 确保直接连接到添加下载方法
-            self.connector.downloadRequestReceived.connect(self.add_download_from_extension)
+            # 连接下载请求信号 - 使用下载处理器处理请求，而不是直接处理
+            self.connector.downloadRequestReceived.connect(self.download_handler.handle_download_request, Qt.QueuedConnection)
             
             # 启动连接器
             self.connector.start()
@@ -1465,6 +1497,29 @@ class DownloadManagerWindow(QMainWindow):
                     widget.close()
         except Exception as e:
             logging.error(f"关闭子对话框失败: {e}")
+        
+        # 释放下载处理器资源
+        if hasattr(self, 'download_handler') and self.download_handler:
+            try:
+                # 断开信号连接
+                if hasattr(self.download_handler, 'downloadCompleted'):
+                    try:
+                        self.download_handler.downloadCompleted.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+                
+                # 使用弱引用避免循环引用
+                import weakref
+                handler_ref = weakref.ref(self.download_handler)
+                self.download_handler = None
+                
+                # 强制清理
+                import gc
+                gc.collect()
+                
+                logging.info("已安全释放下载处理器资源")
+            except Exception as e:
+                logging.error(f"释放下载处理器资源失败: {e}")
         
         # 停止浏览器下载监听器
         if hasattr(self, 'connector') and self.connector:
