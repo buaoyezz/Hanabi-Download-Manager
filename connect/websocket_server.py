@@ -54,7 +54,7 @@ class WebSocketServer:
             # 发送版本信息
             version_info = {
                 "type": "version",
-                "ClientVersion": "1.0.5",
+                "ClientVersion": "1.0.6",
                 "LatestExtensionVersion": "1.0.1",
                 "ServerStatus": "ready"
             }

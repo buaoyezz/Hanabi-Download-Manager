@@ -203,7 +203,7 @@ class HomeWindow(QWidget):
         welcome_layout.addWidget(welcome_title)
         
         # 欢迎信息
-        welcome_text = QLabel("Stable Channel 1.0.5 Released")
+        welcome_text = QLabel("Stable Channel 1.0.6 Released")
         welcome_text.setStyleSheet("color: #B0B0B0; font-size: 14px;")
         welcome_text.setWordWrap(True)
         self.font_manager.apply_font(welcome_text)

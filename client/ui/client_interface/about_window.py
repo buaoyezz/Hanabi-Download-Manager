@@ -80,7 +80,7 @@ class AboutWindow(QWidget):
         header_layout.addStretch(1)
         
         # 版本信息
-        version_label = QLabel("版本 1.0.5 Release")
+        version_label = QLabel("版本 1.0.6 Release")
         version_label.setStyleSheet("color: #9E9E9E; font-size: 14px;")
         self.font_manager.apply_font(version_label)
         header_layout.addWidget(version_label)
