@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from core.font.font_manager import FontManager
 from client.ui.components.customMessagebox import CustomMessageBox
+from client.ui.components.customNotify import NotifyManager
 import requests
 import json
 import os
@@ -37,12 +38,12 @@ class UpdatePage(QWidget):
         self.secondary_endpoint = "/HanabiDM/version.json"
         
         # 主更新源尝试次数和连接参数
-        self.primary_max_retries = 3  # 主更新源重试次数更多
-        self.primary_retry_delay = 1  # 秒
+        self.primary_max_retries = 2  # 减少重试次数，避免长时间阻塞
+        self.primary_retry_delay = 0.5  # 减少重试延迟
         
         # 次更新源尝试次数和连接参数
-        self.secondary_max_retries = 2
-        self.secondary_retry_delay = 1  # 秒
+        self.secondary_max_retries = 1  # 减少重试次数
+        self.secondary_retry_delay = 0.5  # 减少重试延迟
         
         # 代理设置
         self.use_proxy = self.config_manager.get_use_proxy() if hasattr(self.config_manager, 'get_use_proxy') else False
@@ -513,28 +514,52 @@ class UpdatePage(QWidget):
             self.check_button.setEnabled(False)
             self.status_label.setText("正在检查更新...")
             self.status_label.setStyleSheet("color: #B39DDB; font-size: 13px; background-color: transparent;")
+            
+            # 添加通知
+            try:
+                NotifyManager.info("正在检查更新，请稍候...")
+            except Exception as e:
+                print(f"显示通知失败: {e}")
         
         # 记录检查时间
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if not silent:
             self.last_check_label.setText(f"上次检查：{now}")
         
-        # 优先使用缓存的更新源
-        if self.cached_data and self.cached_data.get("working_source"):
-            source = self.cached_data.get("working_source")
-            endpoint = self.cached_data.get("working_endpoint", "")
-            
-            if source == "primary":
-                logging.info("使用缓存中记录的主更新源")
-                self.primary_endpoint = endpoint
-                self.try_primary_source(now, silent)
-            else:
-                logging.info("使用缓存中记录的次更新源")
-                self.secondary_endpoint = endpoint
-                self.try_secondary_source(now, silent)
-        else:
-            # 没有缓存的可用源，按正常顺序尝试
-            self.try_primary_source(now, silent)
+        # 在后台线程中执行网络请求，避免阻塞UI
+        def check_in_background():
+            try:
+                # 优先使用缓存的更新源
+                if self.cached_data and self.cached_data.get("working_source"):
+                    source = self.cached_data.get("working_source")
+                    endpoint = self.cached_data.get("working_endpoint", "")
+                    
+                    if source == "primary":
+                        logging.info("使用缓存中记录的主更新源")
+                        self.primary_endpoint = endpoint
+                        self.try_primary_source(now, silent)
+                    else:
+                        logging.info("使用缓存中记录的次更新源")
+                        self.secondary_endpoint = endpoint
+                        self.try_secondary_source(now, silent)
+                else:
+                    # 没有缓存的可用源，按正常顺序尝试
+                    self.try_primary_source(now, silent)
+            except Exception as e:
+                logging.error(f"后台检查更新时发生错误: {e}")
+                if not silent:
+                    # 使用QTimer确保在主线程中更新UI
+                    QTimer.singleShot(0, lambda: self.handle_update_failure(f"检查更新时发生错误: {str(e)}", silent))
+        
+        # 使用QThread在后台执行
+        from PySide6.QtCore import QThread
+        
+        class UpdateCheckThread(QThread):
+            def run(self):
+                check_in_background()
+        
+        self.update_thread = UpdateCheckThread()
+        self.update_thread.start()
     
     def try_primary_source(self, now, silent=False):
         """尝试从主更新源获取更新信息"""
@@ -582,11 +607,11 @@ class UpdatePage(QWidget):
                     "DNT": "1"
                 }
                 
-                # 使用requests
+                # 使用requests，设置更短的超时时间避免长时间阻塞
                 response = session.get(
                     primary_url,
                     headers=headers,
-                    timeout=10,
+                    timeout=(3, 5),  # 连接超时3秒，读取超时5秒
                     verify=False,  # 禁用SSL验证
                     allow_redirects=True,
                     proxies=self.proxy_settings if self.use_proxy else None
@@ -641,7 +666,7 @@ class UpdatePage(QWidget):
                     alt_response = session.get(
                         alternate_url,
                         headers=headers,
-                        timeout=10,
+                        timeout=(3, 5),  # 连接超时3秒，读取超时5秒
                         verify=False,
                         allow_redirects=True,
                         proxies=self.proxy_settings if self.use_proxy else None
@@ -686,16 +711,19 @@ class UpdatePage(QWidget):
                     else:
                         logging.warning(f"备用主源路径返回状态码: {alt_response.status_code}")
                 
-            except requests.exceptions.ConnectionError as conn_err:
+            except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout) as conn_err:
                 logging.error(f"主更新源连接错误 [尝试 {retry_count+1}]: {conn_err}")
-            except requests.exceptions.Timeout as timeout_err:
+                # 连接错误，快速重试
+            except (requests.exceptions.Timeout, requests.exceptions.ReadTimeout) as timeout_err:
                 logging.error(f"主更新源连接超时 [尝试 {retry_count+1}]: {timeout_err}")
+                # 超时错误，快速重试
             except ValueError as json_err:
                 logging.error(f"主更新源JSON解析错误: {json_err}")
                 # JSON解析错误不重试，直接尝试次源
                 break
             except Exception as e:
                 logging.error(f"主更新源连接尝试过程中出现未预期错误: {e}")
+                # 其他错误，快速重试
             finally:
                 # 确保关闭session
                 if 'session' in locals():
@@ -706,7 +734,7 @@ class UpdatePage(QWidget):
             
             # 如果还有重试机会，等待一段时间再重试
             if retry_count <= self.primary_max_retries:
-                retry_delay = self.primary_retry_delay * retry_count  # 逐次增加等待时间
+                retry_delay = self.primary_retry_delay  # 固定延迟时间，避免过长等待
                 logging.info(f"等待 {retry_delay} 秒后重试主更新源连接...")
                 time.sleep(retry_delay)
         
@@ -765,11 +793,11 @@ class UpdatePage(QWidget):
                     # 优先使用requests，不再尝试urllib
                     logging.info(f"使用requests请求更新信息")
                     
-                    # 直接使用requests
+                    # 直接使用requests，设置更短的超时时间避免长时间阻塞
                     response = session.get(
                         secondary_url,
                         headers=headers,
-                        timeout=30,
+                        timeout=(3, 5),  # 连接超时3秒，读取超时5秒
                         verify=False,  # 禁用SSL验证
                         allow_redirects=True,
                         proxies=self.proxy_settings if self.use_proxy else None
@@ -832,7 +860,7 @@ class UpdatePage(QWidget):
                         alt_response = session.get(
                             alternate_url,
                             headers=headers,
-                            timeout=30,
+                            timeout=(3, 5),  # 连接超时3秒，读取超时5秒
                             verify=False,
                             allow_redirects=True,
                             proxies=self.proxy_settings if self.use_proxy else None
@@ -886,13 +914,13 @@ class UpdatePage(QWidget):
                             logging.warning(f"备用次源路径返回状态码: {alt_response.status_code}")
                             raise requests.exceptions.HTTPError(f"HTTP {alt_response.status_code}")
                     
-                except (requests.exceptions.ConnectionError, urllib.error.URLError) as conn_err:
+                except (requests.exceptions.ConnectionError, requests.exceptions.ConnectTimeout, urllib.error.URLError) as conn_err:
                     logging.error(f"次更新源请求错误 [尝试 {retry_count+1}]: {conn_err}")
-                    # 继续尝试重试
+                    # 连接错误，快速重试
                     
-                except requests.exceptions.Timeout as timeout_err:
+                except (requests.exceptions.Timeout, requests.exceptions.ReadTimeout) as timeout_err:
                     logging.error(f"次更新源连接超时 [尝试 {retry_count+1}]: {timeout_err}")
-                    # 继续尝试重试
+                    # 超时错误，快速重试
                     
                 except json.JSONDecodeError as json_err:
                     logging.error(f"次更新源JSON解析错误: {json_err}")
@@ -917,7 +945,7 @@ class UpdatePage(QWidget):
             
             # 如果还有重试机会，等待一段时间再重试
             if retry_count <= self.secondary_max_retries:
-                retry_delay = self.secondary_retry_delay * retry_count  # 逐次增加等待时间
+                retry_delay = self.secondary_retry_delay  # 固定延迟时间，避免过长等待
                 logging.info(f"等待 {retry_delay} 秒后重试次更新源连接...")
                 time.sleep(retry_delay)
         
@@ -939,10 +967,16 @@ class UpdatePage(QWidget):
     def handle_update_failure(self, error_msg, silent=False):
         """处理更新失败"""
         if not silent:
-            self.status_label.setText(f"检查更新失败: {error_msg}")
-            self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
+            # 确保在主线程中更新UI
+            QTimer.singleShot(0, lambda: self._update_failure_ui(error_msg))
         self.updateError.emit(error_msg)
-        self.check_button.setEnabled(True)
+        if not silent:
+            QTimer.singleShot(0, lambda: self.check_button.setEnabled(True))
+    
+    def _update_failure_ui(self, error_msg):
+        """在主线程中更新失败状态UI"""
+        self.status_label.setText(f"检查更新失败: {error_msg}")
+        self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
     
     def process_update_data(self, data, now, silent=False):
         """处理获取到的更新数据"""
@@ -964,11 +998,8 @@ class UpdatePage(QWidget):
             # 有更新版本
             self.has_newer_version = True
             if not silent:
-                self.status_label.setText(f"发现新版本: {latest['version']}")
-                self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
-                
-                # 更新更新日志
-                self.update_release_notes(latest, True)
+                # 确保在主线程中更新UI
+                QTimer.singleShot(0, lambda: self._update_success_ui(latest, True))
             
             # 发出更新信号
             self.updateFound.emit(latest["version"], json.dumps(latest))
@@ -976,65 +1007,93 @@ class UpdatePage(QWidget):
             # 已经是最新版本
             self.has_newer_version = False
             if not silent:
-                self.status_label.setText("您当前使用的已经是最新版本")
-                self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
-                
-                # 显示当前版本的更新日志
-                current_version_info = None
-                
-                # 如果当前版本是最新版本
-                if latest["version"] == self.current_version:
-                    current_version_info = latest
-                # 否则从历史记录中查找
-                elif "history" in data and self.current_version in data["history"]:
-                    current_version_info = data["history"][self.current_version]
-                
-                if current_version_info:
-                    self.update_release_notes(current_version_info, False)
-                else:
-                    # 清除原有内容
-                    for i in reversed(range(self.log_layout.count())):
-                        item = self.log_layout.itemAt(i)
-                        if item.widget():
-                            item.widget().deleteLater()
-                    
-                    # 显示提示信息
-                    no_log_label = QLabel("暂无当前版本的更新日志信息")
-                    no_log_label.setStyleSheet("color: #9E9E9E; font-size: 14px; background-color: transparent;")
-                    self.font_manager.apply_font(no_log_label)
-                    self.log_layout.addWidget(no_log_label)
-                    self.log_layout.addStretch()
+                # 确保在主线程中更新UI
+                QTimer.singleShot(0, lambda: self._update_success_ui(latest, False, data))
         
         # 如果是次更新源，显示警告
         if not silent and self.current_update_source == "secondary" and data.get("source_warning"):
-            self.status_label.setText(f"{self.status_label.text()} (使用次更新源)")
-            
-            # 添加次更新源警告提示
-            source_warning_label = QLabel(data["source_warning"])
-            source_warning_label.setStyleSheet("color: #FFC107; font-size: 12px; background-color: transparent;")
-            self.font_manager.apply_font(source_warning_label)
-            
-            # 在日志上方添加警告
-            if hasattr(self, 'log_layout') and self.log_layout.count() > 0:
-                # 找到合适的位置插入警告
-                first_item = self.log_layout.itemAt(0)
-                if first_item and first_item.widget():
-                    warning_container = QWidget()
-                    warning_layout = QHBoxLayout(warning_container)
-                    warning_layout.setContentsMargins(0, 5, 0, 5)
-                    warning_icon = QLabel()
-                    self.font_manager.apply_icon_font(warning_icon, 14)
-                    warning_icon.setText(self.font_manager.get_icon_text("warning"))
-                    warning_icon.setStyleSheet("color: #FFC107; background-color: transparent;")
-                    warning_layout.addWidget(warning_icon)
-                    warning_layout.addWidget(source_warning_label)
-                    warning_layout.addStretch()
-                    
-                    # 在布局的开头插入
-                    self.log_layout.insertWidget(0, warning_container)
+            QTimer.singleShot(0, lambda: self._show_secondary_source_warning(data))
         
         if not silent:
-            self.check_button.setEnabled(True)
+            QTimer.singleShot(0, lambda: self.check_button.setEnabled(True))
+    
+    def _update_success_ui(self, latest, has_update, data=None):
+        """在主线程中更新成功状态UI"""
+        if has_update:
+            self.status_label.setText(f"发现新版本: {latest['version']}")
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+            # 更新更新日志
+            self.update_release_notes(latest, True)
+            
+            # 添加通知
+            try:
+                NotifyManager.success(f"发现新版本: {latest['version']}")
+            except Exception as e:
+                print(f"显示通知失败: {e}")
+                
+        else:
+            self.status_label.setText("您当前使用的已经是最新版本")
+            self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
+            
+            # 添加通知
+            try:
+                NotifyManager.info("您当前使用的已经是最新版本")
+            except Exception as e:
+                print(f"显示通知失败: {e}")
+            
+            # 显示当前版本的更新日志
+            current_version_info = None
+            
+            # 如果当前版本是最新版本
+            if latest["version"] == self.current_version:
+                current_version_info = latest
+            # 否则从历史记录中查找
+            elif data and "history" in data and self.current_version in data["history"]:
+                current_version_info = data["history"][self.current_version]
+            
+            if current_version_info:
+                self.update_release_notes(current_version_info, False)
+            else:
+                # 清除原有内容
+                for i in reversed(range(self.log_layout.count())):
+                    item = self.log_layout.itemAt(i)
+                    if item.widget():
+                        item.widget().deleteLater()
+                
+                # 显示提示信息
+                no_log_label = QLabel("暂无当前版本的更新日志信息")
+                no_log_label.setStyleSheet("color: #9E9E9E; font-size: 14px; background-color: transparent;")
+                self.font_manager.apply_font(no_log_label)
+                self.log_layout.addWidget(no_log_label)
+                self.log_layout.addStretch()
+    
+    def _show_secondary_source_warning(self, data):
+        """在主线程中显示次更新源警告"""
+        self.status_label.setText(f"{self.status_label.text()} (使用次更新源)")
+        
+        # 添加次更新源警告提示
+        source_warning_label = QLabel(data["source_warning"])
+        source_warning_label.setStyleSheet("color: #FFC107; font-size: 12px; background-color: transparent;")
+        self.font_manager.apply_font(source_warning_label)
+        
+        # 在日志上方添加警告
+        if hasattr(self, 'log_layout') and self.log_layout.count() > 0:
+            # 找到合适的位置插入警告
+            first_item = self.log_layout.itemAt(0)
+            if first_item and first_item.widget():
+                warning_container = QWidget()
+                warning_layout = QHBoxLayout(warning_container)
+                warning_layout.setContentsMargins(0, 5, 0, 5)
+                warning_icon = QLabel()
+                self.font_manager.apply_icon_font(warning_icon, 14)
+                warning_icon.setText(self.font_manager.get_icon_text("warning"))
+                warning_icon.setStyleSheet("color: #FFC107; background-color: transparent;")
+                warning_layout.addWidget(warning_icon)
+                warning_layout.addWidget(source_warning_label)
+                warning_layout.addStretch()
+                
+                # 在布局的开头插入
+                self.log_layout.insertWidget(0, warning_container)
     
     def update_release_notes(self, latest, show_download=True):
         # 清除原有内容
@@ -1357,6 +1416,12 @@ class UpdatePage(QWidget):
                 self.log_layout.addWidget(default_log)
                 self.log_layout.addStretch()
                 
+                # 添加通知
+                try:
+                    NotifyManager.success("更新缓存已清除")
+                except Exception as e:
+                    print(f"显示通知失败: {e}")
+                
                 # 弹出提示
                 CustomMessageBox.information(
                     self,
@@ -1365,6 +1430,13 @@ class UpdatePage(QWidget):
                 )
             else:
                 self.status_label.setText("无需清除，更新缓存不存在")
+                
+                # 添加通知
+                try:
+                    NotifyManager.info("更新缓存不存在，无需清除")
+                except Exception as e:
+                    print(f"显示通知失败: {e}")
+                    
                 CustomMessageBox.information(
                     self,
                     "提示",
@@ -1374,6 +1446,13 @@ class UpdatePage(QWidget):
         except Exception as e:
             self.status_label.setText(f"清除缓存失败: {str(e)}")
             self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
+            
+            # 添加通知
+            try:
+                NotifyManager.error(f"清除缓存失败: {str(e)}")
+            except Exception as notify_error:
+                print(f"显示通知失败: {notify_error}")
+                
             CustomMessageBox.warning(
                 self,
                 "操作失败",
