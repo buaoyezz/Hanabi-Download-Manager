@@ -3,6 +3,9 @@ from PySide6.QtWidgets import (
     QGroupBox, QPushButton, QCheckBox, QComboBox
 )
 from PySide6.QtCore import Qt, Signal
+import os
+import sys
+import subprocess
 
 from core.font.font_manager import FontManager
 from client.ui.components.customNotify import NotifyManager
@@ -334,6 +337,12 @@ class GeneralControlWidget(QWidget):
                 else:
                     self._remove_autostart()
                 
+                # 处理关闭到托盘设置
+                self._apply_close_to_tray_setting(self.close_to_tray_checkbox.isChecked())
+                
+                # 处理启动最小化设置
+                self._apply_start_minimized_setting(self.start_minimized_checkbox.isChecked())
+                
                 # 只发送信号，不显示额外通知
                 self.settings_applied.emit(True, "常规设置已保存")
             else:
@@ -345,13 +354,154 @@ class GeneralControlWidget(QWidget):
             # CustomMessageBox.error(self, "应用设置失败", str(e))
     
     def _setup_autostart(self):
-      
-        # 此处应根据不同操作系统实现自启动设置
-        # 例如Windows下可以写入注册表，Linux下可以创建desktop文件
-        # 简单起见，这里只打印一个信息
-        print("设置开机自启动")
+        """设置开机自启动"""
+        try:
+            # 获取应用程序路径
+            app_path = self._get_app_path()
+            
+            if sys.platform == 'win32':  # Windows
+                import winreg
+                # 打开注册表项
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                    0,
+                    winreg.KEY_SET_VALUE
+                )
+                # 设置注册表值
+                winreg.SetValueEx(
+                    key,
+                    "HanabiDownloadManager",
+                    0,
+                    winreg.REG_SZ,
+                    f'"{app_path}"'
+                )
+                winreg.CloseKey(key)
+                self.notify_manager.show_message("开机启动", "已设置开机自动启动")
+                
+            elif sys.platform == 'darwin':  # macOS
+                # 创建LaunchAgents目录（如果不存在）
+                launch_agents_dir = os.path.expanduser("~/Library/LaunchAgents")
+                os.makedirs(launch_agents_dir, exist_ok=True)
+                
+                # 创建plist文件
+                plist_path = os.path.join(launch_agents_dir, "com.hanabi.downloadmanager.plist")
+                plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.hanabi.downloadmanager</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{app_path}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>'''
+                
+                with open(plist_path, 'w') as f:
+                    f.write(plist_content)
+                
+                # 加载plist
+                subprocess.run(['launchctl', 'load', plist_path])
+                self.notify_manager.show_message("开机启动", "已设置开机自动启动")
+                
+            elif sys.platform.startswith('linux'):  # Linux
+                # 创建桌面文件
+                autostart_dir = os.path.expanduser("~/.config/autostart")
+                os.makedirs(autostart_dir, exist_ok=True)
+                
+                desktop_path = os.path.join(autostart_dir, "hanabidownloadmanager.desktop")
+                desktop_content = f'''[Desktop Entry]
+Type=Application
+Name=Hanabi Download Manager
+Exec={app_path}
+Terminal=false
+X-GNOME-Autostart-enabled=true
+'''
+                
+                with open(desktop_path, 'w') as f:
+                    f.write(desktop_content)
+                
+                # 设置权限
+                os.chmod(desktop_path, 0o755)
+                self.notify_manager.show_message("开机启动", "已设置开机自动启动")
+            
+            else:
+                self.notify_manager.show_message("开机启动", "不支持当前操作系统的自启动设置")
+                
+        except Exception as e:
+            self.notify_manager.show_message("开机启动", f"设置开机自启动失败: {str(e)}")
+            print(f"设置开机自启动失败: {str(e)}")
     
     def _remove_autostart(self):
-     
-        # 此处应根据不同操作系统实现移除自启动设置
-        print("移除开机自启动") 
+        """移除开机自启动设置"""
+        try:
+            if sys.platform == 'win32':  # Windows
+                import winreg
+                # 打开注册表项
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                        0,
+                        winreg.KEY_SET_VALUE
+                    )
+                    # 删除注册表值
+                    winreg.DeleteValue(key, "HanabiDownloadManager")
+                    winreg.CloseKey(key)
+                    self.notify_manager.show_message("开机启动", "已取消开机自动启动")
+                except FileNotFoundError:
+                    # 注册表项不存在，忽略错误
+                    pass
+                
+            elif sys.platform == 'darwin':  # macOS
+                # 卸载并删除plist文件
+                plist_path = os.path.expanduser("~/Library/LaunchAgents/com.hanabi.downloadmanager.plist")
+                if os.path.exists(plist_path):
+                    subprocess.run(['launchctl', 'unload', plist_path])
+                    os.remove(plist_path)
+                    self.notify_manager.show_message("开机启动", "已取消开机自动启动")
+                
+            elif sys.platform.startswith('linux'):  # Linux
+                # 删除桌面文件
+                desktop_path = os.path.expanduser("~/.config/autostart/hanabidownloadmanager.desktop")
+                if os.path.exists(desktop_path):
+                    os.remove(desktop_path)
+                    self.notify_manager.show_message("开机启动", "已取消开机自动启动")
+            
+            else:
+                self.notify_manager.show_message("开机启动", "不支持当前操作系统的自启动设置")
+                
+        except Exception as e:
+            self.notify_manager.show_message("开机启动", f"取消开机自启动失败: {str(e)}")
+            print(f"取消开机自启动失败: {str(e)}")
+    
+    def _get_app_path(self):
+        """获取应用程序可执行文件路径"""
+        if getattr(sys, 'frozen', False):
+            # PyInstaller打包的环境
+            return sys.executable
+        else:
+            # 开发环境，使用python路径运行main.py
+            python_path = sys.executable
+            main_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../main.py'))
+            return f"{python_path} {main_script}"
+    
+    def _apply_close_to_tray_setting(self, enabled):
+        """应用关闭到托盘设置"""
+        # 保存到配置中
+        if "window" not in self.config_manager._config:
+            self.config_manager._config["window"] = {}
+        self.config_manager._config["window"]["close_to_tray"] = enabled
+        self.config_manager.save_config()
+    
+    def _apply_start_minimized_setting(self, enabled):
+        """应用启动时最小化设置"""
+        # 保存到配置中
+        if "window" not in self.config_manager._config:
+            self.config_manager._config["window"] = {}
+        self.config_manager._config["window"]["start_minimized"] = enabled
+        self.config_manager.save_config() 
