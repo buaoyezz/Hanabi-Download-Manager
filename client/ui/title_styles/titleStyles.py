@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSpacerItem, QSizePolicy, QSystemTrayIcon, QMenu
-from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtCore import Qt, QPoint, Signal, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QAction, QFont
 from core.font.font_manager import FontManager
 import os
@@ -68,14 +68,81 @@ class TitleBar(QWidget):
         
         # 创建托盘菜单
         tray_menu = QMenu()
+        # 设置菜单样式，与应用主题一致
+        tray_menu.setStyleSheet("""
+            QMenu {
+                background-color: #1E1E1E;
+                color: #FFFFFF;
+                border: 1px solid #3C3C3C;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 5px 20px 5px 10px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #3F3F46;
+                color: #B39DDB;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #3C3C3C;
+                margin: 5px 2px;
+            }
+        """)
         
-        # 添加菜单项
-        show_action = QAction("显示窗口", self)
+        # 添加菜单项 - 使用字体图标
+        show_action = QAction("显示主窗口", self)
+        # 设置图标如果有字体管理器
+        if hasattr(self, 'font_manager') and self.font_manager:
+            show_icon = self.font_manager.get_qicon("ic_fluent_window_24_regular")
+            if show_icon:
+                show_action.setIcon(show_icon)
         show_action.triggered.connect(self.show_window)
         tray_menu.addAction(show_action)
         
-        exit_action = QAction("退出", self)
-        exit_action.triggered.connect(self.parent.close)
+        # 添加分隔线
+        tray_menu.addSeparator()
+        
+        # 添加下载管理项
+        download_action = QAction("下载管理", self)
+        if hasattr(self, 'font_manager') and self.font_manager:
+            download_icon = self.font_manager.get_qicon("ic_fluent_arrow_download_24_regular")
+            if download_icon:
+                download_action.setIcon(download_icon)
+        download_action.triggered.connect(lambda: self.switch_to_page("downloads"))
+        tray_menu.addAction(download_action)
+        
+        # 添加历史记录项
+        history_action = QAction("历史记录", self)
+        if hasattr(self, 'font_manager') and self.font_manager:
+            history_icon = self.font_manager.get_qicon("ic_fluent_history_24_regular")
+            if history_icon:
+                history_action.setIcon(history_icon)
+        history_action.triggered.connect(lambda: self.switch_to_page("history"))
+        tray_menu.addAction(history_action)
+        
+        # 添加设置项
+        settings_action = QAction("设置", self)
+        if hasattr(self, 'font_manager') and self.font_manager:
+            settings_icon = self.font_manager.get_qicon("ic_fluent_settings_24_regular")
+            if settings_icon:
+                settings_action.setIcon(settings_icon)
+        settings_action.triggered.connect(lambda: self.switch_to_page("settings"))
+        tray_menu.addAction(settings_action)
+        
+        # 添加分隔线
+        tray_menu.addSeparator()
+        
+        # 退出项
+        exit_action = QAction("退出程序", self)
+        if hasattr(self, 'font_manager') and self.font_manager:
+            exit_icon = self.font_manager.get_qicon("ic_fluent_power_24_regular")
+            if exit_icon:
+                exit_action.setIcon(exit_icon)
+        # 修改退出动作，确保应用正确退出
+        exit_action.triggered.connect(self.exit_application)
         tray_menu.addAction(exit_action)
         
         # 设置托盘菜单
@@ -338,5 +405,30 @@ class TitleBar(QWidget):
         self.layout.addWidget(left_part)
         self.layout.addWidget(self.title_label, 1)  # 1表示拉伸系数，确保中间标题可以拉伸
         self.layout.addWidget(right_part)
+
+    def switch_to_page(self, page_id):
+        """切换到指定页面"""
+        # 先显示窗口
+        self.show_window()
+        
+        # 然后切换页面 - 如果父窗口有pages_manager
+        if hasattr(self.parent, 'pages_manager'):
+            QTimer.singleShot(100, lambda: self.parent.pages_manager.switch_page(page_id))
+    
+    def exit_application(self):
+        """确保应用程序完全退出"""
+        # 停止所有可能的后台任务
+        if hasattr(self.parent, 'download_tasks'):
+            for task in self.parent.download_tasks:
+                if task.get('status') == '下载中' and task.get('manager'):
+                    task['manager'].stop()
+        
+        # 确保托盘图标被隐藏
+        if self.tray_icon.isVisible():
+            self.tray_icon.hide()
+        
+        # 退出应用程序
+        import sys
+        sys.exit(0)
 
 
