@@ -163,11 +163,8 @@ class AboutWindow(QWidget):
         """)
         self.font_manager.apply_font(github_btn)
         links_layout.addWidget(github_btn)
-        # 先打开网页，再显示通知
-        github_btn.clicked.connect(lambda: webbrowser.open("https://github.com/buaoyezz"))
-        
-        # 延迟显示通知，避免可能的错误影响网页打开
-        github_btn.clicked.connect(lambda: QTimer.singleShot(500, lambda: NotifyManager.info("正在打开GitHub主页")))
+        # 优化打开网页和显示通知的逻辑
+        github_btn.clicked.connect(lambda: self._open_url("https://github.com/buaoyezz", "正在打开GitHub主页", "info"))
 
         website_btn = QPushButton("Official Website")
         website_btn.setStyleSheet("""
@@ -184,11 +181,8 @@ class AboutWindow(QWidget):
         """)
         self.font_manager.apply_font(website_btn)
         links_layout.addWidget(website_btn)
-        # 先打开网页，再显示通知
-        website_btn.clicked.connect(lambda: webbrowser.open("https://zzbuaoye.dpdns.org/"))
-        
-        # 延迟显示通知，避免可能的错误影响网页打开
-        website_btn.clicked.connect(lambda: QTimer.singleShot(500, lambda: NotifyManager.success("正在打开官方网站")))
+        # 优化打开网页和显示通知的逻辑
+        website_btn.clicked.connect(lambda: self._open_url("https://zzbuaoye.dpdns.org/", "正在打开官方网站", "success"))
 
         links_layout.addStretch(1)
         about_layout.addLayout(links_layout)
@@ -292,7 +286,7 @@ class AboutWindow(QWidget):
         """)
             self.font_manager.apply_font(link_btn)
             # 为每个按钮创建一个单独的lambda，捕获当前url值
-            link_btn.clicked.connect(lambda checked=False, url=url: webbrowser.open(url))
+            link_btn.clicked.connect(lambda checked=False, url=url: self._open_url(url, f"正在打开: {name}", "info"))
             link_layout.addWidget(link_btn)
             link_layout.addStretch()
             
@@ -323,3 +317,28 @@ class AboutWindow(QWidget):
         icon_label.setStyleSheet(f"color: {color}; margin: 0; padding: 0;")
         icon_label.setAlignment(Qt.AlignCenter)
         return icon_label
+
+    def _open_url(self, url, message, notify_type="info"):
+        """打开URL并显示通知
+        
+        Args:
+            url (str): 要打开的URL
+            message (str): 通知消息
+            notify_type (str): 通知类型，可以是"info"、"success"、"warning"或"error"
+        """
+        try:
+            # 先尝试打开网页
+            webbrowser.open(url)
+            
+            # 显示通知
+            if notify_type == "info":
+                NotifyManager.info(message)
+            elif notify_type == "success":
+                NotifyManager.success(message)
+            elif notify_type == "warning":
+                NotifyManager.warning(message)
+            elif notify_type == "error":
+                NotifyManager.error(message)
+        except Exception as e:
+            # 如果发生错误，显示错误通知
+            NotifyManager.error(f"打开链接失败: {str(e)}")

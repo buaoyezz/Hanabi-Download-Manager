@@ -16,6 +16,7 @@ from core.font.font_manager import FontManager
 from client.ui.components.progressBar import ProgressBar
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.client_interface.task_window import TaskWindow, RoundedTaskFrame
+from client.ui.components.customNotify import NotifyManager
 
 class DownloadWindow(QWidget):
     """下载管理窗口，负责显示下载任务和控制下载操作"""
@@ -218,11 +219,21 @@ class DownloadWindow(QWidget):
             
             # 清空输入框
             self.url_input.clear()
+            
+            # 显示通知
+            NotifyManager.info(f"正在准备下载: {url}")
+        else:
+            # 显示错误通知
+            NotifyManager.warning("请输入有效的下载链接")
     
     def _on_dialog_download_requested(self, task_data):
         """处理弹窗发出的下载请求"""
         # 将弹窗的下载请求转发给应用程序
         self.downloadAdded.emit(task_data)
+        
+        # 显示通知
+        filename = task_data.get("file_name", "未知文件")
+        NotifyManager.info(f"已添加下载任务: {filename}")
     
     def _on_dialog_download_completed(self, task_data):
         """处理弹窗发出的下载完成信号"""
@@ -230,12 +241,19 @@ class DownloadWindow(QWidget):
         task_data["status"] = "已完成"
         task_data["progress"] = 100
         self.add_download_task(task_data)
+        
+        # 显示通知
+        filename = task_data.get("file_name", "未知文件")
+        NotifyManager.success(f"下载完成: {filename}")
     
     def _on_select_path_clicked(self):
         """选择保存路径按钮点击事件处理"""
         folder_path = QFileDialog.getExistingDirectory(self, "选择保存位置", self.save_path)
         if folder_path:
             self.set_save_path(folder_path)
+            
+            # 显示通知
+            NotifyManager.info(f"保存位置已更改: {folder_path}")
         
     def _create_tasks_area(self):
         """创建下载任务列表区域"""
@@ -576,6 +594,10 @@ class DownloadWindow(QWidget):
             if hasattr(self, 'save_path_label'):
                 self.save_path_label.setText(f"当前保存位置: {self.save_path}")
             self.saveFolderChanged.emit(path)
+            
+            # 显示通知
+            NotifyManager.info(f"下载保存位置已更新: {path}")
+            
             return True
         return False
         
@@ -687,8 +709,15 @@ class DownloadWindow(QWidget):
             # 记录创建的弹窗
             logging.info(f"[download_window.py] 已为下载请求 [ID: {request_id}] 创建下载弹窗")
             
+            # 显示通知
+            NotifyManager.info(f"浏览器下载请求: {filename}")
+            
             return True
             
         except Exception as e:
             logging.error(f"处理浏览器下载请求失败: {e}")
+            
+            # 显示错误通知
+            NotifyManager.error(f"处理浏览器下载请求失败: {str(e)}")
+            
             return False

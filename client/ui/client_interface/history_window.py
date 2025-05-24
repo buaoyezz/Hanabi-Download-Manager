@@ -11,6 +11,7 @@ from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.client_interface.task_window import TaskItemWidget, RoundedTaskFrame
 from core.history.history_manager import HistoryManager
+from client.ui.components.customNotify import NotifyManager
 
 class HistoryWindow(QWidget):
     """下载历史记录窗口"""
@@ -232,6 +233,12 @@ class HistoryWindow(QWidget):
             
             # 显示空历史提示
             self._show_empty_history_message()
+            
+            # 添加简洁的通知
+            try:
+                NotifyManager.warning("所有历史记录已清空")
+            except Exception as e:
+                print(f"显示通知失败: {e}")
             
             # 发送信号
             self.history_cleared.emit()
@@ -567,6 +574,17 @@ class HistoryWindow(QWidget):
                     if not self.history_items:
                         self._show_empty_history_message()
                     
+                # 显示简洁的通知
+                try:
+                    NotifyManager.success(f"已删除历史记录")
+                except Exception as e:
+                    print(f"显示通知失败: {e}")
+                
                 QMessageBox.information(self, "成功", f"已删除'{filename}'的历史记录")
             else:
+                try:
+                    NotifyManager.error("删除历史记录失败")
+                except Exception as e:
+                    print(f"显示通知失败: {e}")
+                    
                 QMessageBox.warning(self, "错误", f"删除历史记录失败")

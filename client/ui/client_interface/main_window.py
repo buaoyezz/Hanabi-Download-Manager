@@ -2,9 +2,9 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QPushButton, QLineEdit, QTableWidget, 
                               QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox,
                               QSplitter, QFrame, QLabel, QSizePolicy, QStackedWidget, QScrollArea, QDialog,QApplication)
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QPropertyAnimation, QEasingCurve, QPoint, QTimer, QCoreApplication, QMetaObject, Q_ARG, QEvent
-from PySide6.QtGui import QIcon, QColor, QFont, QPainter, QPainterPath, QBrush, QMouseEvent, QFontDatabase
-from PySide6.QtWidgets import QSystemTrayIcon
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QPropertyAnimation, QEasingCurve, QPoint, QTimer, QCoreApplication, QMetaObject, Q_ARG, QEvent, QRect
+from PySide6.QtGui import QIcon, QColor, QFont, QPainter, QPainterPath, QBrush, QMouseEvent, QFontDatabase, QCursor
+from PySide6.QtWidgets import QSystemTrayIcon, QGraphicsOpacityEffect, QGridLayout
 
 from client.ui.components.progressBar import ProgressBar
 from client.ui.title_styles.titleStyles import TitleBar
@@ -21,6 +21,7 @@ from client.ui.client_interface.task_window import TaskWindow, RoundedTaskFrame
 from client.ui.client_interface.history_window import HistoryWindow
 from client.ui.client_interface.download_window import DownloadWindow
 from client.ui.extension_interface.extension_window import ExtensionWindow
+from client.ui.components.customNotify import NotifyManager
 
 import os
 import sys
@@ -142,6 +143,16 @@ class DownloadManagerWindow(QMainWindow):
         self.config_manager = config
         # 更新日志管理器
         self.update_log_manager = UpdateLogManager()
+        # 天气信息初始化
+        self.weather_data = {
+            "city": "--",
+            "temperature": "--",
+            "weather": "--"
+        }
+        # 天气标签
+        self.weather_label = None
+        # 添加天气线程属性
+        self.weather_thread = None
     
     def _setup_logging(self):
         """设置日志系统"""
@@ -257,19 +268,41 @@ class DownloadManagerWindow(QMainWindow):
         brand_layout.setContentsMargins(10, 0, 10, 0)
         brand_layout.setSpacing(8)
         
+        # 应用名称水平布局
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(5)
+        
         # 应用名称
         app_title = QLabel()
         app_title.setText("<span style='font-size: 28px;'>Hanabi</span><br><span style='font-size: 14px;'>Download Manager</span>")
         app_title.setStyleSheet("color: #B39DDB; font-weight: bold; background-color: transparent;")
         app_title.setTextFormat(Qt.RichText)
         self.font_manager.apply_font(app_title)
-        brand_layout.addWidget(app_title)
+        title_layout.addWidget(app_title)
+        
+        # 添加应用名称布局
+        brand_layout.addLayout(title_layout)
         
         # 应用口号
         slogan_label = QLabel("Dev By ZZBuAoYe")
         slogan_label.setStyleSheet("color: #9E9E9E; font-size: 12px; background-color: transparent;")
         self.font_manager.apply_font(slogan_label)
         brand_layout.addWidget(slogan_label)
+        
+        # 天气信息作为单独的一行
+        self.weather_label = QLabel()
+        self.weather_label.setStyleSheet("color: #9E9E9E; background-color: transparent; padding: 4px 0;")
+        self.weather_label.setTextFormat(Qt.RichText)
+        self.weather_label.setCursor(Qt.PointingHandCursor)  # 设置指针光标，提示可交互
+        self.font_manager.apply_font(self.weather_label)
+        self._update_weather_display()  # 初始化显示
+        brand_layout.addWidget(self.weather_label)
+        
+        # 创建天气悬浮窗
+        self.weather_popup = WeatherPopup(self)
+        
+        # 为天气标签安装事件过滤器
+        self.weather_label.installEventFilter(self)
         
         # 下方装饰线
         separator = QFrame()
@@ -279,8 +312,16 @@ class DownloadManagerWindow(QMainWindow):
         separator.setFixedHeight(1)
         brand_layout.addWidget(separator)
         
-        parent_layout.addWidget(brand_container)
+        # 获取天气数据
+        self._fetch_weather_data()
         
+        # 设置定时器，每30分钟更新一次天气
+        self.weather_timer = QTimer(self)
+        self.weather_timer.timeout.connect(self._fetch_weather_data)
+        self.weather_timer.start(30 * 60 * 1000)  # 30分钟 = 30 * 60 * 1000毫秒
+        
+        parent_layout.addWidget(brand_container)
+    
     def _create_main_content_area(self):
         """创建主内容区域"""
         self.content_area = RoundedWidget(radius=20, bg_color="#1E1E1E", corners="all")
@@ -345,6 +386,7 @@ class DownloadManagerWindow(QMainWindow):
         self.save_path = folder_path
         # 更新配置
         self.config_manager.set_save_path(folder_path)
+        NotifyManager.info(f"默认保存路径已更改: {folder_path}")
     
     def _create_download_page(self):
         """创建下载页面内容"""
@@ -623,7 +665,76 @@ class DownloadManagerWindow(QMainWindow):
     def _check_for_updates(self):
         """检查更新"""
         QTimer.singleShot(2000, self.check_update_logs)
+        
+    def _fetch_weather_data(self):
+        """获取天气数据 - 使用线程方式避免阻塞UI"""
+        try:
+            # 如果有正在运行的线程，先停止它
+            if self.weather_thread and self.weather_thread.isRunning():
+                self.weather_thread.stop()
+                self.weather_thread.wait()  # 等待线程结束
+            
+            # 创建新的天气获取线程
+            self.weather_thread = WeatherFetchThread(self)
+            
+            # 连接信号
+            self.weather_thread.weatherDataReceived.connect(self._on_weather_data_received)
+            self.weather_thread.weatherDataFailed.connect(self._on_weather_data_failed)
+            
+            # 启动线程
+            self.weather_thread.start()
+            
+            logging.debug("天气数据获取线程已启动")
+            
+        except Exception as e:
+            logging.error(f"启动天气数据获取线程失败: {str(e)}")
     
+    @Slot(dict)
+    def _on_weather_data_received(self, weather_data):
+        """接收到天气数据的处理函数"""
+        try:
+            # 更新天气数据
+            self.weather_data = weather_data
+            
+            # 更新UI显示
+            if self.weather_label:
+                self._update_weather_display()
+                
+            # 如果悬浮窗已经创建并且可见，也更新悬浮窗
+            if hasattr(self, 'weather_popup') and self.weather_popup and self.weather_popup.is_visible:
+                self.weather_popup.update_weather_data(weather_data)
+                
+            logging.debug(f"成功获取天气数据: {weather_data['city']} {weather_data['temperature']}℃ {weather_data['weather']}")
+            
+        except Exception as e:
+            logging.error(f"处理天气数据失败: {str(e)}")
+    
+    @Slot(str)
+    def _on_weather_data_failed(self, error_msg):
+        """天气数据获取失败的处理函数"""
+        logging.warning(f"获取天气数据失败: {error_msg}")
+        # 可以选择在这里更新UI，显示获取失败的状态
+        # 但通常保留上次的数据更好，避免UI闪烁
+    
+    def _update_weather_display(self):
+        """更新天气显示"""
+        if self.weather_label:
+            # 根据天气状况选择合适的图标
+            weather_icon = self._get_weather_icon(self.weather_data.get('weather', ''))
+            
+            # 获取城市名称，处理过长的情况
+            city = self.weather_data.get('city', '--')
+            # 如果城市名称包含逗号，只取第一部分(如"Hangzhou, Zhejiang, China" -> "Hangzhou")
+            if ',' in city:
+                city = city.split(',')[0].strip()
+            
+            # 创建带图标的天气文本
+            weather_text = f"<span style='font-size: 13px;'>{weather_icon}{city} {self.weather_data.get('temperature', '--')}℃</span>"
+            self.weather_label.setText(weather_text)
+            
+            # 确保标签高度足够
+            self.weather_label.setMinimumHeight(25)
+        
     def paintEvent(self, event):
         """自定义绘制窗口背景"""
         painter = QPainter(self)
@@ -845,7 +956,7 @@ class DownloadManagerWindow(QMainWindow):
             # 更新配置
             self.config_manager.set_save_path(folder_path)
             # 提示用户
-            self.show_toast("保存位置已更新")
+            NotifyManager.info(f"保存位置已更新: {folder_path}")
     
     def start_download(self, url=None):
         """手动开始下载任务"""
@@ -1166,6 +1277,16 @@ class DownloadManagerWindow(QMainWindow):
             # 向API发送请求，统计下载次数
             self._send_download_count()
             
+            # 获取文件名用于通知
+            file_name = ""
+            if hasattr(task.get("manager", None), "file_name"):
+                file_name = task["manager"].file_name
+            else:
+                file_name = task.get("file_name", "未知文件")
+                
+            # 显示通知
+            NotifyManager.success(f"下载完成: {file_name}")
+            
             logging.info(f"下载任务完成: {task.get('file_name', '')}")
             
         except Exception as e:
@@ -1207,6 +1328,8 @@ class DownloadManagerWindow(QMainWindow):
                 if history_widget and hasattr(history_widget, 'load_history'):
                     # 在主线程中异步刷新
                     QTimer.singleShot(100, history_widget.load_history)
+                    # 添加通知
+                    QTimer.singleShot(200, lambda: NotifyManager.info("正在刷新历史记录"))
         except Exception as e:
             logging.error(f"刷新历史页面失败: {e}")
     
@@ -1539,6 +1662,15 @@ class DownloadManagerWindow(QMainWindow):
         
         # 保存下载任务的状态，以便下次启动时恢复
         self.save_application_state()
+        
+        # 停止天气获取线程
+        if hasattr(self, 'weather_thread') and self.weather_thread and self.weather_thread.isRunning():
+            try:
+                self.weather_thread.stop()
+                self.weather_thread.wait(1000)  # 最多等待1秒
+                logging.info("已停止天气获取线程")
+            except Exception as e:
+                logging.error(f"停止天气获取线程失败: {e}")
         
         logging.info("应用程序正常关闭")
         super().closeEvent(event)
@@ -2271,4 +2403,571 @@ class DownloadManagerWindow(QMainWindow):
             logging.warning(f"从URL提取文件名失败: {e}")
             timestamp = int(time.time())
             return f"download_{timestamp}.bin"
+    
+    def _get_weather_icon(self, weather_condition):
+        """根据天气状况返回对应的图标"""
+        # 使用font_manager创建图标文本
+        icon_name = "ic_fluent_weather_sunny_24_regular"  # 默认晴天图标
         
+        # 根据天气状况映射图标
+        if "晴" in weather_condition or "晴天" in weather_condition:
+            icon_name = "ic_fluent_weather_sunny_24_regular"
+        elif "多云" in weather_condition:
+            icon_name = "ic_fluent_weather_partly_cloudy_day_24_regular"
+        elif "阴" in weather_condition:
+            icon_name = "ic_fluent_weather_cloudy_24_regular"
+        elif "雨" in weather_condition:
+            if "雷" in weather_condition:
+                icon_name = "ic_fluent_weather_thunderstorm_24_regular"
+            elif "小" in weather_condition:
+                icon_name = "ic_fluent_weather_drizzle_24_regular"
+            else:
+                icon_name = "ic_fluent_weather_rain_24_regular"
+        elif "雪" in weather_condition:
+            icon_name = "ic_fluent_weather_snow_24_regular"
+        elif "雾" in weather_condition or "霾" in weather_condition:
+            icon_name = "ic_fluent_weather_fog_24_regular"
+        elif "风" in weather_condition or "飓风" in weather_condition:
+            icon_name = "ic_fluent_weather_squalls_24_regular"
+        
+        # 获取图标Unicode字符
+        try:
+            # 尝试获取图标文本
+            if hasattr(self, 'font_manager') and self.font_manager:
+                icon_text = self.font_manager.get_icon_text(icon_name)
+                if icon_text:
+                    # 增大图标尺寸，并添加样式
+                    return f"<span style='font-family: FluentSystemIcons-Regular; color: #B39DDB; font-size: 16px; vertical-align: middle; margin-right: 5px;'>{icon_text}</span>"
+        except Exception as e:
+            logging.warning(f"获取天气图标失败: {e}")
+        
+        # 如果获取失败或没有图标，返回空字符串
+        return ""
+    
+    def eventFilter(self, watched, event):
+        """事件过滤器，处理天气标签的鼠标事件"""
+        if watched == self.weather_label:
+            if event.type() == QEvent.Enter:
+                # 鼠标进入天气标签
+                self._show_weather_popup()
+                return True
+            elif event.type() == QEvent.Leave:
+                # 鼠标离开天气标签
+                self.weather_popup.prepare_hide()
+                return True
+        
+        # 其他事件交给父类处理
+        return super().eventFilter(watched, event)
+
+    def _show_weather_popup(self):
+        """显示天气详情悬浮窗"""
+        if hasattr(self, 'weather_popup') and self.weather_popup:
+            # 更新天气数据
+            self.weather_popup.update_weather_data(self.weather_data)
+            
+            # 计算显示位置 - 在天气标签旁边，根据布局判断
+            label_pos = self.weather_label.mapToGlobal(QPoint(0, 0))
+            label_width = self.weather_label.width()
+            label_height = self.weather_label.height()
+            
+            # 获取屏幕尺寸，避免显示超出屏幕边界
+            screen_rect = QApplication.primaryScreen().availableGeometry()
+            
+            # 首先尝试在标签右侧显示
+            popup_x = label_pos.x() + label_width + 5
+            # 如果右侧显示会超出屏幕，则在标签下方显示
+            if popup_x + 220 > screen_rect.right():  # 220是悬浮窗的固定宽度
+                popup_x = label_pos.x()
+                popup_y = label_pos.y() + label_height + 5
+            else:
+                # 右侧显示时，垂直居中对齐
+                popup_y = label_pos.y() - 50  # 向上偏移一些，使内容更居中显示
+            
+            # 确保不超出屏幕顶部
+            if popup_y < screen_rect.top():
+                popup_y = screen_rect.top() + 5
+            
+            # 显示悬浮窗
+            self.weather_popup.show_at(QPoint(popup_x, popup_y))
+
+# 添加天气获取线程类
+class WeatherFetchThread(QThread):
+    """天气数据获取线程，防止在主线程中获取数据导致界面卡顿"""
+    
+    # 定义信号：成功获取天气数据时发出
+    weatherDataReceived = Signal(dict)
+    # 定义信号：获取数据失败时发出
+    weatherDataFailed = Signal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 可以设置一个标志来控制线程运行
+        self.is_running = True
+    
+    def run(self):
+        """线程执行函数，负责获取天气数据"""
+        try:
+            import requests
+            # 设置较短的超时时间，避免长时间阻塞
+            response = requests.get("http://apiv2.xiaoy.asia/api/v1/?name=weather", timeout=5)
+            
+            # 检查响应状态
+            if response.status_code == 200:
+                # 检查响应内容是否为空
+                if not response.text.strip():
+                    logging.error("API返回空响应")
+                    self.weatherDataFailed.emit("API返回空响应")
+                    return
+                
+                # 记录原始响应内容以便调试
+                logging.debug(f"天气API原始响应: {response.text}")
+                
+                try:
+                    # 解析JSON响应
+                    data = response.json()
+                    
+                    # 处理不同的API响应格式
+                    if data.get("code") == 200:
+                        # 获取data字段，可能是字典也可能是其他格式
+                        api_data = data.get("data", {})
+                        city = ""
+                        weather_info = {}
+                        
+                        # 根据API返回的不同格式分别处理
+                        if isinstance(api_data, dict):
+                            # 格式1: 嵌套格式
+                            if "data" in api_data and isinstance(api_data["data"], list) and len(api_data["data"]) > 0:
+                                city = api_data.get("city", "--")
+                                weather_info = api_data["data"][0]
+                            # 格式2: 直接包含天气信息
+                            else:
+                                city = api_data.get("city", "--") 
+                                weather_info = api_data
+                        # 格式3: data直接是天气信息
+                        elif isinstance(api_data, list) and len(api_data) > 0:
+                            weather_info = api_data[0]
+                            city = data.get("city", "--")
+                        # 如果都不是，可能是其他格式
+                        else:
+                            weather_info = data
+                            city = data.get("city", "--")
+                        
+                        # 检查天气信息是否获取成功
+                        if not weather_info:
+                            logging.warning("无法从API响应中提取天气信息")
+                            self.weatherDataFailed.emit("无法从API响应中提取天气信息")
+                            return
+                        
+                        # 解析温度，移除度数符号
+                        temp = weather_info.get("temperature", "--")
+                        if temp and "°" in temp:
+                            temp = temp.replace("°", "")
+                        
+                        # 创建天气数据字典
+                        weather_data = {
+                            "city": city,
+                            "temperature": temp,
+                            "weather": weather_info.get("weather", "--"),
+                            "wind": weather_info.get("wind", "--"),
+                            "wind_level": weather_info.get("wind_level", "--"),
+                            "humidity": weather_info.get("humidity", "--"),
+                            "air_quality": weather_info.get("air_quality", "--")
+                        }
+                        
+                        # 记录成功解析的数据
+                        logging.info(f"成功获取天气数据: {city} {temp}℃ {weather_info.get('weather', '--')}")
+                        
+                        # 通过信号发送数据到主线程
+                        self.weatherDataReceived.emit(weather_data)
+                    else:
+                        logging.warning(f"API返回错误状态: {data.get('code')} - {data.get('msg', '未知错误')}")
+                        self.weatherDataFailed.emit(f"API返回错误: {data.get('msg', '未知错误')}")
+                
+                except requests.exceptions.JSONDecodeError as json_err:
+                    # JSON解析错误，记录原始响应内容
+                    logging.error(f"JSON解析错误: {json_err}")
+                    logging.error(f"API返回的原始内容: {response.text[:200]}...")  # 只记录前200个字符
+                    self.weatherDataFailed.emit(f"无法解析API响应: {json_err}")
+                    
+            else:
+                logging.warning(f"HTTP错误: {response.status_code} - {response.reason}")
+                self.weatherDataFailed.emit(f"HTTP错误: {response.status_code}")
+                
+        except requests.exceptions.Timeout:
+            logging.warning("API请求超时")
+            self.weatherDataFailed.emit("API请求超时，请检查网络连接")
+            
+        except requests.exceptions.ConnectionError as conn_err:
+            logging.warning(f"网络连接错误: {conn_err}")
+            self.weatherDataFailed.emit("网络连接错误，无法连接到天气服务")
+            
+        except Exception as e:
+            # 发送错误信号
+            import traceback
+            error_details = traceback.format_exc()
+            logging.error(f"获取天气数据时出现未知错误: {e}")
+            logging.debug(error_details)  # 详细错误信息记录到debug级别
+            self.weatherDataFailed.emit(f"获取天气数据失败: {str(e)}")
+    
+    def stop(self):
+        """停止线程"""
+        self.is_running = False
+        self.wait()  # 等待线程结束
+    
+# 添加自定义天气悬浮窗类
+class WeatherPopup(QWidget):
+    """自定义天气悬浮窗，提供美观的动画效果和主题风格"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.ToolTip | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)  # 不激活窗口（不抢焦点）
+        self.setFocusPolicy(Qt.NoFocus)  # 不接受焦点
+        
+        # 初始化UI
+        self._init_ui()
+        
+        # 设置动画
+        self.opacity_effect = QGraphicsOpacityEffect(self)
+        self.opacity_effect.setOpacity(0.0)
+        self.setGraphicsEffect(self.opacity_effect)
+        
+        self.fade_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
+        self.fade_animation.setDuration(180)  # 稍微加快动画速度
+        self.fade_animation.setEasingCurve(QEasingCurve.OutCubic)  # 使用OutCubic曲线，开始快结束慢
+        
+        # 计时器：鼠标离开后延迟隐藏
+        self.hide_timer = QTimer(self)
+        self.hide_timer.setSingleShot(True)
+        self.hide_timer.timeout.connect(self.start_fade_out)
+        
+        # 隐藏状态
+        self.is_visible = False
+        
+    def _init_ui(self):
+        """初始化UI组件"""
+        # 主布局
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        self.main_layout.setSpacing(0)
+        
+        # 内容区域 - 圆角矩形背景
+        self.content_widget = QWidget(self)
+        self.content_widget.setObjectName("weatherPopupContent")
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(12, 12, 12, 12)
+        self.content_layout.setSpacing(4)
+        
+        # 添加标题
+        self.title_label = QLabel("天气详情", self.content_widget)
+        self.title_label.setObjectName("weatherPopupTitle")
+        self.content_layout.addWidget(self.title_label, 0, Qt.AlignLeft)
+        
+        # 添加分隔线
+        self.separator = QFrame(self.content_widget)
+        self.separator.setFrameShape(QFrame.HLine)
+        self.separator.setFrameShadow(QFrame.Sunken)
+        self.separator.setObjectName("weatherPopupSeparator")
+        self.content_layout.addWidget(self.separator)
+        
+        # 添加天气详情网格
+        self.details_widget = QWidget(self.content_widget)
+        self.details_layout = QGridLayout(self.details_widget)
+        self.details_layout.setContentsMargins(0, 6, 0, 0)
+        self.details_layout.setHorizontalSpacing(10)
+        self.details_layout.setVerticalSpacing(6)
+        
+        # 创建天气详情标签
+        self.city_label = self._create_detail_labels("城市", "--")
+        self.weather_label = self._create_detail_labels("天气", "--")
+        self.temp_label = self._create_detail_labels("温度", "--")
+        self.wind_label = self._create_detail_labels("风向", "--")
+        self.wind_level_label = self._create_detail_labels("风力", "--")
+        self.humidity_label = self._create_detail_labels("湿度", "--")
+        self.air_label = self._create_detail_labels("空气质量", "--")
+        
+        # 添加到网格
+        self.details_layout.addWidget(self.city_label[0], 0, 0)
+        self.details_layout.addWidget(self.city_label[1], 0, 1)
+        self.details_layout.addWidget(self.weather_label[0], 1, 0)
+        self.details_layout.addWidget(self.weather_label[1], 1, 1)
+        self.details_layout.addWidget(self.temp_label[0], 2, 0)
+        self.details_layout.addWidget(self.temp_label[1], 2, 1)
+        self.details_layout.addWidget(self.wind_label[0], 3, 0)
+        self.details_layout.addWidget(self.wind_label[1], 3, 1)
+        self.details_layout.addWidget(self.wind_level_label[0], 4, 0)
+        self.details_layout.addWidget(self.wind_level_label[1], 4, 1)
+        self.details_layout.addWidget(self.humidity_label[0], 5, 0)
+        self.details_layout.addWidget(self.humidity_label[1], 5, 1)
+        self.details_layout.addWidget(self.air_label[0], 6, 0)
+        self.details_layout.addWidget(self.air_label[1], 6, 1)
+        
+        # 添加详情到主布局
+        self.content_layout.addWidget(self.details_widget)
+        
+        # 添加内容区到主布局
+        self.main_layout.addWidget(self.content_widget)
+        
+        # 设置样式
+        self._set_styles()
+        
+        # 调整大小
+        self.adjustSize()
+        
+        # 设置固定宽度，防止太宽
+        self.setFixedWidth(220)
+    
+    def _create_detail_labels(self, title, value):
+        """创建详情标签对"""
+        title_label = QLabel(title + ":", self.details_widget)
+        title_label.setObjectName("weatherDetailTitle")
+        
+        value_label = QLabel(value, self.details_widget)
+        value_label.setObjectName("weatherDetailValue")
+        value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        
+        return (title_label, value_label)
+    
+    def _set_styles(self):
+        """设置样式"""
+        # 主窗口样式
+        self.setStyleSheet("""
+            WeatherPopup {
+                background-color: transparent;
+            }
+            
+            #weatherPopupContent {
+                background-color: #1E1E1E;
+                border-radius: 8px;
+                border: 1px solid #333333;
+            }
+            
+            #weatherPopupTitle {
+                color: #B39DDB;
+                font-size: 14px;
+                font-weight: bold;
+                margin-bottom: 5px;
+            }
+            
+            #weatherPopupSeparator {
+                background-color: #333333;
+                max-height: 1px;
+            }
+            
+            #weatherDetailTitle {
+                color: #9E9E9E;
+                font-size: 12px;
+                padding-right: 5px;
+            }
+            
+            #weatherDetailValue {
+                color: #FFFFFF;
+                font-size: 12px;
+            }
+        """)
+    
+    def update_weather_data(self, weather_data):
+        """更新天气数据"""
+        if not weather_data:
+            return
+            
+        # 更新标签文本
+        self.city_label[1].setText(weather_data.get('city', '--'))
+        self.weather_label[1].setText(weather_data.get('weather', '--'))
+        self.temp_label[1].setText(weather_data.get('temperature', '--') + "℃")
+        self.wind_label[1].setText(weather_data.get('wind', '--'))
+        self.wind_level_label[1].setText(weather_data.get('wind_level', '--'))
+        self.humidity_label[1].setText(weather_data.get('humidity', '--'))
+        self.air_label[1].setText(weather_data.get('air_quality', '--'))
+        
+        # 调整大小
+        self.adjustSize()
+    
+    def show_at(self, pos):
+        """在指定位置显示"""
+        if self.fade_animation.state() == QPropertyAnimation.Running:
+            self.fade_animation.stop()
+            
+        # 计算位置
+        self.move(pos)
+        
+        # 如果还未显示，设置可见
+        if not self.is_visible:
+            super().show()
+            self.is_visible = True
+            
+        # 开始淡入动画
+        self.start_fade_in()
+    
+    def start_fade_in(self):
+        """开始淡入动画"""
+        self.fade_animation.setStartValue(self.opacity_effect.opacity())
+        self.fade_animation.setEndValue(1.0)
+        self.fade_animation.start()
+    
+    def start_fade_out(self):
+        """开始淡出动画"""
+        self.fade_animation.setStartValue(self.opacity_effect.opacity())
+        self.fade_animation.setEndValue(0.0)
+        self.fade_animation.finished.connect(self._hide_complete)
+        self.fade_animation.start()
+    
+    def _hide_complete(self):
+        """淡出完成后隐藏窗口"""
+        try:
+            # 断开连接，避免多次调用
+            self.fade_animation.finished.disconnect(self._hide_complete)
+        except:
+            pass
+            
+        # 如果动画已经完成，并且不透明度为0，则隐藏窗口
+        if self.opacity_effect.opacity() < 0.1:
+            super().hide()
+            self.is_visible = False
+    
+    def keep_visible(self):
+        """保持可见状态，重置隐藏计时器"""
+        # 停止任何现有的计时器
+        self.hide_timer.stop()
+    
+    def prepare_hide(self):
+        """准备隐藏，启动隐藏计时器"""
+        # 开始计时器，500毫秒后隐藏
+        self.hide_timer.start(500)
+    
+    def enterEvent(self, event):
+        """鼠标进入事件"""
+        self.keep_visible()
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        """鼠标离开事件"""
+        self.prepare_hide()
+        super().leaveEvent(event)
+    
+    def paintEvent(self, event):
+        """自定义绘制，添加阴影效果"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 设置半透明背景
+        path = QPainterPath()
+        path.addRoundedRect(self.rect(), 10, 10)
+        
+        # 绘制背景
+        painter.fillPath(path, QColor(0, 0, 0, 1))  # 几乎透明的背景
+        
+        # 添加简单的阴影效果
+        shadow_path = QPainterPath()
+        shadow_path.addRoundedRect(self.rect().adjusted(2, 2, -2, -2), 8, 8)
+        shadow_color = QColor(0, 0, 0, 30)  # 半透明黑色
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(shadow_color)
+        painter.drawPath(shadow_path)
+        
+        super().paintEvent(event)
+
+    def closeEvent(self, event):
+        """关闭事件处理"""
+        # 查找活跃下载任务
+        active_downloads = [task for task in self.download_tasks if task['status'] == '下载中']
+        
+        if active_downloads:
+            # 自动暂停所有正在下载的任务
+            for task in active_downloads:
+                try:
+                    # 获取任务行号
+                    row = task['row']
+                    
+                    # 更新任务状态为已暂停
+                    task['status'] = '已暂停'
+                    
+                    # 暂停下载而不是停止
+                    if task.get('manager'):
+                        task['manager'].stop()  # 目前使用stop方法暂停，保留任务信息
+                    
+                    # 更新UI显示
+                    with self.thread_lock:
+                        self.task_window.update_status(row, "已暂停")
+                    
+                    logging.info(f"自动暂停任务: {row}")
+                except Exception as e:
+                    logging.error(f"自动暂停任务失败: {e}")
+            
+            # 显示提示信息
+            logging.info(f"已自动暂停{len(active_downloads)}个下载任务并准备退出")
+            
+            # 可选：显示通知
+            QMessageBox.information(
+                self,
+                "下载已暂停",
+                f"已自动暂停{len(active_downloads)}个正在进行的下载任务。下次启动应用时可以恢复这些任务。",
+                QMessageBox.Ok
+            )
+        
+        # 关闭所有可能的弹窗
+        try:
+            for widget in QApplication.topLevelWidgets():
+                if widget != self and widget.isVisible() and isinstance(widget, QDialog):
+                    logging.info(f"关闭子对话框: {widget.__class__.__name__}")
+                    widget.close()
+        except Exception as e:
+            logging.error(f"关闭子对话框失败: {e}")
+        
+        # 释放下载处理器资源
+        if hasattr(self, 'download_handler') and self.download_handler:
+            try:
+                # 断开信号连接
+                if hasattr(self.download_handler, 'downloadCompleted'):
+                    try:
+                        self.download_handler.downloadCompleted.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+                
+                # 使用弱引用避免循环引用
+                import weakref
+                handler_ref = weakref.ref(self.download_handler)
+                self.download_handler = None
+                
+                # 强制清理
+                import gc
+                gc.collect()
+                
+                logging.info("已安全释放下载处理器资源")
+            except Exception as e:
+                logging.error(f"释放下载处理器资源失败: {e}")
+        
+        # 停止浏览器下载监听器
+        if hasattr(self, 'connector') and self.connector:
+            try:
+                self.connector.stop()
+                logging.info("已停止浏览器下载监听器")
+            except Exception as e:
+                logging.error(f"停止浏览器下载监听器失败: {e}")
+        
+        # 停止定时器
+        if hasattr(self, 'ws_refresh_timer') and self.ws_refresh_timer:
+            self.ws_refresh_timer.stop()
+        
+        # 保存配置
+        if hasattr(self, 'config_manager'):
+            self.config_manager.save_config()
+        
+        # 保存下载任务的状态，以便下次启动时恢复
+        self.save_application_state()
+        
+        # 停止天气获取线程
+        if hasattr(self, 'weather_thread') and self.weather_thread and self.weather_thread.isRunning():
+            try:
+                self.weather_thread.stop()
+                self.weather_thread.wait(1000)  # 最多等待1秒
+                logging.info("已停止天气获取线程")
+            except Exception as e:
+                logging.error(f"停止天气获取线程失败: {e}")
+        
+        # 关闭天气悬浮窗
+        if hasattr(self, 'weather_popup') and self.weather_popup:
+            self.weather_popup.close()
+        
+        logging.info("应用程序正常关闭")
+        super().closeEvent(event)
