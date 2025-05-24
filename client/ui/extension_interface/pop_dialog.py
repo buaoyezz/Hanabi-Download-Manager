@@ -14,8 +14,11 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                QGraphicsDropShadowEffect, QSpacerItem, QSizePolicy, QCheckBox,
                                QScrollArea, QApplication, QMessageBox, QTableWidget,
                                QTableWidgetItem, QHeaderView)
-from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QThread
+from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QThread, QObject
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QFont, QIcon, QPixmap
+
+from core.animations.window_auto_resize_animation import apply_resize_animation
+from client.ui.client_interface.utils.file_icons_get import FileIconGetter
 
 from core.download_core.Hanabi_NSF_Kernel import DownloadEngine
 from connect.fallback_connector import FallbackConnector
@@ -104,7 +107,7 @@ class DownloadPopDialog(QDialog):
         参数:
             download_data (dict): 下载数据，如果为None则显示添加下载界面
             parent: 父窗口
-            auto_start (bool): 是否自动开始下载，默认为False
+            auto_start (bool): 是否自动开始下载，默认为False (通常设为False以显示确认界面)
             
         返回:
             DownloadPopDialog: 创建的弹窗对象
@@ -166,32 +169,28 @@ class DownloadPopDialog(QDialog):
             # 预处理下载数据
             task_data = dialog._process_download_data(download_data)
             
-            if auto_start:
-                # 显示下载中界面并开始下载
-                dialog._create_downloading_ui(task_data)
-                dialog._start_download(task_data)
-            else:
-                # 显示添加下载界面，但填入URL和文件名
-                dialog._create_add_download_ui()
+            # 忽略传入的auto_start参数，始终显示添加下载界面供用户确认
+            # 显示添加下载界面，但填入URL和文件名
+            dialog._create_add_download_ui()
+            
+            # 填入URL
+            if "url" in task_data and dialog.url_input:
+                dialog.url_input.setText(task_data.get("url", ""))
                 
-                # 填入URL
-                if "url" in task_data and dialog.url_input:
-                    dialog.url_input.setText(task_data.get("url", ""))
-                    
-                # 填入文件名
-                if "file_name" in task_data and dialog.filename_input:
-                    dialog.filename_input.setText(task_data.get("file_name", ""))
-                    
-                # 填入保存路径
-                if "save_path" in task_data and dialog.save_path_input:
-                    dialog.save_path_input.setText(task_data.get("save_path", ""))
-                    
-                # 多线程选项
-                if "multi_thread" in task_data and dialog.multi_thread_checkbox:
-                    dialog.multi_thread_checkbox.setChecked(task_data.get("multi_thread", True))
-                    
-                # 保存任务数据，以便下载按钮使用
-                dialog.pending_task_data = task_data
+            # 填入文件名
+            if "file_name" in task_data and dialog.filename_input:
+                dialog.filename_input.setText(task_data.get("file_name", ""))
+                
+            # 填入保存路径
+            if "save_path" in task_data and dialog.save_path_input:
+                dialog.save_path_input.setText(task_data.get("save_path", ""))
+                
+            # 多线程选项
+            if "multi_thread" in task_data and dialog.multi_thread_checkbox:
+                dialog.multi_thread_checkbox.setChecked(task_data.get("multi_thread", True))
+                
+            # 保存任务数据，以便下载按钮使用
+            dialog.pending_task_data = task_data
         
         # 显示窗口
         dialog.showNormal()
@@ -258,6 +257,9 @@ class DownloadPopDialog(QDialog):
         # 初始化字体管理器
         self.font_manager = FontManager()
         
+        # 初始化文件图标获取器
+        self.file_icon_getter = FileIconGetter()
+        
         # 初始化UI
         self._setup_ui()
         
@@ -275,6 +277,15 @@ class DownloadPopDialog(QDialog):
         self.dragging = False
         self.drag_position = QPoint()
         
+        # 拖动性能优化相关
+        self.last_move_time = 0
+        self.last_move_pos = QPoint()
+        self.last_update_time = 0
+        
+        # 设置应用程序级别的处理策略，使拖动更加流畅
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        
         # 定时关闭 - 5秒后自动关闭完成弹窗
         self.auto_close_timer = QTimer(self)
         self.auto_close_timer.setSingleShot(True)
@@ -284,11 +295,10 @@ class DownloadPopDialog(QDialog):
         self.progress_timer = QTimer(self)
         self.progress_timer.timeout.connect(self._update_download_info)
         
-        # 分段信息区域是否显示
-        self.show_segments = True
+        # 分段信息区域是否显示，默认折叠
+        self.show_segments = False
         
-        # 是否自动关闭完成页面
-        self.auto_close_completed = False
+        # 已移除自动关闭功能
         
         # 待处理的任务数据
         self.pending_task_data = None
@@ -297,9 +307,48 @@ class DownloadPopDialog(QDialog):
         self.installEventFilter(self)
     
     def eventFilter(self, obj, event):
-        """事件过滤器，确保窗口可以正常响应事件"""
-        # 处理任何可能导致窗口卡住的事件
-        return super().eventFilter(obj, event)
+        """事件过滤器，确保窗口可以正常响应事件并支持从标题栏子控件拖动"""
+        try:
+            # 首先检查参数类型是否有效
+            if not hasattr(event, 'type'):
+                return False
+                
+            # 处理标题栏中子控件的拖动
+            if isinstance(obj, QObject) and (isinstance(obj, QLabel) or isinstance(obj, QPushButton)):
+                # 检查父对象是否是标题栏
+                parent = obj.parent()
+                if parent and isinstance(parent, QObject) and parent.objectName() == "title_bar":
+                    # 处理鼠标事件
+                    if event.type() == event.Type.MouseButtonPress and hasattr(event, 'button') and event.button() == Qt.LeftButton:
+                        # 触发拖动
+                        self.dragging = True
+                        if hasattr(event, 'globalPosition'):
+                            self.drag_position = event.globalPosition().toPoint() - self.pos()
+                            self.setCursor(Qt.ClosedHandCursor)
+                            return True
+                    elif event.type() == event.Type.MouseMove and hasattr(event, 'buttons') and (event.buttons() & Qt.LeftButton) and self.dragging:
+                        # 移动窗口
+                        if hasattr(event, 'globalPosition'):
+                            new_pos = event.globalPosition().toPoint() - self.drag_position
+                            
+                            # 限制窗口不要移出屏幕
+                            screen = QApplication.primaryScreen().availableGeometry()
+                            new_pos.setX(max(0, min(new_pos.x(), screen.width() - self.width())))
+                            new_pos.setY(max(0, min(new_pos.y(), screen.height() - self.height())))
+                            
+                            self.setGeometry(new_pos.x(), new_pos.y(), self.width(), self.height())
+                            return True
+                    elif event.type() == event.Type.MouseButtonRelease and hasattr(event, 'button') and event.button() == Qt.LeftButton and self.dragging:
+                        # 停止拖动
+                        self.dragging = False
+                        self.setCursor(Qt.ArrowCursor)
+                        return False  # 不拦截释放事件，让按钮能正常响应点击
+                        
+            return False
+        except Exception as e:
+            # 捕获所有异常，确保事件过滤器不会崩溃
+            logging.debug(f"事件过滤器异常: {e}")
+            return False
     
     def closeEvent(self, event):
         """关闭窗口事件处理"""
@@ -518,6 +567,11 @@ class DownloadPopDialog(QDialog):
     
     def _setup_ui(self):
         """初始化UI"""
+        # 设置窗口属性，提高渲染性能
+        self.setAttribute(Qt.WA_OpaquePaintEvent, False)  # 禁用不透明绘制，提高性能
+        self.setAttribute(Qt.WA_NoSystemBackground, True)  # 禁用系统背景
+        self.setFocusPolicy(Qt.StrongFocus)  # 设置强焦点策略
+        
         # 主布局
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
@@ -529,8 +583,8 @@ class DownloadPopDialog(QDialog):
         
         # 框架布局
         self.frame_layout = QVBoxLayout(self.frame)
-        self.frame_layout.setContentsMargins(15, 15, 15, 15)  # 缩小边距
-        self.frame_layout.setSpacing(10)  # 减小间距
+        self.frame_layout.setContentsMargins(25, 15, 25, 15)  # 增加左右边距，保持上下边距不变
+        self.frame_layout.setSpacing(10)  # 保持间距
         
         # 顶部区域 - 标题栏
         self._create_title_bar()
@@ -549,13 +603,27 @@ class DownloadPopDialog(QDialog):
         self.button_layout.setSpacing(10)  # 减小间距
         self.frame_layout.addWidget(self.button_widget)
         
+        # 启用窗口自动调整大小 - 根据内容自动伸缩
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.content_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
         # 默认显示添加下载UI
         self._create_add_download_ui()
     
     def _create_title_bar(self):
         """创建标题栏"""
         title_bar = QFrame()
+        title_bar.setObjectName("title_bar")  # 设置对象名称，方便在鼠标事件中找到
         title_bar.setFixedHeight(40)
+        title_bar.setCursor(Qt.ArrowCursor)  # 设置默认光标
+        # 设置标题栏样式 - 移除悬停效果
+        title_bar.setStyleSheet("""
+            QFrame#title_bar {
+                background-color: transparent;
+                border: none;
+            }
+        """)
         title_layout = QHBoxLayout(title_bar)
         title_layout.setContentsMargins(5, 0, 5, 0)
         title_layout.setSpacing(10)
@@ -569,6 +637,8 @@ class DownloadPopDialog(QDialog):
             self.title_icon.setStyleSheet("color: #B39DDB;")
         else:
             self.title_icon.setStyleSheet("background-image: url(assets/icons/icon_download_purple.png); background-position: center; background-repeat: no-repeat;")
+        # 安装事件过滤器支持拖动
+        self.title_icon.installEventFilter(self)
         title_layout.addWidget(self.title_icon)
         
         # 标题文本
@@ -576,6 +646,8 @@ class DownloadPopDialog(QDialog):
         self.title_label.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(self.title_label)
+        # 安装事件过滤器支持拖动
+        self.title_label.installEventFilter(self)
         title_layout.addWidget(self.title_label, 1)
         
         # 关闭按钮
@@ -610,6 +682,8 @@ class DownloadPopDialog(QDialog):
                 }
             """)
         self.close_button.clicked.connect(self.close)
+        # 安装事件过滤器支持拖动
+        self.close_button.installEventFilter(self)
         title_layout.addWidget(self.close_button)
         
         # 添加分隔线
@@ -639,15 +713,15 @@ class DownloadPopDialog(QDialog):
         main_container = QFrame()
         main_container.setStyleSheet("background-color: transparent;")
         main_layout = QVBoxLayout(main_container)
-        main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(10, 10, 10, 10)  # 增加容器边距
+        main_layout.setSpacing(12)  # 增加间距
         
         # URL输入区域
         url_layout = QHBoxLayout()
         url_layout.setSpacing(5)
         
         url_label = QLabel("下载链接")
-        url_label.setFixedWidth(60)
+        url_label.setFixedWidth(75)  # 增加标签宽度
         url_label.setStyleSheet("color: #B0B0B0; font-size: 13px;")
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(url_label)
@@ -680,7 +754,7 @@ class DownloadPopDialog(QDialog):
         filename_layout.setSpacing(5)
         
         filename_label = QLabel("文件名")
-        filename_label.setFixedWidth(60)
+        filename_label.setFixedWidth(75)  # 增加标签宽度
         filename_label.setStyleSheet("color: #B0B0B0; font-size: 13px;")
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(filename_label)
@@ -713,7 +787,7 @@ class DownloadPopDialog(QDialog):
         save_path_layout.setSpacing(5)
         
         save_path_label = QLabel("保存位置")
-        save_path_label.setFixedWidth(60)
+        save_path_label.setFixedWidth(75)  # 增加标签宽度
         save_path_label.setStyleSheet("color: #B0B0B0; font-size: 13px;")
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(save_path_label)
@@ -740,7 +814,7 @@ class DownloadPopDialog(QDialog):
         save_path_layout.addWidget(self.save_path_input)
         
         self.browse_button = QPushButton("浏览")
-        self.browse_button.setFixedSize(60, 28)
+        self.browse_button.setFixedSize(70, 28)  # 增加按钮宽度
         self.browse_button.setStyleSheet("""
             QPushButton {
                 background-color: #444444;
@@ -803,7 +877,7 @@ class DownloadPopDialog(QDialog):
         button_layout.addStretch(1)
         
         self.cancel_button = QPushButton("取消")
-        self.cancel_button.setFixedSize(80, 32)
+        self.cancel_button.setFixedSize(90, 32)  # 增加按钮宽度
         self.cancel_button.setStyleSheet("""
             QPushButton {
                 background-color: #2D2D30;
@@ -823,7 +897,7 @@ class DownloadPopDialog(QDialog):
         button_layout.addWidget(self.cancel_button)
         
         self.download_button = QPushButton("下载")
-        self.download_button.setFixedSize(80, 32)
+        self.download_button.setFixedSize(90, 32)  # 增加按钮宽度
         self.download_button.setStyleSheet("""
             QPushButton {
                 background-color: #8A7CEC;
@@ -853,8 +927,8 @@ class DownloadPopDialog(QDialog):
         # 为URL输入框添加内容变化处理
         self.url_input.textChanged.connect(self._on_url_changed)
         
-        # 设置添加下载页面的窗口大小
-        QTimer.singleShot(0, lambda: self.setMinimumSize(643, 318))
+        # 设置添加下载页面的窗口大小下限，但允许自动伸缩
+        QTimer.singleShot(0, lambda: self._auto_resize())
     
     def _create_downloading_ui(self, task_data):
         """创建下载中UI"""
@@ -866,24 +940,66 @@ class DownloadPopDialog(QDialog):
         
         # 文件名和图标区域
         file_info_frame = QFrame()
+        file_info_frame.setObjectName("file_info_frame")  # 设置对象名，方便以后查找
         file_info_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 8px;")
         file_info_layout = QHBoxLayout(file_info_frame)
-        file_info_layout.setContentsMargins(15, 12, 15, 12)
+        file_info_layout.setContentsMargins(20, 12, 20, 12)  # 增加左右边距
         file_info_layout.setSpacing(15)
         
         # 文件图标
         file_icon = QLabel()
+        file_icon.setObjectName("file_icon")  # 设置对象名，方便以后查找
         file_icon.setFixedSize(36, 36)
-        if hasattr(self, 'font_manager'):
-            self.font_manager.apply_icon_font(file_icon, "ic_fluent_document_24_regular", size=24)
-            file_icon.setStyleSheet("color: #B39DDB; background-color: transparent;")
+        
+        # 尝试获取文件的真实图标
+        file_name = task_data.get("file_name", "")
+        file_path = os.path.join(task_data.get("save_path", ""), file_name)
+        
+        # 获取文件扩展名，如果没有扩展名则显示"No"
+        file_ext_raw = os.path.splitext(file_name)[1]
+        file_ext = file_ext_raw.lstrip('.') if file_ext_raw else "No"
+        
+        icon = None
+        if hasattr(self, 'file_icon_getter'):
+            # 先尝试从文件路径获取图标（对于已有的文件）
+            if os.path.exists(file_path):
+                icon = self.file_icon_getter.get_file_icon(file_path=file_path)
+            # 如果没有获取到，尝试从扩展名获取图标
+            if not icon or icon.isNull():
+                icon = self.file_icon_getter.get_file_icon(file_ext=file_ext)
+        
+        # 如果获取到了有效的图标，则使用它
+        if icon and not icon.isNull():
+            pixmap = icon.pixmap(32, 32)
+            file_icon.setPixmap(pixmap)
+            file_icon.setScaledContents(True)
         else:
-            file_icon.setStyleSheet("background-image: url(assets/icons/icon_file.png); background-position: center; background-repeat: no-repeat;")
+            # 如果没有获取到有效图标，使用字体图标作为备用
+            if hasattr(self, 'font_manager'):
+                self.font_manager.apply_icon_font(file_icon, "ic_fluent_document_24_regular", size=24)
+                file_icon.setStyleSheet("color: #B39DDB; background-color: transparent;")
+            else:
+                # 使用emoji作为备用
+                emoji = self.file_icon_getter.get_file_emoji(file_name) if hasattr(self, 'file_icon_getter') else "📄"
+                color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#B39DDB"
+                pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
+                if pixmap:
+                    file_icon.setPixmap(pixmap)
+                    file_icon.setScaledContents(True)
+                else:
+                    file_icon.setText(emoji)
+                    file_icon.setAlignment(Qt.AlignCenter)
+                    file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
+        
         file_info_layout.addWidget(file_icon)
         
         # 文件信息区域
         file_text_layout = QVBoxLayout()
         file_text_layout.setSpacing(4)
+        
+        # 文件名和扩展名布局
+        filename_layout = QHBoxLayout()
+        filename_layout.setSpacing(8)
         
         # 文件名
         self.filename_label = QLabel(task_data.get("file_name", "未知文件"))
@@ -891,8 +1007,26 @@ class DownloadPopDialog(QDialog):
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(self.filename_label)
         self.filename_label.setWordWrap(True)
-        self.filename_label.setMaximumWidth(380)  # 限制最大宽度，防止窗口过宽
-        file_text_layout.addWidget(self.filename_label)
+        self.filename_label.setMaximumWidth(320)  # 减小最大宽度，为扩展名标签留出空间
+        filename_layout.addWidget(self.filename_label, 1)
+        
+        # 文件扩展名标签
+        self.ext_label = QLabel(file_ext)
+        ext_bg_color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#808080"
+        self.ext_label.setStyleSheet(f"""
+            background-color: {ext_bg_color};
+            color: white;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 12px;
+            font-weight: bold;
+        """)
+        self.ext_label.setAlignment(Qt.AlignCenter)
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(self.ext_label)
+        filename_layout.addWidget(self.ext_label)
+        
+        file_text_layout.addLayout(filename_layout)
         
         # 文件大小和状态
         size_status_layout = QHBoxLayout()
@@ -922,7 +1056,7 @@ class DownloadPopDialog(QDialog):
         progress_frame = QFrame()
         progress_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 8px;")
         progress_layout = QVBoxLayout(progress_frame)
-        progress_layout.setContentsMargins(15, 15, 15, 15)
+        progress_layout.setContentsMargins(20, 15, 20, 15)  # 增加左右边距
         progress_layout.setSpacing(15)
         
         # 进度条
@@ -1010,7 +1144,7 @@ class DownloadPopDialog(QDialog):
         segment_header_frame = QFrame()
         segment_header_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 8px;")
         segment_header_layout = QHBoxLayout(segment_header_frame)
-        segment_header_layout.setContentsMargins(15, 10, 15, 10)
+        segment_header_layout.setContentsMargins(20, 10, 20, 10)  # 增加左右边距
         segment_header_layout.setSpacing(10)
         
         # 分段信息图标
@@ -1032,16 +1166,33 @@ class DownloadPopDialog(QDialog):
         
         segment_header_layout.addStretch(1)
         
-        # 切换按钮
+        # 切换按钮 - 根据是否显示分段信息设置不同图标
         self.toggle_segments_button = QPushButton()
         self.toggle_segments_button.setFixedSize(24, 24)
-        if hasattr(self, 'font_manager') and hasattr(self, 'toggle_segments_button'):
+        if hasattr(self, 'font_manager'):
+            # 设置与展开/折叠状态匹配的图标
             if self.show_segments:
+                # 展开状态 - 显示向上箭头表示可以折叠
                 self.font_manager.apply_icon_font(self.toggle_segments_button, "ic_fluent_chevron_up_24_regular", size=16)
             else:
+                # 折叠状态 - 显示向下箭头表示可以展开
                 self.font_manager.apply_icon_font(self.toggle_segments_button, "ic_fluent_chevron_down_24_regular", size=16)
         else:
+            # 文本备用方案
             self.toggle_segments_button.setText("分段信息 ▽" if self.show_segments else "分段信息 ▷")
+            
+        # 设置切换按钮样式
+        self.toggle_segments_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                color: #CCCCCC;
+            }
+            QPushButton:hover {
+                color: #FFFFFF;
+            }
+        """)
+        
         self.toggle_segments_button.clicked.connect(self._toggle_segments_display)
         segment_header_layout.addWidget(self.toggle_segments_button)
         
@@ -1051,7 +1202,7 @@ class DownloadPopDialog(QDialog):
         self.segments_frame = QFrame()
         self.segments_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 8px;")
         self.segments_layout = QVBoxLayout(self.segments_frame)
-        self.segments_layout.setContentsMargins(15, 15, 15, 15)
+        self.segments_layout.setContentsMargins(20, 15, 20, 15)  # 增加左右边距
         self.segments_layout.setSpacing(10)
         
         # 分段信息表头
@@ -1116,6 +1267,7 @@ class DownloadPopDialog(QDialog):
         self.segments_layout.addWidget(scroll_area)
         
         self.content_layout.addWidget(self.segments_frame)
+        # 根据show_segments属性设置分段信息框的可见性（默认为False，即折叠状态）
         self.segments_frame.setVisible(self.show_segments)
         
         # 添加空白空间
@@ -1125,7 +1277,7 @@ class DownloadPopDialog(QDialog):
         self.button_layout.addStretch(1)
         
         self.cancel_button = QPushButton("取消")
-        self.cancel_button.setFixedSize(100, 40)
+        self.cancel_button.setFixedSize(110, 40)  # 增加按钮宽度
         if hasattr(self, 'font_manager'):
             # 不使用布局，直接设置图标
             icon = QIcon()
@@ -1156,7 +1308,7 @@ class DownloadPopDialog(QDialog):
         self.button_layout.addWidget(self.cancel_button)
         
         self.download_button = QPushButton("")
-        self.download_button.setFixedSize(100, 40)
+        self.download_button.setFixedSize(110, 40)  # 增加按钮宽度
         if hasattr(self, 'font_manager'):
             # 不使用布局，直接设置图标
             icon = QIcon()
@@ -1199,8 +1351,8 @@ class DownloadPopDialog(QDialog):
         # 初始化段列表
         self.segment_rows = []
         
-        # 设置窗口大小
-        QTimer.singleShot(0, lambda: self.setMinimumSize(633, 474))
+        # 设置窗口自动调整大小
+        QTimer.singleShot(0, lambda: self._auto_resize())
         
         # 强制更新UI
         self.repaint()
@@ -1267,22 +1419,97 @@ class DownloadPopDialog(QDialog):
     
     def mousePressEvent(self, event):
         """鼠标按下事件 - 用于窗口拖动"""
-        if event.button() == Qt.LeftButton:
-            self.dragging = True
-            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+        try:
+            if event.button() == Qt.LeftButton:
+                # 检查鼠标是否在标题栏区域内
+                title_bar = self.findChild(QFrame, "title_bar")
+                if title_bar and title_bar.geometry().contains(event.pos()):
+                    self.dragging = True
+                    # 使用globalPosition()获取全局坐标，更准确
+                    self.drag_position = event.globalPosition().toPoint() - self.pos()
+                    
+                    # 记录当前时间，用于计算拖动速度
+                    self.last_move_time = time.time()
+                    self.last_move_pos = event.globalPosition().toPoint()
+                    
+                    # 修改光标形状为移动状态
+                    self.setCursor(Qt.ClosedHandCursor)
+                    event.accept()
+                    return
+            
+            # 如果不满足拖动条件，调用父类处理
+            super().mousePressEvent(event)
+        except Exception as e:
+            logging.debug(f"鼠标按下事件异常: {e}")
+            event.ignore()
     
     def mouseMoveEvent(self, event):
         """鼠标移动事件 - 用于窗口拖动"""
-        if event.buttons() == Qt.LeftButton and self.dragging:
-            self.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
+        try:
+            if event.buttons() & Qt.LeftButton and self.dragging:
+                # 计算当前时间和位置
+                current_time = time.time()
+                current_pos = event.globalPosition().toPoint()
+                
+                # 计算移动速度（像素/秒）
+                time_diff = current_time - getattr(self, 'last_move_time', current_time)
+                if time_diff > 0:
+                    last_pos = getattr(self, 'last_move_pos', current_pos)
+                    dx = current_pos.x() - last_pos.x()
+                    dy = current_pos.y() - last_pos.y()
+                    distance = (dx**2 + dy**2)**0.5
+                    speed = distance / time_diff
+                    
+                    # 更新最后移动时间和位置
+                    self.last_move_time = current_time
+                    self.last_move_pos = current_pos
+                    
+                    # 如果移动速度过快，适当降低响应频率以防止卡顿
+                    if speed > 1500 and hasattr(self, 'last_update_time'):
+                        if current_time - self.last_update_time < 0.016:  # 约60fps
+                            event.accept()
+                            return
+                    
+                    self.last_update_time = current_time
+                
+                # 计算精确的新位置
+                new_pos = event.globalPosition().toPoint() - self.drag_position
+                
+                # 限制窗口不要移出屏幕
+                screen = QApplication.primaryScreen().availableGeometry()
+                new_pos.setX(max(0, min(new_pos.x(), screen.width() - self.width())))
+                new_pos.setY(max(0, min(new_pos.y(), screen.height() - self.height())))
+                
+                # 直接设置位置，避免使用move()可能导致的问题
+                self.setGeometry(new_pos.x(), new_pos.y(), self.width(), self.height())
+                
+                # 强制立即更新窗口位置
+                QApplication.processEvents()
+                
+                event.accept()
+                return
+            
+            # 如果不满足拖动条件，调用父类处理
+            super().mouseMoveEvent(event)
+        except Exception as e:
+            logging.debug(f"鼠标移动事件异常: {e}")
+            event.ignore()
     
     def mouseReleaseEvent(self, event):
         """鼠标释放事件 - 用于窗口拖动"""
-        if event.button() == Qt.LeftButton:
-            self.dragging = False
-            event.accept()
+        try:
+            if event.button() == Qt.LeftButton and self.dragging:
+                self.dragging = False
+                # 恢复默认光标
+                self.setCursor(Qt.ArrowCursor)
+                event.accept()
+                return
+                
+            # 如果不满足拖动条件，调用父类处理
+            super().mouseReleaseEvent(event)
+        except Exception as e:
+            logging.debug(f"鼠标释放事件异常: {e}")
+            event.ignore()
     
     def _process_download_data(self, download_data):
         """处理下载数据，添加必要的信息
@@ -1335,6 +1562,23 @@ class DownloadPopDialog(QDialog):
         
         return task_data
     
+    def _set_thread_priority_safely(self):
+        """安全地设置线程优先级"""
+        if not hasattr(self, 'download_engine') or self.download_engine is None:
+            return
+            
+        try:
+            # 检查线程是否在运行
+            if self.download_engine.isRunning():
+                # 设置为低优先级，使下载线程更容易被系统中断
+                self.download_engine.setPriority(QThread.LowPriority)
+                logging.debug("成功设置下载线程为低优先级")
+            else:
+                logging.debug("下载线程未运行，无法设置优先级")
+        except Exception as e:
+            # 忽略设置优先级可能的错误，不影响下载功能
+            logging.debug(f"设置线程优先级失败: {e}")
+    
     def _start_download(self, task_data):
         """开始下载任务
         
@@ -1382,9 +1626,6 @@ class DownloadPopDialog(QDialog):
                     default_segments=default_segments  # 使用从配置获取的分段数
                 )
                 
-                # 设置线程优先级为低优先级，使其更容易被系统中断
-                self.download_engine.setPriority(QThread.LowPriority)
-                
                 # 连接信号
                 self.download_engine.initialized.connect(self._on_download_initialized)
                 self.download_engine.block_progress_updated.connect(self._on_progress_updated)
@@ -1393,8 +1634,16 @@ class DownloadPopDialog(QDialog):
                 self.download_engine.error_occurred.connect(self._on_download_error)
                 self.download_engine.file_name_changed.connect(self._on_filename_changed)
                 
-                # 启动下载
+                # 先启动下载线程
                 self.download_engine.start()
+                
+                # 在线程启动后设置优先级
+                try:
+                    # 等待极短时间确保线程已启动
+                    QTimer.singleShot(10, lambda: self._set_thread_priority_safely())
+                except Exception as e:
+                    # 忽略设置优先级可能的错误，不影响下载功能
+                    logging.debug(f"设置线程优先级时出错: {e}")
                 
                 # 启动进度更新定时器
                 self.progress_timer.start(500)  # 每500毫秒更新一次
@@ -1507,7 +1756,7 @@ class DownloadPopDialog(QDialog):
         参数:
             speed_bytes (int): 下载速度(字节/秒)
         """
-        # 更新UI
+        # 更新UI - 使用统一格式"速度: {speed_str}"
         speed_str = self._get_readable_speed(speed_bytes)
         self.speed_label.setText(f"速度: {speed_str}")
         
@@ -1643,6 +1892,65 @@ class DownloadPopDialog(QDialog):
         # 更新UI
         if hasattr(self, 'filename_label'):
             self.filename_label.setText(new_filename)
+        
+        # 获取文件扩展名，如果没有扩展名则显示"No"
+        file_ext_raw = os.path.splitext(new_filename)[1]
+        file_ext = file_ext_raw.lstrip('.') if file_ext_raw else "No"
+        
+        # 更新扩展名标签
+        if hasattr(self, 'ext_label'):
+            self.ext_label.setText(file_ext)
+            
+            # 更新扩展名标签的背景颜色
+            if hasattr(self, 'file_icon_getter'):
+                ext_bg_color = self.file_icon_getter.get_file_color(new_filename)
+                self.ext_label.setStyleSheet(f"""
+                    background-color: {ext_bg_color};
+                    color: white;
+                    border-radius: 4px;
+                    padding: 2px 6px;
+                    font-size: 12px;
+                    font-weight: bold;
+                """)
+            
+        # 尝试更新文件图标
+        if hasattr(self, 'file_icon_getter') and hasattr(self, 'download_engine') and self.download_engine:
+            try:
+                file_path = os.path.join(self.download_engine.save_path, new_filename)
+                
+                # 查找文件图标QLabel
+                file_icon = None
+                for child in self.findChildren(QLabel):
+                    if child.objectName() == "file_icon":
+                        file_icon = child
+                        break
+                
+                # 如果找不到指定命名的控件，尝试在前缀内容区域查找符合尺寸的控件
+                if file_icon is None:
+                    content_frame = self.findChild(QFrame, "file_info_frame")
+                    if content_frame:
+                        for child in content_frame.findChildren(QLabel):
+                            if child.size().width() == 36 and child.size().height() == 36:
+                                file_icon = child
+                                break
+                
+                # 如果找到了图标控件，更新图标
+                if file_icon:
+                    icon = None
+                    # 先尝试从文件路径获取图标
+                    if os.path.exists(file_path):
+                        icon = self.file_icon_getter.get_file_icon(file_path=file_path)
+                    # 如果没有获取到，尝试从扩展名获取图标
+                    if not icon or icon.isNull():
+                        icon = self.file_icon_getter.get_file_icon(file_ext=file_ext)
+                    
+                    # 如果获取到了有效的图标，则使用它
+                    if icon and not icon.isNull():
+                        pixmap = icon.pixmap(32, 32)
+                        file_icon.setPixmap(pixmap)
+                        file_icon.setScaledContents(True)
+            except Exception as e:
+                logging.debug(f"更新文件图标失败: {e}")
     
     def _update_download_info(self):
         """更新下载信息"""
@@ -1696,11 +2004,11 @@ class DownloadPopDialog(QDialog):
                             downloaded_str = self._get_readable_size(downloaded)
                             self.size_label.setText(f"已下载: {downloaded_str}")
                 
-                # 更新速度
+                # 更新速度 - 使用统一格式"速度: {speed_str}"
                 if hasattr(self.download_engine, 'avg_speed'):
                     speed = self.download_engine.avg_speed
                     speed_str = self._get_readable_speed(speed)
-                    self.speed_label.setText(speed_str)
+                    self.speed_label.setText(f"速度: {speed_str}")
                     
                     # 更新剩余时间 - 根据下载速度计算
                     if speed > 0 and hasattr(self.download_engine, 'file_size') and hasattr(self.download_engine, 'current_progress'):
@@ -1914,19 +2222,100 @@ class DownloadPopDialog(QDialog):
         self.show_segments = not self.show_segments
         self.segments_frame.setVisible(self.show_segments)
         
-        # 更新按钮图标
+        # 更新按钮图标 - 根据折叠状态设置不同图标
         if hasattr(self, 'font_manager') and hasattr(self, 'toggle_segments_button'):
             if self.show_segments:
+                # 展开状态 - 显示向上箭头表示可以折叠
                 self.font_manager.apply_icon_font(self.toggle_segments_button, "ic_fluent_chevron_up_24_regular", size=16)
             else:
+                # 折叠状态 - 显示向下箭头表示可以展开
                 self.font_manager.apply_icon_font(self.toggle_segments_button, "ic_fluent_chevron_down_24_regular", size=16)
         else:
+            # 文本备用方案
             self.toggle_segments_button.setText("分段信息 ▽" if self.show_segments else "分段信息 ▷")
         
         # 调整窗口大小
         if self.isVisible():
-            self.adjustSize()
+            self._auto_resize()
     
+    def _auto_resize(self):
+        """自动调整窗口大小以适应内容
+        
+        根据当前内容自动计算并调整窗口大小，确保所有内容都能完整显示
+        同时限制最大尺寸，避免窗口过大
+        使用动画效果使调整过程更加平滑
+        """
+        # 先计算窗口内容的理想大小
+        content_size = self.sizeHint()
+        
+        # 获取屏幕大小
+        screen_size = QApplication.primaryScreen().availableSize()
+        
+        # 限制最大宽高为屏幕的75%
+        max_width = int(screen_size.width() * 0.75)
+        max_height = int(screen_size.height() * 0.75)
+        
+        # 确保窗口大小在合理范围内
+        # 增加最小宽度，让界面左右更宽一些
+        new_width = min(max(content_size.width(), 550), max_width)  # 最小宽度550，原来是450
+        new_height = min(max(content_size.height(), 300), max_height)  # 最小高度300
+        
+        # 添加额外宽度，确保文本和控件显示更和谐
+        new_width += 50  # 额外增加50像素宽度
+        
+        # 使用动画平滑调整窗口大小
+        apply_resize_animation(self, new_width, new_height)
+        
+        # 强制布局更新
+        self.layout().update()
+        
+        # 处理窗口位置以确保它在屏幕上可见
+        self._ensure_visible_on_screen()
+        
+    def _ensure_visible_on_screen(self):
+        """确保窗口在屏幕上完全可见，使用动画效果平滑移动窗口"""
+        # 获取当前窗口几何信息
+        window_geometry = self.frameGeometry()
+        
+        # 获取当前屏幕
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        
+        # 当前位置
+        current_x = self.x()
+        current_y = self.y()
+        
+        # 新位置（默认为当前位置）
+        new_x = current_x
+        new_y = current_y
+        
+        # 检查窗口是否超出屏幕边界，并计算新位置
+        if window_geometry.right() > screen_geometry.right():
+            # 右边超出屏幕，向左移动
+            new_x = screen_geometry.right() - window_geometry.width()
+            
+        if window_geometry.bottom() > screen_geometry.bottom():
+            # 底部超出屏幕，向上移动
+            new_y = screen_geometry.bottom() - window_geometry.height()
+            
+        if window_geometry.left() < screen_geometry.left():
+            # 左边超出屏幕，向右移动
+            new_x = screen_geometry.left()
+            
+        if window_geometry.top() < screen_geometry.top():
+            # 顶部超出屏幕，向下移动
+            new_y = screen_geometry.top()
+        
+        # 如果位置有变化，使用动画移动窗口
+        if new_x != current_x or new_y != current_y:
+            # 创建位置动画
+            pos_animation = QPropertyAnimation(self, b"pos")
+            pos_animation.setDuration(200)  # 200毫秒
+            pos_animation.setStartValue(self.pos())
+            pos_animation.setEndValue(QPoint(new_x, new_y))
+            pos_animation.setEasingCurve(QEasingCurve.OutCubic)
+            pos_animation.start(QPropertyAnimation.DeleteWhenStopped)  # 动画结束后自动删除
+            
     def _update_segment_row(self, index, status=None, downloaded=None, total=None, start_pos=None, progress=None, end_pos=None):
         """更新分段下载信息行
         
@@ -1945,25 +2334,36 @@ class DownloadPopDialog(QDialog):
             
         row = self.segment_rows[index]
         
-        # 更新状态
+        # 更新状态 - 只在状态真正改变时更新UI
         if status is not None and 'status' in row:
-            # 根据状态设置颜色
-            status_color = "#B39DDB"  # 默认紫色
-            
-            if "完成" in status or "成功" in status:
-                status_color = "#4CAF50"  # 完成 - 绿色
-            elif "错误" in status or "失败" in status:
-                status_color = "#F44336"  # 错误 - 红色
-            elif "暂停" in status:
-                status_color = "#FF9800"  # 暂停 - 橙色
-            elif "等待" in status:
-                status_color = "#FFC107"  # 等待 - 黄色
-            elif "下载中" in status or "连接中" in status:
-                status_color = "#2196F3"  # 活跃 - 蓝色
+            # 检查状态是否真正改变，避免不必要的UI更新
+            current_status = row['status'].text()
+            if current_status != status:
+                # 标准化状态文本，确保统一的状态文本格式
+                # 根据状态设置颜色
+                status_color = "#B39DDB"  # 默认紫色
                 
-            # 设置文本和颜色
-            row['status'].setText(status)
-            row['status'].setStyleSheet(f"color: {status_color}; font-size: 13px;")
+                # 使用精确匹配而非模糊匹配
+                if status == "已完成" or status == "完成":
+                    status_color = "#4CAF50"  # 完成 - 绿色
+                    status = "已完成"  # 标准化状态文本
+                elif status == "下载失败" or status == "失败" or status == "错误":
+                    status_color = "#F44336"  # 错误 - 红色
+                    status = "下载失败"  # 标准化状态文本
+                elif status == "已暂停" or status == "暂停":
+                    status_color = "#FF9800"  # 暂停 - 橙色
+                    status = "已暂停"  # 标准化状态文本
+                elif status == "等待中" or status == "等待":
+                    status_color = "#FFC107"  # 等待 - 黄色
+                    status = "等待中"  # 标准化状态文本
+                elif status == "下载中":
+                    status_color = "#2196F3"  # 活跃 - 蓝色
+                elif status == "连接中":
+                    status_color = "#2196F3"  # 活跃 - 蓝色
+                
+                # 设置文本和颜色
+                row['status'].setText(status)
+                row['status'].setStyleSheet(f"color: {status_color}; font-size: 13px;")
         
         # 更新已下载大小 - 优先使用直接提供的downloaded参数
         if downloaded is not None and 'downloaded' in row:
@@ -2031,18 +2431,26 @@ class DownloadPopDialog(QDialog):
             
             # 状态 - 使用不同颜色表示不同状态
             status_text = block.get("status", "未知")
-            status_color = "#B39DDB"  # 默认紫色
             
-            if "完成" in status_text or "成功" in status_text:
+            # 标准化状态文本，确保统一的状态文本格式
+            if status_text == "已完成" or status_text == "完成":
+                status_text = "已完成"
                 status_color = "#4CAF50"  # 完成 - 绿色
-            elif "错误" in status_text or "失败" in status_text:
+            elif status_text == "下载失败" or status_text == "失败" or status_text == "错误":
+                status_text = "下载失败"
                 status_color = "#F44336"  # 错误 - 红色
-            elif "暂停" in status_text:
+            elif status_text == "已暂停" or status_text == "暂停":
+                status_text = "已暂停"
                 status_color = "#FF9800"  # 暂停 - 橙色
-            elif "等待" in status_text:
+            elif status_text == "等待中" or status_text == "等待":
+                status_text = "等待中"
                 status_color = "#FFC107"  # 等待 - 黄色
-            elif "下载中" in status_text or "连接中" in status_text:
+            elif status_text == "下载中":
                 status_color = "#2196F3"  # 活跃 - 蓝色
+            elif status_text == "连接中":
+                status_color = "#2196F3"  # 活跃 - 蓝色
+            else:
+                status_color = "#B39DDB"  # 默认紫色
             
             status_label = QLabel(status_text)
             status_label.setFixedWidth(90)  # 减少宽度
@@ -2093,10 +2501,10 @@ class DownloadPopDialog(QDialog):
                 "total": total_label
             })
         
-        # 更新后调整大小，但是避免窗口变得过大
+        # 更新后自动调整窗口大小，适应内容
         if self.isVisible() and self.current_state == "downloading":
-            # 确保窗口大小适合当前内容
-            self.setMinimumSize(633, 474)
+            # 使用自动大小调整功能确保窗口适合内容
+            QTimer.singleShot(0, lambda: self._auto_resize())
     
     def _clear_content(self):
         """清空内容区域"""
@@ -2441,7 +2849,7 @@ class DownloadPopDialog(QDialog):
         # 更新状态文本
         self.status_label.setText(f"{progress_percent:.1f}%")
         
-        # 更新速度
+        # 更新速度 - 保持统一格式"速度: {speed_str}"
         speed_str = self._get_readable_speed(speed_bytes)
         self.speed_label.setText(f"速度: {speed_str}")
         
@@ -2466,31 +2874,96 @@ class DownloadPopDialog(QDialog):
         
         # 文件信息区域
         file_info_frame = QFrame()
+        file_info_frame.setObjectName("file_info_frame")  # 设置对象名，方便以后查找
         file_info_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 10px;")
         file_info_layout = QHBoxLayout(file_info_frame)
-        file_info_layout.setContentsMargins(15, 15, 15, 15)
+        file_info_layout.setContentsMargins(20, 15, 20, 15)  # 增加左右边距
         file_info_layout.setSpacing(15)
         
         # 图标
         file_icon = QLabel()
+        file_icon.setObjectName("file_icon")  # 设置对象名，方便以后查找
         file_icon.setFixedSize(36, 36)
-        if hasattr(self, 'font_manager'):
-            self.font_manager.apply_icon_font(file_icon, "ic_fluent_checkmark_circle_24_regular", size=28)
-            file_icon.setStyleSheet("color: #4CAF50; background-color: transparent;")
+        
+        # 获取文件名和路径
+        filename = task_data.get("file_name", "未知文件")
+        save_path = task_data.get("save_path", "")
+        file_path = os.path.join(save_path, filename) if save_path and filename else ""
+        
+        # 获取文件扩展名，如果没有扩展名则显示"No"
+        file_ext_raw = os.path.splitext(filename)[1]
+        file_ext = file_ext_raw.lstrip('.') if file_ext_raw else "No"
+        
+        # 尝试获取文件的真实图标
+        icon = None
+        if hasattr(self, 'file_icon_getter'):
+            # 先尝试从文件路径获取图标（完成后文件应该已存在）
+            if os.path.exists(file_path):
+                icon = self.file_icon_getter.get_file_icon(file_path=file_path)
+            # 如果没有获取到，尝试从扩展名获取图标
+            if not icon or icon.isNull():
+                icon = self.file_icon_getter.get_file_icon(file_ext=file_ext)
+        
+        # 如果获取到了有效的图标，则使用它
+        if icon and not icon.isNull():
+            pixmap = icon.pixmap(32, 32)
+            file_icon.setPixmap(pixmap)
+            file_icon.setScaledContents(True)
+        else:
+            # 如果没有获取到有效图标，使用完成图标
+            if hasattr(self, 'font_manager'):
+                self.font_manager.apply_icon_font(file_icon, "ic_fluent_checkmark_circle_24_regular", size=28)
+                file_icon.setStyleSheet("color: #4CAF50; background-color: transparent;")
+            else:
+                # 使用emoji作为备用
+                emoji = "✅"
+                color = "#4CAF50"  # 绿色表示完成
+                pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
+                if pixmap:
+                    file_icon.setPixmap(pixmap)
+                    file_icon.setScaledContents(True)
+                else:
+                    file_icon.setText(emoji)
+                    file_icon.setAlignment(Qt.AlignCenter)
+                    file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
+        
         file_info_layout.addWidget(file_icon)
         
         # 文件信息布局
         file_text_layout = QVBoxLayout()
         file_text_layout.setSpacing(5)
         
+        # 文件名和扩展名布局
+        filename_layout = QHBoxLayout()
+        filename_layout.setSpacing(8)
+        
         # 文件名
         filename = task_data.get("file_name", "未知文件")
         filename_label = QLabel(filename)
         filename_label.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: bold;")
         filename_label.setWordWrap(True)
+        filename_label.setMaximumWidth(320)  # 减小最大宽度，为扩展名标签留出空间
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(filename_label)
-        file_text_layout.addWidget(filename_label)
+        filename_layout.addWidget(filename_label, 1)
+        
+        # 文件扩展名标签
+        ext_label = QLabel(file_ext)
+        ext_bg_color = self.file_icon_getter.get_file_color(filename) if hasattr(self, 'file_icon_getter') else "#808080"
+        ext_label.setStyleSheet(f"""
+            background-color: {ext_bg_color};
+            color: white;
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 12px;
+            font-weight: bold;
+        """)
+        ext_label.setAlignment(Qt.AlignCenter)
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(ext_label)
+        filename_layout.addWidget(ext_label)
+        
+        file_text_layout.addLayout(filename_layout)
         
         # 文件大小
         file_size = task_data.get("file_size", 0)
@@ -2543,44 +3016,14 @@ class DownloadPopDialog(QDialog):
         message_frame = QFrame()
         message_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 10px;")
         message_layout = QVBoxLayout(message_frame)
-        message_layout.setContentsMargins(15, 15, 15, 15)
+        message_layout.setContentsMargins(20, 15, 20, 15)  # 增加左右边距
         
-        message_label = QLabel("文件已成功下载，您可以打开文件或查看文件所在文件夹。")
+        message_label = QLabel("您文件已经准备好啦,您可以操作下方按钮进行操作")
         message_label.setStyleSheet("color: #FFFFFF; font-size: 14px;")
         message_label.setWordWrap(True)
         if hasattr(self, 'font_manager'):
             self.font_manager.apply_font(message_label)
         message_layout.addWidget(message_label)
-        
-        # 添加自动关闭选项
-        self.auto_close_checkbox = QCheckBox("5秒后自动关闭")
-        self.auto_close_checkbox.setChecked(self.auto_close_completed)
-        if hasattr(self, 'font_manager'):
-            self.font_manager.apply_font(self.auto_close_checkbox)
-        
-        self.auto_close_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #B0B0B0;
-                font-size: 13px;
-                spacing: 5px;
-            }
-            QCheckBox::indicator {
-                width: 14px;
-                height: 14px;
-                border-radius: 2px;
-                border: 1px solid #555555;
-                background: #333333;
-            }
-            QCheckBox::indicator:unchecked:hover {
-                border: 1px solid #8A7CEC;
-            }
-            QCheckBox::indicator:checked {
-                background: #8A7CEC;
-                border: 1px solid #8A7CEC;
-            }
-        """)
-        self.auto_close_checkbox.stateChanged.connect(self._on_auto_close_changed)
-        message_layout.addWidget(self.auto_close_checkbox)
         
         self.content_layout.addWidget(message_frame)
         
@@ -2590,9 +3033,46 @@ class DownloadPopDialog(QDialog):
         # 底部按钮
         self.button_layout.addStretch(1)
         
+        # 打开文件按钮
+        open_file_button = QPushButton("")
+        open_file_button.setFixedSize(140, 40)
+        if hasattr(self, 'font_manager'):
+            # 不使用布局，直接设置图标
+            icon = QIcon()
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_document_24_regular")
+            open_file_button.setIcon(icon)
+            open_file_button.setIconSize(QSize(16, 16))
+            
+            # 设置文本并添加前导空格以防止文本和图标重叠
+            open_file_button.setText("  打开文件")
+            self.font_manager.apply_font(open_file_button)
+        
+        open_file_button.setStyleSheet("""
+            QPushButton {
+                background-color: #8A7CEC;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 8px;
+                padding: 5px 15px;
+                font-size: 14px;
+                font-weight: bold;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #9E8FEF;
+            }
+            QPushButton:pressed {
+                background-color: #7A6CD8;
+            }
+        """)
+        # 打开文件并关闭窗口
+        file_path = os.path.join(task_data.get("save_path", ""), task_data.get("file_name", ""))
+        open_file_button.clicked.connect(lambda: self._on_open_file_and_close(file_path))
+        self.button_layout.addWidget(open_file_button)
+        
         # 打开文件夹按钮
         open_folder_button = QPushButton("")
-        open_folder_button.setFixedSize(120, 40)
+        open_folder_button.setFixedSize(140, 40)
         if hasattr(self, 'font_manager'):
             # 不使用布局，直接设置图标
             icon = QIcon()
@@ -2619,7 +3099,8 @@ class DownloadPopDialog(QDialog):
                 border: 1px solid #B39DDB;
             }
         """)
-        open_folder_button.clicked.connect(lambda: self._on_open_folder(task_data.get("save_path", "")))
+        # 打开文件夹并关闭窗口
+        open_folder_button.clicked.connect(lambda: self._on_open_folder_and_close(task_data.get("save_path", "")))
         self.button_layout.addWidget(open_folder_button)
         
         # 关闭按钮
@@ -2628,30 +3109,27 @@ class DownloadPopDialog(QDialog):
         if hasattr(self, 'font_manager'):
             # 不使用布局，直接设置图标
             icon = QIcon()
-            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_checkmark_24_regular")
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_dismiss_24_regular")
             close_button.setIcon(icon)
             close_button.setIconSize(QSize(16, 16))
             
             # 设置文本并添加前导空格以防止文本和图标重叠
-            close_button.setText("  完成")
+            close_button.setText("  关闭")
             self.font_manager.apply_font(close_button)
         
         close_button.setStyleSheet("""
             QPushButton {
-                background-color: #8A7CEC;
+                background-color: #2D2D30;
                 color: #FFFFFF;
-                border: none;
+                border: 1px solid #3C3C3C;
                 border-radius: 8px;
                 padding: 5px 15px;
                 font-size: 14px;
-                font-weight: bold;
                 text-align: center;
             }
             QPushButton:hover {
-                background-color: #9E8FEF;
-            }
-            QPushButton:pressed {
-                background-color: #7A6CD8;
+                background-color: #3E3E42;
+                border: 1px solid #B39DDB;
             }
         """)
         close_button.clicked.connect(self.close)
@@ -2660,12 +3138,10 @@ class DownloadPopDialog(QDialog):
         # 设置当前状态
         self.current_state = "completed"
         
-        # 开始自动关闭定时器 - 只有在勾选自动关闭时才启动
-        if self.auto_close_completed:
-            self.auto_close_timer.start(5000)
+        # 已移除自动关闭定时器功能
         
-        # 设置下载完成页面的窗口大小
-        QTimer.singleShot(0, lambda: self.setMinimumSize(457, 350))
+        # 设置下载完成页面的窗口自动调整大小
+        QTimer.singleShot(0, lambda: self._auto_resize())
         
         # 强制更新UI
         self.repaint()
@@ -2726,15 +3202,7 @@ class DownloadPopDialog(QDialog):
         except Exception as e:
             logging.error(f"打开文件夹失败: {e}")
     
-    def _on_auto_close_changed(self, state):
-        """自动关闭选项改变处理"""
-        self.auto_close_completed = (state == Qt.Checked)
-        
-        # 更新定时器状态
-        if self.auto_close_completed:
-            self.auto_close_timer.start(5000)
-        else:
-            self.auto_close_timer.stop()
+    # 已移除自动关闭选项改变处理方法
     
     def __del__(self):
         """析构函数，确保资源释放"""
@@ -2897,3 +3365,100 @@ class DownloadPopDialog(QDialog):
         except Exception as e:
             # 忽略焦点事件处理中的错误
             pass
+    
+    def _on_open_file_and_close(self, file_path):
+        """打开文件并关闭窗口
+        
+        参数:
+            file_path (str): 文件路径
+        """
+        if not file_path:
+            return
+            
+        # 发送打开文件信号
+        if hasattr(self, 'fileOpened'):
+            self.fileOpened.emit(file_path)
+        
+        # 尝试使用系统默认方式打开文件
+        try:
+            import subprocess
+            import os
+            import platform
+            
+            if platform.system() == "Windows":
+                os.startfile(file_path)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.call(["open", file_path])
+            else:  # Linux
+                subprocess.call(["xdg-open", file_path])
+                
+            # 等待100毫秒后关闭窗口，给系统一些时间启动程序
+            QTimer.singleShot(100, self.close)
+                
+        except Exception as e:
+            logging.error(f"打开文件失败: {e}")
+            
+            # 即使打开失败也关闭窗口
+            QTimer.singleShot(500, self.close)
+    
+    def _on_open_folder_and_close(self, folder_path):
+        """打开文件夹并关闭窗口
+        
+        参数:
+            folder_path (str): 文件夹路径
+        """
+        if not folder_path:
+            return
+            
+        # 发送信号
+        if hasattr(self, 'folderOpened'):
+            self.folderOpened.emit(folder_path)
+        
+        # 获取文件名，用于选中文件
+        file_name = ""
+        if hasattr(self, 'download_engine') and self.download_engine:
+            if hasattr(self.download_engine, 'file_name'):
+                file_name = self.download_engine.file_name
+                
+        # 尝试使用系统默认方式打开文件夹
+        try:
+            import subprocess
+            import os
+            import platform
+            
+            if platform.system() == "Windows":
+                if file_name:
+                    # 使用/select参数打开文件夹并选中文件
+                    full_path = os.path.join(folder_path, file_name)
+                    subprocess.run(['explorer', '/select,', full_path])
+                else:
+                    # 仅打开文件夹
+                    os.startfile(folder_path)
+            elif platform.system() == "Darwin":  # macOS
+                if file_name:
+                    # 在macOS上选中文件
+                    full_path = os.path.join(folder_path, file_name)
+                    subprocess.call(["open", "-R", full_path])
+                else:
+                    subprocess.call(["open", folder_path])
+            else:  # Linux
+                if file_name:
+                    # 尝试在Linux上选中文件（不同文件管理器命令不同）
+                    try:
+                        full_path = os.path.join(folder_path, file_name)
+                        # 尝试使用nautilus（GNOME）
+                        subprocess.call(["nautilus", "--select", full_path])
+                    except:
+                        # 如果失败，只打开文件夹
+                        subprocess.call(["xdg-open", folder_path])
+                else:
+                    subprocess.call(["xdg-open", folder_path])
+            
+            # 等待100毫秒后关闭窗口，给系统一些时间启动程序
+            QTimer.singleShot(100, self.close)
+                
+        except Exception as e:
+            logging.error(f"打开文件夹失败: {e}")
+            
+            # 即使打开失败也关闭窗口
+            QTimer.singleShot(500, self.close)
