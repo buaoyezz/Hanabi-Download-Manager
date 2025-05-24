@@ -383,30 +383,91 @@ class FontManager:
         return font
 
     def get_icon_text(self, icon_name):
-        """获取图标文本，使用缓存提高性能"""
-        # 非字符串直接返回问号
-        if not isinstance(icon_name, str):
-            return "?"
-            
-        # 使用缓存
-        if icon_name in self._icon_cache:
-            return self._icon_cache[icon_name]
-            
-        # 查找图标
-        icon_text = ICON_MAP.get(icon_name, '')
-        if not icon_text and not icon_name.startswith('ic_fluent_'):
-            # 添加前缀尝试查找
-            fluent_name = f'ic_fluent_{icon_name}_24_regular'
-            icon_text = ICON_MAP.get(fluent_name, '')
-            
-        # 未找到返回问号
-        if not icon_text:
-            log.warning(f"未找到图标: {icon_name}")
-            icon_text = "?"
+        """获取图标字符
         
-        # 缓存结果
-        self._icon_cache[icon_name] = icon_text
-        return icon_text
+        Args:
+            icon_name: 图标名称，例如"ic_fluent_arrow_download_24_regular"
+            
+        Returns:
+            str: 图标对应的Unicode字符，如果找不到则返回空字符串
+        """
+        try:
+            # 标准化名称
+            if not icon_name.startswith("ic_fluent_"):
+                icon_name = f"ic_fluent_{icon_name}_24_regular"
+            
+            # 从映射中获取字符
+            icon_char = ICON_MAP.get(icon_name, "")
+            
+            if not icon_char and "_24_" in icon_name:
+                # 尝试查找其他尺寸
+                for size in ["16", "20", "28", "32", "48"]:
+                    alt_name = icon_name.replace("_24_", f"_{size}_")
+                    icon_char = ICON_MAP.get(alt_name, "")
+                    if icon_char:
+                        break
+            
+            return icon_char
+        except Exception as e:
+            log.warning(f"获取图标文本失败: {icon_name}, {str(e)}")
+            return ""
+    
+    def get_qicon(self, icon_name, color=COLOR_WHITE):
+        """从字体图标创建QIcon对象
+        
+        Args:
+            icon_name: 图标名称，例如"ic_fluent_window_24_regular"
+            color: 图标颜色，默认为白色
+            
+        Returns:
+            QIcon: 图标对象，如果无法创建则返回空图标
+        """
+        try:
+            # 检查缓存
+            cache_key = f"{icon_name}_{color}"
+            if cache_key in self._icon_cache:
+                return self._icon_cache[cache_key]
+            
+            # 获取图标文本
+            icon_text = self.get_icon_text(icon_name)
+            if not icon_text:
+                log.warning(f"无法找到图标: {icon_name}")
+                return QIcon()
+            
+            # 创建图标
+            icon_font = self.create_icon_font()
+            
+            # 确定合适的大小
+            icon_sizes = [16, 24, 32, 48]
+            
+            icon = QIcon()
+            for size in icon_sizes:
+                pixmap = QPixmap(size, size)
+                pixmap.fill(Qt.transparent)
+                
+                painter = QPainter(pixmap)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.TextAntialiasing)
+                
+                # 设置字体和颜色
+                icon_font.setPointSize(size * 0.8)  # 稍微缩小一点以适应边界
+                painter.setFont(icon_font)
+                painter.setPen(QColor(color))
+                
+                # 绘制图标
+                painter.drawText(QRect(0, 0, size, size), Qt.AlignCenter, icon_text)
+                painter.end()
+                
+                # 添加到图标的不同尺寸
+                icon.addPixmap(pixmap)
+            
+            # 缓存图标
+            self._icon_cache[cache_key] = icon
+            return icon
+            
+        except Exception as e:
+            log.error(f"创建图标失败: {icon_name}, {str(e)}")
+            return QIcon()
 
     def apply_font(self, widget, size=DEFAULT_FONT_SIZE, is_bold=False):
         """将字体应用到控件"""
