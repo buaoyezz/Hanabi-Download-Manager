@@ -157,6 +157,19 @@ class FileIconGetter:
         :param file_ext: 文件扩展名(不带.)
         :return: QIcon对象或None
         """
+        # 处理特殊情况：无扩展名
+        if file_ext == "No" or file_ext == "":
+            # 尝试使用通用文件图标
+            try:
+                generic_icon = self.icon_provider.icon(QFileIconProvider.File)
+                if not generic_icon.isNull():
+                    return generic_icon
+            except Exception as e:
+                print(f"获取通用文件图标失败: {e}")
+            
+            # 如果无法获取通用图标，返回None，让上层使用默认图标
+            return None
+
         # 尝试多种方式获取系统图标
         icon = None
         
@@ -254,6 +267,10 @@ class FileIconGetter:
         _, ext = os.path.splitext(filename)
         ext = ext.lower().lstrip('.')
         
+        # 如果没有扩展名或扩展名是"No"，使用默认图标
+        if not ext or ext == "No":
+            return "📄"  # 无扩展名文件使用普通文档图标
+        
         return self.file_emoji_map.get(ext, self.file_emoji_map['default'])
     
     def get_file_color(self, filename):
@@ -267,6 +284,10 @@ class FileIconGetter:
         
         _, ext = os.path.splitext(filename)
         ext = ext.lower().lstrip('.')
+        
+        # 如果没有扩展名或扩展名是"No"，使用特殊的灰色
+        if not ext or ext == "No":
+            return "#808080"  # 无扩展名文件使用灰色
         
         return self.file_type_colors.get(ext, self.file_type_colors['default'])
     
@@ -302,6 +323,10 @@ class FileIconGetter:
         _, ext = os.path.splitext(filename)
         ext = ext.lower().lstrip('.')
         
+        # 如果没有扩展名或扩展名是"No"，显示"NO"文本
+        if not ext or ext == "No":
+            return "NO"
+        
         # 获取emoji
         emoji = self.get_file_emoji(filename)
         
@@ -322,7 +347,7 @@ class FileIconGetter:
             return "PDF"
         
         # 使用文件扩展名首字母大写
-        return emoji if emoji else (ext[0].upper() if ext else "?")
+        return emoji if emoji else (ext[0].upper() if ext else "NO")
 
     def create_pixmap_with_emoji(self, emoji, size=60, bg_color=None):
         """
