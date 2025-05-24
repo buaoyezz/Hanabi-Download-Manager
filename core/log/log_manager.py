@@ -2,7 +2,9 @@ import logging
 import os
 import sys
 from logging.handlers import RotatingFileHandler
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
+import threading
 from typing import Optional
 import colorama
 from colorama import Fore, Style
@@ -163,6 +165,9 @@ class LogManager:
         self.info("日志系统初始化完成")
         self.info(f"日志文件路径: {self.log_file}")
         self.info("="*50)
+        
+        # 启动日志清理
+        self._setup_log_cleanup()
     
     def debug(self, message: str) -> None:
         self.logger.debug(message)
@@ -202,6 +207,103 @@ class LogManager:
         for handler in self.logger.handlers:
             handler.removeFilter(self.level_filter)
             handler.addFilter(self.level_filter)
+    
+    def _setup_log_cleanup(self):
+        """设置日志清理定时器"""
+        # 立即清理一次旧日志
+        self.cleanup_old_logs()
+        
+        # 创建定时器线程，每天清理一次
+        cleanup_thread = threading.Thread(target=self._log_cleanup_scheduler, daemon=True)
+        cleanup_thread.start()
+        self.info("日志自动清理功能已启动")
+    
+    def _log_cleanup_scheduler(self):
+        """日志清理定时调度器"""
+        while True:
+            # 计算下一次清理时间（每天凌晨3点）
+            now = datetime.now()
+            next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+            if now >= next_run:
+                next_run = next_run + timedelta(days=1)
+            
+            # 计算等待时间
+            wait_seconds = (next_run - now).total_seconds()
+            
+            # 等待到下一次清理时间
+            time.sleep(wait_seconds)
+            
+            # 执行清理
+            try:
+                self.cleanup_old_logs()
+            except Exception as e:
+                self.error(f"日志清理失败: {e}")
+    
+    def cleanup_old_logs(self, max_age_days=7, max_files=30):
+        """清理旧的日志文件
+        
+        Args:
+            max_age_days: 保留日志的最大天数，默认7天
+            max_files: 保留日志的最大文件数，默认30个
+        """
+        try:
+            self.info(f"开始清理旧日志文件，保留{max_age_days}天内的日志，最多保留{max_files}个文件")
+            
+            # 确保日志目录存在
+            if not os.path.exists(self.log_dir):
+                self.warning(f"日志目录不存在: {self.log_dir}")
+                return
+            
+            # 获取所有日志文件
+            log_files = []
+            for filename in os.listdir(self.log_dir):
+                if filename.startswith('hanabidownloadmanager_') and filename.endswith('.log'):
+                    file_path = os.path.join(self.log_dir, filename)
+                    if os.path.isfile(file_path):
+                        # 获取文件创建时间
+                        file_time = os.path.getctime(file_path)
+                        log_files.append((file_path, file_time))
+            
+            # 按时间排序，最新的在前
+            log_files.sort(key=lambda x: x[1], reverse=True)
+            
+            # 计算截止日期
+            cutoff_date = time.time() - (max_age_days * 24 * 60 * 60)
+            
+            # 保留当前使用的日志文件
+            current_log = os.path.abspath(self.log_file)
+            
+            # 要删除的文件
+            files_to_delete = []
+            
+            # 检查每个文件
+            for i, (file_path, file_time) in enumerate(log_files):
+                file_path_abs = os.path.abspath(file_path)
+                
+                # 跳过当前正在使用的日志文件
+                if file_path_abs == current_log:
+                    continue
+                
+                # 如果超过了最大文件数或者超过了最大天数
+                if i >= max_files or file_time < cutoff_date:
+                    files_to_delete.append(file_path)
+            
+            # 删除文件
+            for file_path in files_to_delete:
+                try:
+                    os.remove(file_path)
+                    self.debug(f"已删除旧日志文件: {file_path}")
+                except Exception as e:
+                    self.error(f"删除日志文件失败 {file_path}: {e}")
+            
+            # 记录清理结果
+            if files_to_delete:
+                self.info(f"日志清理完成，共删除了{len(files_to_delete)}个旧日志文件")
+            else:
+                self.info("日志清理完成，没有需要删除的旧日志文件")
+                
+        except Exception as e:
+            self.error(f"清理旧日志文件时出错: {e}")
 
 # 全局访问点
 log = LogManager()
