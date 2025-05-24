@@ -242,5 +242,20 @@ if __name__ == "__main__":
         from PySide6.QtCore import QTimer
         QTimer.singleShot(3000, lambda: window.init_browser_download_listener())
     
-    window.show()
+    # 检查是否应该启动时最小化到托盘
+    from client.ui.client_interface.settings.config import ConfigManager
+    from PySide6.QtCore import QTimer  # 确保正确导入QTimer
+    config = ConfigManager()
+    start_minimized = config.get_setting("window", "start_minimized", False)
+    
+    if start_minimized:
+        log.info("根据设置，应用将在启动时最小化到托盘")
+        # 先显示窗口以确保正确初始化
+        window.show()
+        # 然后最小化到托盘
+        QTimer.singleShot(500, window.on_minimize_to_tray)
+    else:
+        # 正常显示窗口
+        window.show()
+    
     sys.exit(app.exec())
