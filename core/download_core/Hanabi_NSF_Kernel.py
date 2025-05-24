@@ -12,6 +12,7 @@ import threading
 import sys
 import re
 import logging
+import io
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Union, Callable
 from urllib.parse import urlparse, parse_qs, unquote
@@ -40,30 +41,234 @@ class DownloadBlock:
         self.status = "未知"                 # 下载状态
 
 
+class BufferedWriter:
+    """优化的文件写入类，使用内存缓冲区减少I/O操作"""
+    
+    def __init__(self, file_path, buffer_size=8*1024*1024):  # 默认8MB缓冲区
+        self.file_path = file_path
+        self.file = None
+        self.buffer_size = buffer_size
+        self.buffer_lock = threading.RLock()  # 添加线程锁保护并发写入
+        self.buffers = {}  # 为每个位置维护一个缓冲区
+        self.last_flush_time = time.time()
+        self.flush_interval = 1.0  # 增加刷新间隔到1秒
+        self.total_written = 0
+        self.open()
+    
+    def open(self):
+        """打开文件"""
+        with self.buffer_lock:
+            if self.file is None:
+                try:
+                    if not os.path.exists(self.file_path):
+                        # 确保目录存在
+                        os.makedirs(os.path.dirname(os.path.abspath(self.file_path)), exist_ok=True)
+                        # 创建空文件
+                        with open(self.file_path, 'wb') as f:
+                            pass
+                    self.file = open(self.file_path, 'r+b')
+                except Exception as e:
+                    logging.error(f"打开文件失败: {e}")
+                    raise
+    
+    def write_at(self, position, data):
+        """在指定位置写入数据，先缓存在内存中"""
+        if not data:  # 跳过空数据
+            return
+            
+        with self.buffer_lock:
+            if self.file is None:
+                self.open()
+                
+            # 获取位置的缓冲区，如果不存在则创建
+            buffer_key = position // self.buffer_size
+            if buffer_key not in self.buffers:
+                self.buffers[buffer_key] = {}
+            
+            # 将数据加入缓冲区，使用memoryview提高效率
+            buffer = self.buffers[buffer_key]
+            rel_pos = position % self.buffer_size
+            data_view = memoryview(data)
+            
+            # 批量添加数据而不是逐字节
+            for i in range(len(data)):
+                buffer[rel_pos + i] = data_view[i]
+            
+            self.total_written += len(data)
+            
+            # 如果缓冲区足够大或者时间间隔足够长，进行刷新
+            current_time = time.time()
+            buffer_full = len(buffer) >= self.buffer_size * 0.7  # 降低阈值到70%
+            time_elapsed = current_time - self.last_flush_time > self.flush_interval
+            data_enough = self.total_written > 2*1024*1024  # 增加到2MB才刷新
+            
+            if buffer_full or (time_elapsed and data_enough):
+                self.flush(force=False)
+    
+    def flush(self, force=True):
+        """将缓冲区数据写入文件"""
+        with self.buffer_lock:
+            if not self.buffers:
+                return
+                
+            current_time = time.time()
+            # 非强制刷新且时间间隔不够，跳过
+            if not force and current_time - self.last_flush_time < self.flush_interval:
+                return
+                
+            try:
+                # 按顺序处理每个缓冲区块
+                for buffer_key in sorted(self.buffers.keys()):
+                    buffer = self.buffers[buffer_key]
+                    if not buffer:
+                        continue
+                        
+                    # 找出缓冲区中连续的数据范围，使用更高效的算法
+                    pos_list = sorted(buffer.keys())
+                    if not pos_list:
+                        continue
+                        
+                    ranges = []
+                    start = pos_list[0]
+                    last = start
+                    
+                    for pos in pos_list[1:]:
+                        if pos == last + 1:
+                            last = pos
+                        else:
+                            if last >= start:  # 确保范围有效
+                                ranges.append((start, last))
+                            start = pos
+                            last = pos
+                    
+                    if last >= start:  # 添加最后一个范围
+                        ranges.append((start, last))
+                    
+                    # 批量写入连续范围的数据
+                    for start_rel, end_rel in ranges:
+                        # 计算实际文件位置
+                        start_abs = buffer_key * self.buffer_size + start_rel
+                        length = end_rel - start_rel + 1
+                        
+                        # 对于较大的数据块，使用更高效的写入方式
+                        if length > 1024:  # 大于1KB的数据块
+                            # 准备数据 - 使用bytearray预分配空间
+                            data = bytearray(length)
+                            data_view = memoryview(data)
+                            
+                            for i in range(length):
+                                rel_i = start_rel + i
+                                if rel_i in buffer:
+                                    data_view[i] = buffer[rel_i]
+                                    
+                            # 写入文件
+                            self.file.seek(start_abs)
+                            self.file.write(data)
+                        else:
+                            # 对于小数据块，合并后再写入
+                            small_data = bytearray(length)
+                            for i in range(length):
+                                rel_i = start_rel + i
+                                if rel_i in buffer:
+                                    small_data[i] = buffer[rel_i]
+                                    
+                            self.file.seek(start_abs)
+                            self.file.write(small_data)
+                
+                # 仅在强制刷新或大量数据时才调用fsync
+                if force or self.total_written > 10*1024*1024:  # 10MB阈值
+                    self.file.flush()
+                    os.fsync(self.file.fileno())
+                    
+                # 清空已写入的缓冲区
+                self.buffers.clear()
+                self.last_flush_time = current_time
+                self.total_written = 0
+                
+            except Exception as e:
+                logging.error(f"刷新缓冲区失败: {e}")
+                # 出错时尝试重新打开文件
+                try:
+                    if self.file:
+                        self.file.close()
+                except:
+                    pass
+                self.file = None
+                self.open()
+    
+    def close(self):
+        """关闭文件，确保所有数据都写入"""
+        with self.buffer_lock:
+            if self.file:
+                try:
+                    self.flush(force=True)
+                    self.file.close()
+                except Exception as e:
+                    logging.error(f"关闭文件失败: {e}")
+                finally:
+                    self.file = None
+                    
+    def __del__(self):
+        """析构函数，确保文件被关闭"""
+        self.close()
+
+
 class ConnectionManager:
     """连接管理器，负责创建和管理下载会话"""
     
-    def __init__(self, use_ssl_verify: bool = True, timeout: int = 60):
+    def __init__(self, use_ssl_verify: bool = True, timeout: int = 30):
         self.timeout = timeout
         self.ssl_verify = use_ssl_verify
+        # 会话缓存池，减少重复创建
+        self._session_pool = {}
+        self._pool_lock = threading.RLock()
+        self._pool_size_limit = 16  # 限制池大小
         
     def create_session(self, headers: Dict[str, str] = None) -> requests.Session:
         """创建新的会话对象"""
-        # 重试策略配置
+        # 尝试从池中获取会话
+        with self._pool_lock:
+            # 清理过大的池
+            if len(self._session_pool) > self._pool_size_limit:
+                # 关闭多余的会话
+                keys_to_remove = list(self._session_pool.keys())[self._pool_size_limit//2:]
+                for key in keys_to_remove:
+                    try:
+                        self._session_pool[key].close()
+                    except:
+                        pass
+                    del self._session_pool[key]
+            
+            # 生成会话键
+            header_key = str(sorted(headers.items())) if headers else "default"
+            if header_key in self._session_pool:
+                session = self._session_pool[header_key]
+                # 验证会话是否可用
+                if session:
+                    return session
+        
+        # 重试策略配置 - 更稳健的设置
         retry_strategy = Retry(
-            total=3,  # 减少重试次数以提高响应速度
-            backoff_factor=0.3,  # 减少退避因子
+            total=5,  # 增加重试次数
+            backoff_factor=0.5,  # 增加退避因子
             status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "HEAD"],  # 明确指定允许的方法
+            respect_retry_after_header=True,
+            raise_on_status=False,  # 不抛出状态异常
+            connect=3,  # 连接错误重试
+            read=3,    # 读取错误重试
+            redirect=3  # 重定向错误重试
         )
         
         # 创建会话
         session = requests.Session()
         
-        # 配置连接适配器
+        # 配置连接适配器 - 降低连接池大小以减少内存占用
         adapter = HTTPAdapter(
             max_retries=retry_strategy, 
-            pool_connections=128,  # 增加连接池数量 
-            pool_maxsize=128       # 增加最大连接数
+            pool_connections=32,  # 减少连接池数量
+            pool_maxsize=32,      # 减少最大连接数
+            pool_block=False      # 不阻塞连接池
         )
         
         session.mount("http://", adapter)
@@ -83,8 +288,26 @@ class ConnectionManager:
                 "http": proxy,
                 "https": proxy
             }
+        
+        # 设置超时（连接超时,读取超时）
+        session.timeout = (self.timeout // 2, self.timeout)
+        
+        # 缓存会话
+        with self._pool_lock:
+            self._session_pool[header_key] = session
             
         return session
+        
+    def close_all(self):
+        """关闭所有会话"""
+        with self._pool_lock:
+            for session in self._session_pool.values():
+                try:
+                    if session:
+                        session.close()
+                except:
+                    pass
+            self._session_pool.clear()
 
 
 class DownloadEngine(QThread):
@@ -145,6 +368,9 @@ class DownloadEngine(QThread):
         
         # 高性能下载模式
         self.high_performance = True  # 启用高性能模式
+        
+        # 文件写入缓冲区
+        self.file_writer = None
         
         # 添加必要的请求头（如果未提供）
         if 'User-Agent' not in self.headers:
@@ -538,39 +764,60 @@ class DownloadEngine(QThread):
                     segment_count = 2  # 至少使用2个分段
                     reason = "文件小于1MB，使用2个分段"
                 elif self.file_size < 10 * 1024 * 1024:  # 小于10MB
-                    segment_count = min(6, self.thread_count)  # 较少分段
-                    reason = f"文件在1-10MB范围，使用{segment_count}个分段(最大6个)"
+                    segment_count = min(4, self.thread_count)  # 较少分段
+                    reason = f"文件在1-10MB范围，使用{segment_count}个分段(最大4个)"
                 elif self.file_size < 50 * 1024 * 1024:  # 小于50MB
-                    segment_count = min(8, self.thread_count)  # 中等分段
-                    reason = f"文件在10-50MB范围，使用{segment_count}个分段(最大8个)"
+                    segment_count = min(6, self.thread_count)  # 中等分段
+                    reason = f"文件在10-50MB范围，使用{segment_count}个分段(最大6个)"
                 elif self.file_size < 100 * 1024 * 1024:  # 小于100MB
-                    segment_count = min(12, self.thread_count) # 较多分段
-                    reason = f"文件在50-100MB范围，使用{segment_count}个分段(最大12个)"
+                    segment_count = min(8, self.thread_count) # 较多分段
+                    reason = f"文件在50-100MB范围，使用{segment_count}个分段(最大8个)"
+                elif self.file_size < 1024 * 1024 * 1024:  # 小于1GB
+                    segment_count = min(12, self.thread_count)
+                    reason = f"文件在100MB-1GB范围，使用{segment_count}个分段(最大12个)"
                 else:
-                    segment_count = self.thread_count  # 使用最大分段数
-                    reason = f"文件大于100MB，使用{segment_count}个分段(最大线程数)"
+                    segment_count = min(16, self.thread_count)  # 限制最大分段数
+                    reason = f"文件大于1GB，使用{segment_count}个分段(最大16个)"
                 
                 self._log_download_debug(f"智能分段计算: {reason}, 文件大小={getReadableSize(self.file_size)}")
                 logging.info(f"智能分段计算: {reason}")
             else:
-                # 使用用户指定的默认分段数
-                segment_count = self.default_segments
-                self._log_download_debug(f"智能线程管理已关闭，使用设置的默认分段数: {segment_count}")
-                logging.info(f"智能线程管理已关闭，使用设置的默认分段数: {segment_count}")
+                # 使用用户指定的默认分段数，但限制最大值
+                file_size_mb = self.file_size / (1024 * 1024)
+                # 对较小文件限制分段数，避免过度分段
+                if file_size_mb < 100:  # 小于100MB
+                    max_segments = min(8, self.default_segments)
+                    segment_count = max_segments
+                    self._log_download_debug(f"文件较小({getReadableSize(self.file_size)})，限制分段数为{max_segments}(原始设置为{self.default_segments})")
+                else:
+                    # 对于大文件，确保每个块至少4MB
+                    min_block_mb = 4  # 每块至少4MB
+                    max_segments = min(16, int(file_size_mb / min_block_mb))
+                    segment_count = min(max_segments, self.default_segments)
+                    if segment_count < self.default_segments:
+                        self._log_download_debug(f"限制分段数为{segment_count}(原始设置为{self.default_segments})，确保每块至少{min_block_mb}MB")
+                    else:
+                        self._log_download_debug(f"使用设置的默认分段数: {segment_count}")
+                
+                logging.info(f"智能线程管理已关闭，最终使用分段数: {segment_count}")
             
             # 确保至少有两个分段（提高下载速度）
             segment_count = max(2, segment_count)
             
-            # 计算块大小的最小值 (降低为512KB以提高并行性)
-            min_block_size = 512 * 1024  
+            # 计算块大小的最小值，确保每块至少1MB（增加并发效率）
+            min_block_size = 1024 * 1024  
             
             # 如果文件太小，不分块
             if self.file_size <= min_block_size:
                 logging.info(f"文件过小 ({getReadableSize(self.file_size)} < {getReadableSize(min_block_size)})，使用单个分块")
                 return [[0, self.file_size - 1]]
             
-            # 计算每块的基本大小
-            basic_block_size = max(min_block_size, self.file_size // segment_count)
+            # 计算每块的基本大小，确保每块至少4MB（对于较大文件）
+            if self.file_size > 100 * 1024 * 1024:  # 大于100MB
+                min_big_file_block = 4 * 1024 * 1024  # 每块至少4MB
+                basic_block_size = max(min_big_file_block, self.file_size // segment_count)
+            else:
+                basic_block_size = max(min_block_size, self.file_size // segment_count)
             
             # 创建块边界
             boundaries = []
@@ -816,13 +1063,33 @@ class DownloadEngine(QThread):
         """执行下载任务"""
         try:
             # 预分配文件空间（如果有大小信息）
+            file_path = Path(self.save_path) / self.file_name
             if self.file_size > 0:
-                file_path = Path(self.save_path) / self.file_name
                 try:
                     createSparseFile(file_path, self.file_size)
                     self._log_download_debug(f"预分配文件空间: {getReadableSize(self.file_size)}")
                 except Exception as e:
                     self._log_download_debug(f"预分配文件空间失败: {e}")
+            
+            # 初始化文件写入缓冲区
+            try:
+                # 根据文件大小选择合适的缓冲区大小
+                file_size_mb = self.file_size / (1024 * 1024) if self.file_size > 0 else 50
+                
+                if file_size_mb < 10:  # 小于10MB的文件
+                    buffer_size = 4 * 1024 * 1024  # 4MB缓冲区
+                elif file_size_mb < 100:  # 小于100MB的文件
+                    buffer_size = 8 * 1024 * 1024  # 8MB缓冲区
+                elif file_size_mb < 1024:  # 小于1GB的文件
+                    buffer_size = 16 * 1024 * 1024  # 16MB缓冲区
+                else:  # 大文件
+                    buffer_size = 32 * 1024 * 1024  # 32MB缓冲区
+                
+                self.file_writer = BufferedWriter(str(file_path), buffer_size=buffer_size)
+                self._log_download_debug(f"创建文件写入缓冲区: {getReadableSize(buffer_size)}")
+            except Exception as e:
+                self._log_download_debug(f"创建文件写入缓冲区失败: {e}，将使用直接写入模式")
+                self.file_writer = None
             
             # 设置状态
             self.is_running = True
@@ -1022,9 +1289,10 @@ class DownloadEngine(QThread):
         self.speed_history = []
         last_progress_change_time = time.time()
         stalled_count = 0
+        active_stalled_count = 0  # 活跃块停滞计数
         
         # 等待进入下载状态
-        time.sleep(1)
+        time.sleep(0.5)
         
         # 直到下载完成或停止
         while self.is_running and not all(block.current_position >= block.end_position for block in self.blocks):
@@ -1079,36 +1347,49 @@ class DownloadEngine(QThread):
                             'status': "下载中" if block.active else "已暂停" if self.is_paused else "已完成" if block.current_position >= block.end_position else "等待中"
                         })
                     
-                    # 检测最后一小段数据卡住的情况
-                    if total_remaining_bytes <= 10240:  # 剩余不到10KB
-                        # 检查进度是否长时间没变化
-                        current_time = time.time()
-                        if self.current_progress == last_progress:
-                            if current_time - last_progress_change_time > 2:  # 2秒内进度没变化
-                                stalled_count += 1
-                                if stalled_count >= 3:  # 连续3次检测到卡住
-                                    self._log_download_debug(f"检测到下载卡在最后 {total_remaining_bytes} 字节，自动补齐")
-                                    # 强制完成所有块
-                                    for block in self.blocks:
-                                        if block.current_position < block.end_position:
-                                            block.current_position = block.end_position
-                                    all_blocks_complete = True
-                                    
-                                    # 更新块状态
-                                    block_status = []
-                                    for block in self.blocks:
-                                        if isinstance(block, DownloadBlock):
-                                            block_status.append({
-                                                'start_pos': block.start_position,
-                                                'progress': block.end_position,
-                                                'end_pos': block.end_position,
-                                                'status': "已完成"
-                                            })
-                                    break
+                                            # 检测最后一小段数据卡住的情况
+                        if total_remaining_bytes <= 10240:  # 剩余不到10KB
+                            # 检查进度是否长时间没变化
+                            current_time = time.time()
+                            if self.current_progress == last_progress:
+                                if current_time - last_progress_change_time > 2:  # 2秒内进度没变化
+                                    stalled_count += 1
+                                    if stalled_count >= 3:  # 连续3次检测到卡住
+                                        self._log_download_debug(f"检测到下载卡在最后 {total_remaining_bytes} 字节，自动补齐")
+                                        # 强制完成所有块
+                                        for block in self.blocks:
+                                            if block.current_position < block.end_position:
+                                                block.current_position = block.end_position
+                                        all_blocks_complete = True
+                                        
+                                        # 更新块状态
+                                        block_status = []
+                                        for block in self.blocks:
+                                            if isinstance(block, DownloadBlock):
+                                                block_status.append({
+                                                    'start_pos': block.start_position,
+                                                    'progress': block.end_position,
+                                                    'end_pos': block.end_position,
+                                                    'status': "已完成"
+                                                })
+                                        break
+                            else:
+                                last_progress = self.current_progress
+                                last_progress_change_time = current_time
+                                stalled_count = 0
+                        
+                        # 检测活跃下载块但进度停滞的情况
+                        active_blocks = [b for b in self.blocks if isinstance(b, DownloadBlock) and b.active]
+                        if active_blocks and all(b.last_position == b.current_position for b in active_blocks):
+                            active_stalled_count += 1
+                            # 如果活跃块全部停滞超过3次，可能是连接问题
+                            if active_stalled_count >= 5:  # 连续5次(约2.5秒)没有进度
+                                self._log_download_debug(f"检测到所有活跃块({len(active_blocks)}个)停滞，尝试重新激活")
+                                for b in active_blocks:
+                                    b.active = False  # 标记为非活跃以便重新分配
+                                active_stalled_count = 0
                         else:
-                            last_progress = self.current_progress
-                            last_progress_change_time = current_time
-                            stalled_count = 0
+                            active_stalled_count = 0  # 有进度，重置计数器
                     
                     # 文件大小未知且所有块都不活跃，视为下载完成
                     if (self.file_size <= 0 or self.current_progress == 0) and all_blocks_inactive and not self.is_paused:
@@ -1297,6 +1578,15 @@ class DownloadEngine(QThread):
         self.status_updated.emit("已停止")
         self.is_running = False
         
+        # 关闭文件写入缓冲区，确保所有数据都已写入
+        if self.file_writer:
+            try:
+                self._log_download_debug("关闭文件写入缓冲区")
+                self.file_writer.close()
+                self.file_writer = None
+            except Exception as e:
+                self._log_download_debug(f"关闭文件写入缓冲区失败: {e}")
+        
         # 检查是否所有块都已完成，如果是，则删除断点续传文件而不是保存
         all_blocks_completed = all(
             block.current_position >= block.end_position 
@@ -1322,24 +1612,42 @@ class DownloadEngine(QThread):
         # 关闭线程池
         if self.executor:
             try:
-                self.executor.shutdown(wait=False)
+                # 首先尝试关闭所有提交的任务
+                for block in self.blocks:
+                    if isinstance(block, DownloadBlock):
+                        block.active = False
+                
+                # 使用超时确保不会无限等待
+                self._log_download_debug("正在关闭线程池...")
+                self.executor.shutdown(wait=True, cancel_futures=True)  
                 self.executor = None
+                self._log_download_debug("线程池已关闭")
             except Exception as e:
                 self._log_download_debug(f"关闭线程池失败: {e}")
         
         # 关闭会话
         try:
+            # 关闭所有会话池中的会话
+            if hasattr(self.connection_manager, 'close_all'):
+                self._log_download_debug("关闭所有连接...")
+                self.connection_manager.close_all()
+                self._log_download_debug("所有连接已关闭")
+                
+            # 关闭主会话
             if self.session:
                 self.session.close()
                 self.session = None
             
             # 关闭块会话
             for block in self.blocks:
-                if block.session:
+                if hasattr(block, 'session') and block.session:
                     block.session.close()
                     block.session = None
         except Exception as e:
             self._log_download_debug(f"关闭会话失败: {e}")
+        
+        # 释放内存
+        self.blocks.clear()
         
         # 记录最终状态
         self._write_download_summary()
@@ -1347,6 +1655,21 @@ class DownloadEngine(QThread):
     def run(self) -> None:
         """启动下载引擎（QThread入口方法）"""
         try:
+            # 设置线程优先级较低，避免影响UI响应
+            try:
+                if hasattr(os, 'sched_getscheduler') and hasattr(os, 'SCHED_BATCH'):
+                    # Linux系统
+                    os.sched_setscheduler(0, os.SCHED_BATCH, os.sched_param(0))
+                elif sys.platform == 'win32':
+                    # Windows系统
+                    import ctypes
+                    ctypes.windll.kernel32.SetThreadPriority(
+                        ctypes.windll.kernel32.GetCurrentThread(), 
+                        0  # THREAD_PRIORITY_BELOW_NORMAL
+                    )
+            except Exception as e:
+                self._log_download_debug(f"设置线程优先级失败: {e}")
+                
             # 等待初始化完成
             if self._init_thread and self._init_thread.is_alive():
                 self._log_download_debug("等待初始化线程完成")
@@ -1367,6 +1690,14 @@ class DownloadEngine(QThread):
             # 开始下载
             self._execute_download()
             
+            # 确保文件写入缓冲区已刷新
+            if self.file_writer:
+                try:
+                    self._log_download_debug("下载完成，刷新文件写入缓冲区")
+                    self.file_writer.flush(force=True)
+                except Exception as e:
+                    self._log_download_debug(f"刷新文件缓冲区失败: {e}")
+                    
             # 下载完成后进行文件验证
             if self.is_running and not self.is_paused:
                 file_path = Path(self.save_path) / self.file_name
@@ -1401,6 +1732,15 @@ class DownloadEngine(QThread):
                         self.error_occurred.emit(error_msg)
                 else:
                     self.error_occurred.emit("下载完成但文件不存在")
+                    
+            # 关闭文件写入缓冲区
+            if self.file_writer:
+                try:
+                    self.file_writer.close()
+                    self.file_writer = None
+                    self._log_download_debug("文件写入缓冲区已关闭")
+                except Exception as e:
+                    self._log_download_debug(f"关闭文件写入缓冲区失败: {e}")
             
         except Exception as e:
             error_msg = f"下载过程出错: {e}"
@@ -1418,6 +1758,12 @@ class DownloadEngine(QThread):
         返回:
             bool: 是否成功处理
         """
+        # 如果块已经不活跃（可能被取消），直接返回
+        if not self.is_running or self.is_paused:
+            block.active = False
+            block.status = "已暂停" if self.is_paused else "已停止" 
+            return False
+            
         url = self.url
         headers = dict(self.headers)  # 复制请求头以避免修改原始对象
         
@@ -1436,18 +1782,24 @@ class DownloadEngine(QThread):
         headers['Connection'] = 'keep-alive'
         headers['Accept-Encoding'] = 'gzip, deflate'
         
+        # 使用上次计算的区块为依据，防止在活跃状态下被多次提交
+        if block.active:
+            self._log_download_debug(f"块{block.start_position}-{block.end_position}: 已在下载中，跳过")
+            return False
+            
         block.active = True  # 标记块为活跃状态
         block.status = "连接中" # 更新状态
+        block.retries = 0  # 重置重试计数
             
         try:
             self._log_download_debug(f"块{block.start_position}-{block.end_position}: 开始下载部分 {block.current_position}-{block.end_position}")
             
-            # 发起HTTP请求
+            # 发起HTTP请求，使用更短的超时
             with block.session.get(
                 url, 
                 headers=headers, 
                 stream=True, 
-                timeout=15  # 降低超时时间，更快检测连接问题
+                timeout=10  # 进一步减少超时时间，更快检测连接问题
             ) as response:
                 # 检查响应状态
                 if response.status_code not in [200, 206]:
@@ -1473,12 +1825,22 @@ class DownloadEngine(QThread):
                             self._log_download_debug(f"调整块结束位置: {block.end_position} -> {new_end_pos}")
                             block.end_position = new_end_pos
                 
-                # 确定合适的块大小
+                # 根据文件大小选择合适的固定缓冲区大小
                 block_size = block.end_position - block.current_position + 1
-                if block_size < 1024 * 20:  # 小于20KB的小块使用更小的缓冲区
+                file_size_mb = self.file_size / (1024 * 1024)
+                
+                if block_size < 1024 * 20:  # 小于20KB的小块
                     chunk_size = 1024  # 使用1KB的缓冲区
-                else:
-                    chunk_size = 1024 * 32  # 对于较大的块，使用32KB
+                elif file_size_mb < 10:  # 小于10MB的文件
+                    chunk_size = 256 * 1024  # 使用256KB缓冲区
+                elif file_size_mb < 100:  # 小于100MB的文件
+                    chunk_size = 512 * 1024  # 使用512KB缓冲区
+                elif file_size_mb < 1024:  # 小于1GB的文件
+                    chunk_size = 1024 * 1024  # 使用1MB缓冲区
+                else:  # 大文件
+                    chunk_size = 2 * 1024 * 1024  # 使用2MB缓冲区
+                
+                self._log_download_debug(f"块{block.start_position}-{block.end_position}: 使用固定缓冲区大小 {getReadableSize(chunk_size)}")
                 
                 # 获取数据流
                 download_start_time = time.time()
@@ -1512,13 +1874,19 @@ class DownloadEngine(QThread):
                         with self.progress_lock:
                             # 尝试写入块
                             try:
-                                file_path = Path(self.save_path) / self.file_name
-                                with open(file_path, 'r+b') as f:
-                                    f.seek(current_position)
-                                    f.write(chunk)
-                                    # 确保数据真正写入磁盘
-                                    f.flush()
-                                    os.fsync(f.fileno())
+                                if self.file_writer:
+                                    # 使用优化的缓冲写入
+                                    self.file_writer.write_at(current_position, chunk)
+                                else:
+                                    # 传统直接写入方式
+                                    file_path = Path(self.save_path) / self.file_name
+                                    with open(file_path, 'r+b') as f:
+                                        f.seek(current_position)
+                                        f.write(chunk)
+                                        # 仅在大块数据时才执行刷新，减少系统调用
+                                        if chunk_size > 1024 * 1024:  # 大于1MB才刷新
+                                            f.flush()
+                                            os.fsync(f.fileno())
                             except Exception as e:
                                 self._log_download_debug(f"块{block.start_position}-{block.end_position}: 写入失败 {str(e)}")
                                 self.error_occurred.emit(f"写入失败: {str(e)}")
@@ -1689,22 +2057,60 @@ class DownloadEngine(QThread):
                         if block.end_position < new_size - 1:
                             block.end_position = new_size - 1
                 
-                # 打开文件进行写入
+                # 确保文件写入缓冲区已初始化
                 file_path = Path(self.save_path) / self.file_name
+                if not self.file_writer:
+                    try:
+                        # 根据文件大小选择合适的缓冲区大小
+                        file_size_mb = self.file_size / (1024 * 1024) if self.file_size > 0 else 50
+                        
+                        if file_size_mb < 10:  # 小于10MB的文件
+                            buffer_size = 4 * 1024 * 1024  # 4MB缓冲区
+                        elif file_size_mb < 100:  # 小于100MB的文件
+                            buffer_size = 8 * 1024 * 1024  # 8MB缓冲区
+                        elif file_size_mb < 1024:  # 小于1GB的文件
+                            buffer_size = 16 * 1024 * 1024  # 16MB缓冲区
+                        else:  # 大文件
+                            buffer_size = 32 * 1024 * 1024  # 32MB缓冲区
+                            
+                        self.file_writer = BufferedWriter(str(file_path), buffer_size=buffer_size)
+                        self._log_download_debug(f"为单线程下载创建文件写入缓冲区: {getReadableSize(buffer_size)}")
+                    except Exception as e:
+                        self._log_download_debug(f"创建文件写入缓冲区失败: {e}，将使用直接写入模式")
                 
-                # 下载模式: 追加或覆盖
-                file_mode = "r+b" if block.current_position > 0 else "wb"
+                # 准备写入文件
+                direct_write = not self.file_writer
+                file_handle = None
                 
-                with open(file_path, file_mode) as file:
+                # 如果不使用缓冲区，则打开文件
+                if direct_write:
+                    # 下载模式: 追加或覆盖
+                    file_mode = "r+b" if block.current_position > 0 else "wb"
+                    file_handle = open(file_path, file_mode)
                     # 定位到当前位置
                     if block.current_position > 0:
-                        file.seek(block.current_position)
+                        file_handle.seek(block.current_position)
+                
+                try:
+                    # 根据文件大小选择合适的固定缓冲区大小
+                    file_size_mb = self.file_size / (1024 * 1024) if self.file_size > 0 else 50
                     
-                    # 下载缓冲区和统计
-                    chunk_size = 1024 * 512  # 保持较大缓冲区
+                    if file_size_mb < 10:  # 小于10MB的文件
+                        chunk_size = 256 * 1024  # 使用256KB缓冲区
+                    elif file_size_mb < 100:  # 小于100MB的文件
+                        chunk_size = 512 * 1024  # 使用512KB缓冲区
+                    elif file_size_mb < 1024:  # 小于1GB的文件
+                        chunk_size = 1024 * 1024  # 使用1MB缓冲区
+                    else:  # 大文件
+                        chunk_size = 2 * 1024 * 1024  # 使用2MB缓冲区
+                    
+                    self._log_download_debug(f"单线程下载使用缓冲区大小: {getReadableSize(chunk_size)}")
+                    
+                    # 下载统计
                     last_update_time = time.time()
                     data_downloaded = 0
                     total_chunks_count = 0
+                    last_flush_time = time.time()
                     
                     for chunk in response.iter_content(chunk_size=chunk_size):
                         # 检查是否停止或暂停
@@ -1712,31 +2118,38 @@ class DownloadEngine(QThread):
                             break
                         
                         # 写入数据
-                        file.write(chunk)
                         data_size = len(chunk)
+                        if self.file_writer:
+                            # 使用优化的缓冲写入
+                            self.file_writer.write_at(block.current_position, chunk)
+                        else:
+                            # 直接写入
+                            file_handle.write(chunk)
+                            
+                            # 定期刷新文件缓冲区，但降低频率以提高效率
+                            if total_chunks_count % 40 == 0 and data_downloaded > 4 * 1024 * 1024:  # 每40个块或4MB数据刷新一次
+                                file_handle.flush()
+                        
+                        # 更新位置信息
                         block.current_position += data_size
                         data_downloaded += data_size
                         total_chunks_count += 1
                         
-                        # 定期刷新文件缓冲区，但降低频率以提高效率
-                        if total_chunks_count % 20 == 0:  # 降低刷新频率
-                            file.flush()
-                            
                         # 更新下载速度
                         current_time = time.time()
                         elapsed = current_time - last_update_time
                         if elapsed >= 1.0:  # 每秒更新一次速度
-                            block.download_speed = int(data_downloaded / elapsed)
+                            speed = int(data_downloaded / elapsed)
+                            block.download_speed = speed
                             last_update_time = current_time
                             data_downloaded = 0
-                        
-                        # 应用速度限制，但设置更高的阈值
-                        # self._apply_speed_limit(data_size)
-                        # 在高性能模式下暂时禁用限速功能
-                
-                    # 确保所有数据写入磁盘
-                    file.flush()
-                    os.fsync(file.fileno())
+                finally:
+                    # 关闭直接写入的文件句柄
+                    if direct_write and file_handle:
+                        # 确保数据写入磁盘
+                        file_handle.flush()
+                        os.fsync(file_handle.fileno())
+                        file_handle.close()
                     
                     # 确认下载的文件大小
                     try:
@@ -1998,3 +2411,5 @@ class DownloadEngine(QThread):
         except Exception as e:
             logging.warning(f"速度限制处理出错: {e}")
             # 出错时不进行限速
+
+    # 移除动态缓冲区大小调整方法
