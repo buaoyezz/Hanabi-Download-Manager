@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import argparse  # 导入参数解析模块
 # 设置环境变量以过滤Qt的字体警告日志
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 
@@ -14,6 +15,23 @@ print("使用FallbackConnector")
 from core.font.font_manager import FontManager
 from core.log.log_manager import log
 from client.ui.extension_interface.pop_dialog import DownloadPopDialog
+
+# 命令行参数解析函数
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='Hanabi Download Manager')
+    parser.add_argument('--debug_windows', action='store_true', 
+                        help='显示调试日志窗口')
+    parser.add_argument('--version', action='store_true',
+                        help='显示版本信息')
+    
+    # 添加更多可能的参数
+    parser.add_argument('--no_browser_extension', action='store_true',
+                        help='禁用浏览器扩展连接')
+    parser.add_argument('--config', type=str, metavar='FILE',
+                        help='指定配置文件路径')
+    
+    return parser.parse_args()
 
 # 创建一个全局处理器，用于处理浏览器下载请求
 class BrowserDownloadHandler(QObject):
@@ -172,6 +190,14 @@ class BrowserDownloadHandler(QObject):
             log.error(f"清理弹窗引用时出错: {e}")
 
 if __name__ == "__main__":
+    # 解析命令行参数
+    args = parse_arguments()
+    
+    # 处理版本信息参数
+    if args.version:
+        print("花火下载管理器 v1.0.0")
+        sys.exit(0)
+    
     app = QApplication(sys.argv)
     # app.setStyle("Fusion")
     
@@ -223,30 +249,44 @@ if __name__ == "__main__":
     # 创建主窗口
     window = DownloadManagerWindow()
     
-    try:
-        # 创建连接器，只连接到一个处理器，避免重复处理
-        connector = Connector()
-        
-        # 选择一个处理方式：
-        # 1. 使用全局处理器 - 创建独立下载弹窗，不会拉起主窗口[推荐]
-        connector.downloadRequestReceived.connect(download_handler.handle_download_request)
-        
-        # 2. 使用主窗口的下载窗口处理 - 会在主窗口中显示下载任务[拉起主窗口不推荐]
-        # if hasattr(window, 'download_window'):
-        #     connector.downloadRequestReceived.connect(window.download_window.handle_browser_download_request)
-        
-        connector.start()
-        log.info("浏览器下载连接器已成功启动")
-    except Exception as e:
-        log.error(f"启动浏览器下载连接器失败: {e}")
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(3000, lambda: window.init_browser_download_listener())
-    
     # 检查是否应该启动时最小化到托盘
     from client.ui.client_interface.settings.config import ConfigManager
     from PySide6.QtCore import QTimer  # 确保正确导入QTimer
     config = ConfigManager()
     start_minimized = config.get_setting("window", "start_minimized", False)
+    
+    # 如果指定了--debug_windows参数，显示日志窗口
+    if args.debug_windows:
+        try:
+            from core.log.log_window import LogWindow
+            log_window = LogWindow()
+            log_window.show()
+            log.info("已启用调试日志窗口")
+        except Exception as e:
+            log.error(f"无法启动日志窗口: {e}")
+    
+    # 如果指定了禁用浏览器扩展参数
+    if args.no_browser_extension:
+        log.info("已禁用浏览器扩展连接")
+    else:
+        try:
+            # 创建连接器，只连接到一个处理器，避免重复处理
+            connector = Connector()
+            
+            # 选择一个处理方式：
+            # 1. 使用全局处理器 - 创建独立下载弹窗，不会拉起主窗口[推荐]
+            connector.downloadRequestReceived.connect(download_handler.handle_download_request)
+            
+            # 2. 使用主窗口的下载窗口处理 - 会在主窗口中显示下载任务[拉起主窗口不推荐]
+            # if hasattr(window, 'download_window'):
+            #     connector.downloadRequestReceived.connect(window.download_window.handle_browser_download_request)
+            
+            connector.start()
+            log.info("浏览器下载连接器已成功启动")
+        except Exception as e:
+            log.error(f"启动浏览器下载连接器失败: {e}")
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(3000, lambda: window.init_browser_download_listener())
     
     if start_minimized:
         log.info("根据设置，应用将在启动时最小化到托盘")
