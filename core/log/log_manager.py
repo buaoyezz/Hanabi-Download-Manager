@@ -160,6 +160,9 @@ class LogManager:
         for handler in self.logger.handlers:
             handler.addFilter(self.level_filter)
         
+        # 添加观察者支持
+        self.observers = []
+        
         # 启动信息
         self.info("="*50)
         self.info("日志系统初始化完成")
@@ -171,21 +174,76 @@ class LogManager:
     
     def debug(self, message: str) -> None:
         self.logger.debug(message)
+        self._notify_observers('DEBUG', message)
     
     def info(self, message: str) -> None:
         self.logger.info(message)
+        self._notify_observers('INFO', message)
     
     def warning(self, message: str) -> None:
         self.logger.warning(message)
+        self._notify_observers('WARNING', message)
     
     def error(self, message: str) -> None:
         self.logger.error(message)
+        self._notify_observers('ERROR', message)
     
     def critical(self, message: str) -> None:
         self.logger.critical(message)
+        self._notify_observers('CRITICAL', message)
     
     def exception(self, message: str) -> None:
         self.logger.exception(message)
+        self._notify_observers('ERROR', f"{message} (Exception)\n{sys.exc_info()[1]}")
+    
+    # 观察者模式支持
+    def add_observer(self, observer):
+        """添加日志观察者
+        
+        Args:
+            observer: 观察者对象，必须实现on_log方法
+        """
+        if observer not in self.observers and hasattr(observer, 'on_log'):
+            self.observers.append(observer)
+            # 直接使用logger打印，避免循环调用
+            self.logger.debug(f"添加日志观察者: {observer}")
+            return True
+        return False
+    
+    def remove_observer(self, observer):
+        """移除日志观察者
+        
+        Args:
+            observer: 要移除的观察者对象
+        """
+        if observer in self.observers:
+            self.observers.remove(observer)
+            return True
+        return False
+    
+    def _notify_observers(self, level, message):
+        """通知所有观察者
+        
+        Args:
+            level: 日志级别
+            message: 日志消息
+        """
+        # 获取调用者信息
+        import inspect
+        frame = inspect.currentframe().f_back
+        filename = os.path.basename(frame.f_code.co_filename)
+        lineno = frame.f_lineno
+        
+        # 当前时间戳
+        timestamp = time.time()
+        
+        # 通知每个观察者
+        for observer in self.observers[:]:  # 使用副本避免迭代时修改
+            try:
+                observer.on_log(level, timestamp, filename, message)
+            except Exception as e:
+                # 避免在通知过程中的异常影响其他观察者
+                print(f"通知观察者时出错: {e}")
     
     def get_logger(self) -> logging.Logger:
         return self.logger
