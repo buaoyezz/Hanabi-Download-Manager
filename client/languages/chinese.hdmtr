@@ -1,0 +1,370 @@
+# Hanabi Download Manager Translation Resource
+# Language: zh_CN
+# Format: key=value
+
+# 通用
+app_name=花火下载管理器
+confirm=确认
+cancel=取消
+ok=确定
+yes=是
+no=否
+warning=警告
+error=错误
+success=成功
+info=信息
+help=帮助
+opening=正在打开
+fetching=获取中...
+initializing=初始化中
+completed=已完成
+unknown_file=未知文件
+unnamed_file=未命名文件
+
+# 导航/侧边栏
+downloads=下载管理
+history=下载历史
+settings=设置
+about=关于
+quick_start=快速开始
+example=示例
+expandable=浏览器扩展
+log=日志
+home=首页
+update=更新
+
+# 标题栏和托盘
+minimize=最小化
+maximize=最大化
+restore=还原窗口
+close=关闭
+show_main_window=显示主窗口
+exit_app=退出程序
+logo_not_found=Logo文件不存在
+
+# 设置界面
+ui_settings=界面设置
+theme=界面主题
+dark_theme=深色主题
+light_theme=浅色主题
+language=显示语言
+simplified_chinese=简体中文
+english=English
+stats_option=下载统计参与选项
+local_stats=仅参与本地统计
+global_stats=参与全局统计
+show_notifications=显示桌面通知
+
+# 设置页面选项卡
+general_settings=常规设置
+download_settings=下载设置
+network_settings=网络设置
+advanced_settings=高级线程
+software_update=软件更新
+
+# 启动设置
+startup_settings=启动设置
+auto_start=开机时自动启动
+check_update=启动时自动检查更新
+start_minimized=启动时最小化到系统托盘
+close_to_tray=关闭时最小化到系统托盘
+enable_browser_extension=启用浏览器扩展支持
+restore_download=恢复未完成的下载
+clear_history_on_exit=退出时清理历史记录
+
+# 高级操作
+advanced_operations=高级操作
+clear_cache=清除缓存
+clear_cache_desc=清除软件缓存和历史记录:
+reset_all=重置所有设置
+reset_all_desc=恢复所有设置到默认状态:
+reset=重置
+apply=应用
+
+# 消息
+settings_saved=设置已保存
+settings_load_failed=加载设置失败: {0}
+cache_cleared=缓存已清除
+all_settings_reset=所有设置已重置
+
+# 页面管理
+init_page_manager=页面管理器初始化完成
+page_exists=页面已存在: {0}
+page_not_exists=页面不存在: {0}
+already_on_page=已经在该页面: {0}
+add_page=添加页面: {0}
+switch_to_page=切换到页面: {0}
+page_switch_complete=页面切换完成: {0}
+
+# 页面状态
+page_not_implemented=此页面尚未实现
+home_load_failed=首页加载失败，请检查日志
+history_load_failed=加载历史记录失败，请检查日志
+
+# 确认对话框
+confirm_clear_cache=确定要清除所有缓存和历史记录吗？这将清空下载历史记录。
+confirm_reset_all=确定要将所有设置恢复到默认状态吗？这将清除所有自定义配置。
+
+# 更新
+update_check_failed=更新检查失败
+update_check_error=检查更新时出错
+update_found=发现新版本
+already_latest_version=当前已是最新版本
+check_update_now=立即检查更新
+auto_check_update=自动检查更新
+never_checked=从未检查
+last_check_time=上次检查时间
+save_cache_failed=保存缓存失败
+using_secondary_source=使用备用源
+version=版本
+this_version_is_required_update=此版本为必要更新
+file_size=文件大小
+update_added_to_download_list=更新已添加到下载列表
+download_task_failed=下载任务添加失败
+current_version_needs_update=当前版本需要更新到
+update_cache_cleared=更新缓存已清除
+click_check_update_button_to_get_latest_data=点击检查更新按钮获取最新数据
+update_cache_does_not_exist=更新缓存不存在
+clear_cache_failed=清除缓存失败
+operation_successful=操作成功
+operation_failed=操作失败
+提示=提示
+
+# 下载设置
+parallel_download_tasks=并行下载任务
+tasks_description=设置同时可以进行的最大下载任务数量
+max_tasks_count=最大任务数
+single_task_thread_settings=单任务线程设置
+default_thread_count=默认线程数
+enable_smart_thread_management=启用智能线程管理
+dynamic_thread_description=根据下载速度和文件大小自动调整线程数，以获得最佳性能
+max_thread_count=最大线程数
+default_segments=默认分段数
+buffer_size=缓冲区大小
+chunk_size=分块大小
+download_path_settings=下载路径设置
+default_download_path=默认下载路径
+browse=浏览
+auto_organize_downloads=自动整理下载
+auto_organize_description=根据文件类型自动整理下载文件到对应的文件夹
+clean_resume_files_description=清理所有断点续传文件（.resume）:
+clean_resume_files=清理断点续传文件
+download_behavior_settings=下载行为设置
+auto_start_downloads=自动开始下载
+auto_start_description=添加新下载任务时自动开始下载，无需手动点击开始
+max_retry_count=最大重试次数
+load_config=加载配置
+thread_count=线程数
+dynamic_threads=动态线程
+download_settings_load_failed=下载设置加载失败
+settings_reset=设置已重置
+download_settings_saved=下载设置已保存
+save_settings_failed=保存设置失败
+dynamic_threads_disabled=动态线程已禁用
+disable_dynamic_threads_failed=禁用动态线程失败
+select_download_folder=选择下载文件夹
+create_download_dir_failed=创建下载目录失败
+invalid_download_path=无效的下载路径
+max_concurrent_downloads=最大同时下载数量
+default_save_path=默认保存位置
+auto_open_folder=下载完成后打开文件夹
+pause_on_error=出错时自动暂停
+retry_on_failure=下载失败自动重试
+retry_times=重试次数
+file_exists_action=文件已存在时操作
+overwrite=覆盖
+rename=重命名
+ask=询问
+
+# 网络设置
+proxy_settings=代理设置
+enable_proxy=启用代理
+proxy_type=代理类型
+http_proxy=HTTP代理
+socks5_proxy=SOCKS5代理
+direct_connection=直接连接
+server=服务器
+port=端口
+proxy_host_placeholder=代理服务器地址
+requires_authentication=需要认证
+username=用户名
+password=密码
+speed_limits=速度限制
+limit_download_speed=限制下载速度
+limit_upload_speed=限制上传速度
+user_agent_settings=User-Agent设置
+user_agent_description=自定义HTTP请求头中的User-Agent，可以帮助解决某些网站的下载问题
+user_agent_placeholder=输入自定义User-Agent或从下拉菜单选择
+common_user_agents=常用User-Agent
+select_user_agent=选择User-Agent
+default_downloader=下载器默认
+network_settings_load_failed=网络设置加载失败
+network_settings_reset=网络设置已重置
+network_settings_saved=网络设置已保存
+apply_network_settings_failed=应用网络设置失败
+proxy_host_required=代理服务器地址不能为空
+proxy_port_required=代理服务器端口不能为空
+proxy_username_required=代理用户名不能为空
+connection_timeout=连接超时(秒)
+read_timeout=读取超时(秒)
+user_agent=用户代理(User-Agent)
+use_proxy=使用代理
+proxy_host=代理主机
+proxy_port=代理端口
+proxy_username=代理用户名
+proxy_password=代理密码
+
+# 高级线程设置
+single_task_threads=单任务线程
+threads_description=设置每个下载任务使用的线程数量，更多的线程通常可以提高下载速度
+threads_per_task=每任务线程数
+reset_to_default=重置为默认值
+thread_settings_load_failed=线程设置加载失败
+multi_thread_download=启用多线程下载
+max_threads_per_download=每个下载最大线程数
+min_split_size=最小分片大小(KB)
+segment_size=分段大小(MB)
+bandwidth_limit=带宽限制(KB/s)
+no_limit=无限制
+
+# 常规设置
+general_settings_saved=常规设置已保存
+settings_error=设置错误
+
+# 更新页面
+current_version=当前版本
+check_update=检查更新
+checking_update=正在检查更新...
+update_available=发现新版本
+update_not_available=已是最新版本
+download_update=下载更新
+install_update=安装更新
+update_notes=更新说明
+update_error=检查更新失败
+update_progress=更新下载进度
+update_history=更新历史
+
+# 下载窗口
+add_download=添加下载
+enter_download_link=请输入下载链接...
+start_download=开始下载
+save_location=保存位置
+current_save_location=当前保存位置
+select_save_location=选择保存位置
+save_location_changed=保存位置已更改
+download_location_updated=下载保存位置已更新
+preparing_download=正在准备下载
+enter_valid_link=请输入有效的下载链接
+download_task_added=已添加下载任务
+download_completed=下载完成
+task_window_not_initialized=任务窗口未初始化
+task_data_missing_url=任务数据缺少URL
+add_download_task_failed=添加下载任务失败
+extract_filename_failed=从URL提取文件名失败
+url_decode_failed=URL解码文件名失败
+process_filename_failed=处理文件名失败
+process_browser_download_failed=处理浏览器扩展下载失败
+pause_task=暂停任务
+resume_task=恢复任务
+cancel_task=取消任务
+file_opened=已打开文件
+file_not_exist=文件不存在
+file_not_found=无法找到文件
+open_file_failed=打开文件失败
+open_failed=打开失败
+cannot_open_file=无法打开文件
+folder_opened=已打开文件夹
+folder_not_exist=文件夹不存在
+folder_not_found=无法找到文件夹
+open_folder_failed=打开文件夹失败
+cannot_open_folder=无法打开文件夹
+history_record_missing_url=历史记录数据缺少URL
+created_dialog_for_history=已为历史记录下载创建下载弹窗
+redownload_from_history_failed=从历史记录重新下载失败
+created_dialog_for_request=已为下载请求创建下载弹窗
+browser_download_request=浏览器下载请求
+download_data_missing_url=下载数据缺少URL
+
+# 历史窗口
+download_history=下载历史
+refresh=刷新
+clear=清空
+refresh_history=刷新历史记录
+clear_history=清空历史记录
+confirm_clear=确认清空
+clear_history_confirm=确定要清空所有下载历史记录吗？\n此操作无法撤销。
+all_history_cleared=所有历史记录已清空
+show_notify_failed=显示通知失败
+no_download_history=暂无下载历史记录
+downloaded_at=下载于
+download_failed=下载失败
+redownload=重新下载
+cannot_redownload_missing_url=无法重新下载，缺少下载URL
+delete_record=删除记录
+trying_open_file=尝试打开文件
+trying_open_folder=尝试打开文件夹
+file_path=文件路径
+executing_command=执行命令
+select_file_failed=选中文件失败
+file_not_exist_open_folder=文件不存在，只打开文件夹
+trying_delete_record=尝试删除记录
+confirm_delete=确认删除
+delete_record_confirm=确定要删除'{filename}'的历史记录吗？\n此操作不会删除实际文件。
+record_deleted=已删除历史记录
+record_deleted_msg=已删除'{filename}'的历史记录
+delete_record_failed=删除历史记录失败
+
+# 首页窗口
+stable_channel_version=Stable Channel 1.0.7 Released
+download_statistics=下载统计
+active_downloads=活跃下载
+completed_downloads=已完成下载
+total_downloads=总下载量
+average_speed=平均速度
+quick_actions=快捷操作
+add_new_download=添加新下载
+downloads_description=高效管理所有下载任务
+browser_integration=浏览器集成
+browser_integration_description=直接从浏览器添加下载任务
+history_description=查看和管理下载历史
+settings_description=自定义下载管理器设置
+
+# 关于页面
+version=版本
+about_description=Hanabi Download Manager 使用部分ClutUI NG[PySide6]的组件,在原始上进行创新和自研的Download Manager，搭配自研Hanabi Downlaod Core，提供更高效的下载体验
+main_features=主要特性
+features_list=• 现已经支持多线程下载<br>• 现已支持断点续传<br>• 全新下载内核<br>• 浏览器链接本地<br>• 现代化界面设计<br>• 下载任务管理<br>• 努力适配Ubuntu中!
+developer=开发者 Developer
+developer_info=Developer: ZZBuAoYe
+copyright_info=© 2025 ZZBuAoYe - 保留所有权利
+github_home=GitHub Home
+official_website=Official Website
+opening_github=正在打开GitHub主页
+opening_website=正在打开官方网站
+open_link_failed=打开链接失败
+third_party_resources=第三方资源
+third_party_description=本软件使用了以下优秀的第三方资源：
+pyside6_desc=Qt for Python GUI框架
+fluent_ui_icons=Microsoft Fluent UI Icons
+fluent_ui_desc=现代化图标系统
+harmonyos_desc=华为鸿蒙字体
+mulish_desc=开源无衬线字体
+xiaoy_desc=感谢晓宇提供服务器供我部署图标在线查询；感谢Xiaoy提供云服务
+sadidc_desc=Sad IDC 提供云服务支持
+clutui_desc=使用了部分ClutUI NG的控件
+
+# 浏览器扩展页面
+browser_extension=浏览器扩展
+extension_connected=浏览器扩展已连接
+extension_disconnected=浏览器扩展未连接
+connect_extension=连接浏览器扩展
+extension_install_guide=浏览器扩展安装指南
+supported_browsers=支持的浏览器
+chrome_install=Chrome安装步骤
+edge_install=Edge安装步骤
+firefox_install=Firefox安装步骤
+extension_troubleshooting=扩展问题排查
+connection_port=连接端口
+websocket_server=WebSocket服务器
+refresh_connection=刷新连接
+manual_download=手动下载

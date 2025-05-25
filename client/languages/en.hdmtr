@@ -1,0 +1,372 @@
+# Hanabi Download Manager Translation Resource
+# Language: en
+# Format: key=value
+
+# General
+app_name=Hanabi Download Manager
+confirm=Confirm
+cancel=Cancel
+ok=OK
+yes=Yes
+no=No
+warning=Warning
+error=Error
+success=Success
+info=Information
+help=Help
+opening=Opening
+fetching=Fetching...
+initializing=Initializing
+completed=Completed
+unknown_file=Unknown file
+unnamed_file=Unnamed file
+
+# Navigation/Sidebar
+downloads=Downloads
+history=History
+settings=Settings
+about=About
+quick_start=Quick Start
+example=Example
+expandable=Browser Extension
+log=Log
+home=Home
+update=Update
+browser_extension=Browser Extension
+
+# Title Bar & Tray
+minimize=Minimize
+maximize=Maximize
+restore=Restore
+close=Close
+show_main_window=Show Main Window
+exit_app=Exit
+logo_not_found=Logo file not found
+
+# Settings UI
+ui_settings=UI Settings
+theme=Interface Theme
+dark_theme=Dark Theme
+light_theme=Light Theme
+language=Display Language
+simplified_chinese=简体中文
+english=English
+stats_option=Download Statistics Options
+local_stats=Local Statistics Only
+global_stats=Participate in Global Statistics
+show_notifications=Show Desktop Notifications
+
+# Settings Pages
+general_settings=General Settings
+download_settings=Download Settings
+network_settings=Network Settings
+advanced_settings=Advanced Thread Settings
+software_update=Software Update
+
+# Startup Settings
+startup_settings=Startup Settings
+auto_start=Start automatically at system startup
+start_minimized=Start minimized to tray
+close_to_tray=Minimize to tray when closed
+auto_check_update=Automatically check for updates at startup
+check_update=Check for updates at startup
+enable_browser_extension=Enable browser extension support
+restore_download=Resume unfinished downloads
+clear_history_on_exit=Clear history on exit
+
+# Advanced Operations
+advanced_operations=Advanced Operations
+clear_cache=Clear Cache
+clear_cache_desc=Clear software cache and history records:
+reset_all=Reset All Settings
+reset_all_desc=Restore all settings to default state:
+reset=Reset
+apply=Apply
+
+# Messages
+settings_saved=Settings saved
+settings_load_failed=Failed to load settings: {0}
+cache_cleared=Cache cleared
+all_settings_reset=All settings reset
+
+# Page Management
+init_page_manager=Page manager initialized
+page_exists=Page already exists: {0}
+page_not_exists=Page does not exist: {0}
+already_on_page=Already on page: {0}
+add_page=Adding page: {0}
+switch_to_page=Switching to page: {0}
+page_switch_complete=Page switch complete: {0}
+
+# Page Status
+page_not_implemented=This page is not yet implemented
+home_load_failed=Failed to load home page, please check logs
+history_load_failed=Failed to load history, please check logs
+
+# Confirmation Dialogs
+confirm_clear_cache=Are you sure you want to clear all cache and history records? This will empty your download history.
+confirm_reset_all=Are you sure you want to restore all settings to default? This will clear all custom configurations.
+
+# Update
+update_check_failed=Update check failed
+update_check_error=Error checking for updates
+update_found=New version found
+already_latest_version=Already the latest version
+check_update_now=Check for updates now
+auto_check_update=Auto check for updates
+never_checked=Never checked
+last_check_time=Last check time
+save_cache_failed=Failed to save cache
+using_secondary_source=Using secondary source
+version=Version
+this_version_is_required_update=This version is a required update
+file_size=File size
+update_added_to_download_list=Update added to download list
+download_task_failed=Download task addition failed
+current_version_needs_update=Current version needs update to
+update_cache_cleared=Update cache cleared
+click_check_update_button_to_get_latest_data=Click check update button to get latest data
+update_cache_does_not_exist=Update cache does not exist
+clear_cache_failed=Failed to clear cache
+operation_successful=Operation successful
+operation_failed=Operation failed
+提示=Tip
+
+# Download Settings
+parallel_download_tasks=Parallel Download Tasks
+tasks_description=Set the maximum number of download tasks that can run simultaneously
+max_tasks_count=Maximum task count
+single_task_thread_settings=Single Task Thread Settings
+default_thread_count=Default thread count
+enable_smart_thread_management=Enable smart thread management
+dynamic_thread_description=Automatically adjust thread count based on download speed and file size for optimal performance
+max_thread_count=Maximum thread count
+default_segments=Default segments
+buffer_size=Buffer size
+chunk_size=Chunk size
+download_path_settings=Download Path Settings
+default_download_path=Default download path
+browse=Browse
+auto_organize_downloads=Auto-organize downloads
+auto_organize_description=Automatically organize downloaded files into corresponding folders based on file type
+clean_resume_files_description=Clean all resume files (.resume):
+clean_resume_files=Clean resume files
+download_behavior_settings=Download Behavior Settings
+auto_start_downloads=Auto-start downloads
+auto_start_description=Automatically start downloading when adding new download tasks, no need to manually click start
+max_retry_count=Maximum retry count
+load_config=Load configuration
+thread_count=Thread count
+dynamic_threads=Dynamic threads
+download_settings_load_failed=Failed to load download settings
+settings_reset=Settings reset
+download_settings_saved=Download settings saved
+save_settings_failed=Failed to save settings
+dynamic_threads_disabled=Dynamic threads disabled
+disable_dynamic_threads_failed=Failed to disable dynamic threads
+select_download_folder=Select download folder
+create_download_dir_failed=Failed to create download directory
+invalid_download_path=Invalid download path
+max_concurrent_downloads=Maximum concurrent downloads
+default_save_path=Default save location
+auto_open_folder=Open folder after download completes
+pause_on_error=Auto pause on error
+retry_on_failure=Auto retry on failure
+retry_times=Retry times
+file_exists_action=When file exists
+overwrite=Overwrite
+rename=Rename
+ask=Ask
+
+# Network Settings
+proxy_settings=Proxy Settings
+enable_proxy=Enable proxy
+proxy_type=Proxy Type
+http_proxy=HTTP Proxy
+socks5_proxy=SOCKS5 Proxy
+direct_connection=Direct Connection
+server=Server
+port=Port
+proxy_host_placeholder=Proxy server address
+requires_authentication=Requires authentication
+username=Username
+password=Password
+speed_limits=Speed Limits
+limit_download_speed=Limit download speed
+limit_upload_speed=Limit upload speed
+user_agent_settings=User-Agent Settings
+user_agent_description=Customize the User-Agent in HTTP request headers, which can help solve download issues with certain websites
+user_agent_placeholder=Enter custom User-Agent or select from dropdown
+common_user_agents=Common User-Agents
+select_user_agent=Select User-Agent
+default_downloader=Default Downloader
+network_settings_load_failed=Failed to load network settings
+network_settings_reset=Network settings reset
+network_settings_saved=Network settings saved
+apply_network_settings_failed=Failed to apply network settings
+proxy_host_required=Proxy server address cannot be empty
+proxy_port_required=Proxy server port cannot be empty
+proxy_username_required=Proxy username cannot be empty
+connection_timeout=Connection timeout (seconds)
+read_timeout=Read timeout (seconds)
+user_agent=User Agent
+use_proxy=Use proxy
+proxy_host=Proxy host
+proxy_port=Proxy port
+proxy_username=Proxy username
+proxy_password=Proxy password
+
+# Advanced Thread Settings
+single_task_threads=Single Task Threads
+threads_description=Set the number of threads used for each download task, more threads usually improve download speed
+threads_per_task=Threads per task
+reset_to_default=Reset to default
+thread_settings_load_failed=Failed to load thread settings
+multi_thread_download=Enable multi-threaded download
+max_threads_per_download=Maximum threads per download
+min_split_size=Minimum split size (KB)
+segment_size=Segment size (MB)
+bandwidth_limit=Bandwidth limit (KB/s)
+no_limit=No limit
+
+# General Settings
+general_settings_saved=General settings saved
+settings_error=Settings error
+
+# Update Page
+current_version=Current Version
+check_update=Check for Updates
+checking_update=Checking for updates...
+update_available=New version available
+update_not_available=You have the latest version
+download_update=Download Update
+install_update=Install Update
+update_notes=Update Notes
+update_error=Update check failed
+update_progress=Update download progress
+update_history=Update History
+
+# Download Window
+add_download=Add Download
+enter_download_link=Enter download link...
+start_download=Start Download
+save_location=Save Location
+current_save_location=Current save location
+select_save_location=Select save location
+save_location_changed=Save location changed
+download_location_updated=Download location updated
+preparing_download=Preparing download
+enter_valid_link=Please enter a valid download link
+download_task_added=Download task added
+download_completed=Download completed
+task_window_not_initialized=Task window not initialized
+task_data_missing_url=Task data missing URL
+add_download_task_failed=Add download task failed
+extract_filename_failed=Extract filename from URL failed
+url_decode_failed=URL decode filename failed
+process_filename_failed=Process filename failed
+process_browser_download_failed=Process browser extension download failed
+pause_task=Pause task
+resume_task=Resume task
+cancel_task=Cancel task
+file_opened=File opened
+file_not_exist=File does not exist
+file_not_found=File not found
+open_file_failed=Open file failed
+open_failed=Open failed
+cannot_open_file=Cannot open file
+folder_opened=Folder opened
+folder_not_exist=Folder does not exist
+folder_not_found=Folder not found
+open_folder_failed=Open folder failed
+cannot_open_folder=Cannot open folder
+history_record_missing_url=History record missing URL
+created_dialog_for_history=Created download dialog for history record
+redownload_from_history_failed=Redownload from history failed
+created_dialog_for_request=Created download dialog for request
+browser_download_request=Browser download request
+download_data_missing_url=Download data missing URL
+
+# History Window
+download_history=Download History
+refresh=Refresh
+clear=Clear
+refresh_history=Refresh history
+clear_history=Clear history
+confirm_clear=Confirm Clear
+clear_history_confirm=Are you sure you want to clear all download history?\nThis action cannot be undone.
+all_history_cleared=All history records cleared
+show_notify_failed=Show notification failed
+no_download_history=No download history
+downloaded_at=Downloaded at
+download_failed=Download failed
+redownload=Redownload
+cannot_redownload_missing_url=Cannot redownload, missing URL
+delete_record=Delete record
+trying_open_file=Trying to open file
+trying_open_folder=Trying to open folder
+file_path=File path
+executing_command=Executing command
+select_file_failed=Select file failed
+file_not_exist_open_folder=File does not exist, opening folder only
+trying_delete_record=Trying to delete record
+confirm_delete=Confirm Delete
+delete_record_confirm=Are you sure you want to delete the history record for '{filename}'?\nThis will not delete the actual file.
+record_deleted=Record deleted
+record_deleted_msg=Deleted history record for '{filename}'
+delete_record_failed=Delete record failed
+
+# Home Window
+stable_channel_version=Stable Channel 1.0.7 Released
+download_statistics=Download Statistics
+active_downloads=Active Downloads
+completed_downloads=Completed Downloads
+total_downloads=Total Downloads
+average_speed=Average Speed
+quick_actions=Quick Actions
+add_new_download=Add New Download
+downloads_description=Efficiently manage all download tasks
+browser_integration=Browser Integration
+browser_integration_description=Add download tasks directly from browser
+history_description=View and manage download history
+settings_description=Customize download manager settings
+
+# About Page
+version=Version
+about_description=Hanabi Download Manager uses components from ClutUI NG[PySide6], innovating on the original to create a self-developed Download Manager paired with the self-researched Hanabi Download Core, providing a more efficient download experience
+main_features=Main Features
+features_list=• Now supports multi-threaded downloads<br>• Now supports resumable downloads<br>• Brand new download core<br>• Browser integration<br>• Modern interface design<br>• Download task management<br>• Working on Ubuntu compatibility!
+developer=Developer
+developer_info=Developer: ZZBuAoYe
+copyright_info=© 2025 ZZBuAoYe - All Rights Reserved
+github_home=GitHub Home
+official_website=Official Website
+opening_github=Opening GitHub homepage
+opening_website=Opening official website
+open_link_failed=Failed to open link
+third_party_resources=Third-Party Resources
+third_party_description=This software uses the following excellent third-party resources:
+pyside6_desc=Qt for Python GUI framework
+fluent_ui_icons=Microsoft Fluent UI Icons
+fluent_ui_desc=Modern icon system
+harmonyos_desc=Huawei HarmonyOS font
+mulish_desc=Open source sans-serif font
+xiaoy_desc=Thanks to Xiaoy for providing server for icon query deployment and cloud services
+sadidc_desc=Sad IDC provides cloud service support
+clutui_desc=Uses some components from ClutUI NG
+
+# Browser Extension Page
+browser_extension=Browser Extension
+extension_connected=Browser extension connected
+extension_disconnected=Browser extension disconnected
+connect_extension=Connect browser extension
+extension_install_guide=Browser extension installation guide
+supported_browsers=Supported browsers
+chrome_install=Chrome installation steps
+edge_install=Edge installation steps
+firefox_install=Firefox installation steps
+extension_troubleshooting=Extension troubleshooting
+connection_port=Connection port
+websocket_server=WebSocket server
+refresh_connection=Refresh connection
+manual_download=Manual download

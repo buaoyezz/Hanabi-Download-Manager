@@ -210,7 +210,8 @@
         
         <div class="file-input-container" id="fileInputContainer">
             <p>请选择<strong>FluentSystemIcons-Regular.json</strong>文件：</p>
-            <input type="file" id="jsonFileInput" accept=".json">
+            <label for="jsonFileInput" class="sr-only">选择JSON文件</label>
+            <input type="file" id="jsonFileInput" accept=".json" title="选择Fluent图标JSON文件" placeholder="选择JSON文件">
             <button id="loadFileBtn" style="margin-left: 10px; padding: 5px 10px;">加载文件</button>
             <p id="jsonLoadStatus" style="margin-top: 10px;"></p>
         </div>

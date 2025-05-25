@@ -12,6 +12,7 @@ from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.client_interface.task_window import TaskItemWidget, RoundedTaskFrame
 from core.history.history_manager import HistoryManager
 from client.ui.components.customNotify import NotifyManager
+from client.I18N.i18n import i18n
 
 class HistoryWindow(QWidget):
     """下载历史记录窗口"""
@@ -55,7 +56,7 @@ class HistoryWindow(QWidget):
         title_layout.addWidget(title_icon)
         
         # 标题文本
-        self.title_label = QLabel("下载历史")
+        self.title_label = QLabel(i18n.get_text("download_history"))
         self.title_label.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold;")
         self.font_manager.apply_font(self.title_label)
         title_layout.addWidget(self.title_label)
@@ -74,6 +75,31 @@ class HistoryWindow(QWidget):
         
         # 加载历史记录
         self.load_history()
+        
+        # 连接语言变更信号
+        i18n.language_changed.connect(self.update_ui_texts)
+    
+    def update_ui_texts(self):
+        """更新UI上的所有文本以匹配当前语言"""
+        # 标题
+        self.title_label.setText(i18n.get_text("download_history"))
+        
+        # 按钮文本
+        self.refresh_text_label.setText(i18n.get_text("refresh"))
+        self.clear_text_label.setText(i18n.get_text("clear"))
+        
+        # 更新刷新按钮提示
+        self.refresh_btn.setToolTip(i18n.get_text("refresh_history"))
+        
+        # 更新清空按钮提示
+        self.clear_btn.setToolTip(i18n.get_text("clear_history"))
+        
+        # 更新空历史提示（如果存在）
+        for i in range(self.history_container_layout.count()):
+            item = self.history_container_layout.itemAt(i)
+            if item and item.widget() and item.widget().objectName() == "emptyHistoryLabel":
+                item.widget().setText(i18n.get_text("no_download_history"))
+                break
     
     def _setup_control_buttons(self):
         """设置历史页面的操作按钮"""
@@ -117,18 +143,24 @@ class HistoryWindow(QWidget):
             # 创建文本标签
             text_label = QLabel(text)
             text_label.setStyleSheet("color: #FFFFFF; background-color: transparent;")
-            btn_layout.addWidget(text_label)
-            
-            return btn
+            return btn, text_label, btn_layout
         
         # 刷新按钮
-        self.refresh_btn = create_control_button("刷新", "ic_fluent_arrow_sync_24_regular")
-        self.refresh_btn.setToolTip("刷新历史记录")
+        self.refresh_btn, self.refresh_text_label, refresh_btn_layout = create_control_button(
+            i18n.get_text("refresh"), 
+            "ic_fluent_arrow_sync_24_regular"
+        )
+        refresh_btn_layout.addWidget(self.refresh_text_label)
+        self.refresh_btn.setToolTip(i18n.get_text("refresh_history"))
         self.refresh_btn.clicked.connect(self.load_history)
         
         # 清空按钮
-        self.clear_btn = create_control_button("清空", "ic_fluent_delete_24_regular")
-        self.clear_btn.setToolTip("清空历史记录")
+        self.clear_btn, self.clear_text_label, clear_btn_layout = create_control_button(
+            i18n.get_text("clear"), 
+            "ic_fluent_delete_24_regular"
+        )
+        clear_btn_layout.addWidget(self.clear_text_label)
+        self.clear_btn.setToolTip(i18n.get_text("clear_history"))
         self.clear_btn.clicked.connect(self.clear_history)
         
         # 添加按钮到布局
@@ -178,7 +210,7 @@ class HistoryWindow(QWidget):
     def load_history(self):
         """加载历史记录"""
         # 显示加载状态
-        print("正在重新加载历史记录...")
+        print(i18n.get_text("reloading_history"))
         
         # 清空现有历史项
         self.clear_history_items()
@@ -186,7 +218,7 @@ class HistoryWindow(QWidget):
         # 获取历史记录 - 确保强制从文件重新加载
         history_records = self.history_manager.get_all_records(force_reload=True)
         
-        print(f"已加载历史记录，共{len(history_records)}条")
+        print(f"{i18n.get_text('loaded_history_count')}: {len(history_records)}")
         
         if not history_records:
             # 显示无历史记录提示
@@ -218,8 +250,8 @@ class HistoryWindow(QWidget):
         """清空历史记录"""
         reply = QMessageBox.question(
             self, 
-            "确认清空", 
-            "确定要清空所有下载历史记录吗？\n此操作无法撤销。",
+            i18n.get_text("confirm_clear"), 
+            i18n.get_text("clear_history_confirm"),
             QMessageBox.Yes | QMessageBox.No, 
             QMessageBox.No
         )
@@ -236,16 +268,16 @@ class HistoryWindow(QWidget):
             
             # 添加简洁的通知
             try:
-                NotifyManager.warning("所有历史记录已清空")
+                NotifyManager.warning(i18n.get_text("all_history_cleared"))
             except Exception as e:
-                print(f"显示通知失败: {e}")
+                print(f"{i18n.get_text('show_notify_failed')}: {e}")
             
             # 发送信号
             self.history_cleared.emit()
     
     def _show_empty_history_message(self):
         """显示无历史记录提示"""
-        empty_label = QLabel("暂无下载历史记录")
+        empty_label = QLabel(i18n.get_text("no_download_history"))
         empty_label.setObjectName("emptyHistoryLabel")
         empty_label.setAlignment(Qt.AlignCenter)
         empty_label.setStyleSheet("color: #9E9E9E; font-size: 14px; padding: 20px;")
@@ -275,13 +307,13 @@ class HistoryWindow(QWidget):
         history_item = TaskItemWidget(parent=self.history_container, row_index=row_position)
         
         # 更新历史项信息
-        history_item.update_filename(history_record.get('filename', '未知文件'))
+        history_item.update_filename(history_record.get('filename', i18n.get_text("unknown_file")))
         history_item.update_size(history_record.get('file_size', 0))
         
         # 设置下载时间
         download_time = history_record.get('download_time', '')
         if download_time:
-            history_item.update_speed(f"下载于: {download_time}")
+            history_item.update_speed(f"{i18n.get_text('downloaded_at')}: {download_time}")
         
         # 添加到容器布局的顶部
         self.history_container_layout.insertWidget(0, history_item)
@@ -314,7 +346,7 @@ class HistoryWindow(QWidget):
         
         # 设置状态
         if history_record.get('status') == 'completed':
-            history_item.update_status("下载完成", True)
+            history_item.update_status(i18n.get_text("download_completed"), True)
             history_item.add_completed_actions()
             
             # 添加重新下载按钮
@@ -323,7 +355,7 @@ class HistoryWindow(QWidget):
             # 连接其他操作按钮
             self._connect_completed_actions(row_position, history_record)
         elif history_record.get('status') == 'error':
-            history_item.set_failed_status(history_record.get('error_message', '下载失败'))
+            history_item.set_failed_status(history_record.get('error_message', i18n.get_text("download_failed")))
             
             # 对于失败的下载，也添加重新下载按钮
             self._add_redownload_button(history_item, history_record)
@@ -354,7 +386,7 @@ class HistoryWindow(QWidget):
         
         # 创建重新下载按钮
         redownload_btn = QPushButton()
-        redownload_btn.setToolTip("重新下载")
+        redownload_btn.setToolTip(i18n.get_text("redownload"))
         redownload_btn.setCursor(Qt.PointingHandCursor)
         redownload_btn.setStyleSheet("""
             QPushButton {
@@ -385,7 +417,7 @@ class HistoryWindow(QWidget):
         btn_layout.addWidget(icon_label)
         
         # 创建文本标签
-        text_label = QLabel("重新下载")
+        text_label = QLabel(i18n.get_text("redownload"))
         text_label.setStyleSheet("color: white; background-color: transparent;")
         btn_layout.addWidget(text_label)
         
@@ -403,7 +435,7 @@ class HistoryWindow(QWidget):
         # 获取下载URL
         url = history_record.get('url')
         if not url:
-            QMessageBox.warning(self, "错误", "无法重新下载，缺少下载URL")
+            QMessageBox.warning(self, i18n.get_text("error"), i18n.get_text("cannot_redownload_missing_url"))
             return
         
         # 创建下载请求参数
@@ -443,7 +475,7 @@ class HistoryWindow(QWidget):
         # 连接删除记录操作
         if hasattr(history_item, 'delete_btn'):
             # 修改按钮文字为"删除记录"（只影响工具提示）
-            history_item.delete_btn.setToolTip("删除记录")
+            history_item.delete_btn.setToolTip(i18n.get_text("delete_record"))
                     
             history_item.delete_btn.clicked.connect(
                 functools.partial(self._on_delete_record_clicked, row)
@@ -455,7 +487,7 @@ class HistoryWindow(QWidget):
             history_item = self.history_items[row]
             if hasattr(history_item, 'history_data'):
                 file_path = history_item.history_data.get('save_path')
-                print(f"尝试打开文件: {file_path}")
+                print(f"{i18n.get_text('trying_open_file')}: {file_path}")
                 self.open_file(file_path)
     
     def _on_open_folder_clicked(self, row):
@@ -469,7 +501,7 @@ class HistoryWindow(QWidget):
                 file_path = os.path.normpath(file_path)
                 folder_path = os.path.dirname(file_path)
                 
-                print(f"尝试打开文件夹: {folder_path}, 文件路径: {file_path}")
+                print(f"{i18n.get_text('trying_open_folder')}: {folder_path}, {i18n.get_text('file_path')}: {file_path}")
                 
                 # 判断是否是Windows系统，如果是则选中文件
                 import sys
@@ -482,19 +514,19 @@ class HistoryWindow(QWidget):
                             # explorer命令对参数格式很敏感
                             file_path = file_path.replace('/', '\\')
                             cmd = f'explorer /select,"{file_path}"'
-                            print(f"执行命令: {cmd}")
+                            print(f"{i18n.get_text('executing_command')}: {cmd}")
                             subprocess.run(cmd, shell=True)
                         except Exception as e:
-                            print(f"选中文件失败: {str(e)}")
+                            print(f"{i18n.get_text('select_file_failed')}: {str(e)}")
                             # 如果选中文件失败，回退到打开文件夹
                             os.startfile(folder_path)
                     else:
                         # 如果文件不存在，只打开文件夹
-                        print(f"文件不存在，只打开文件夹: {folder_path}")
+                        print(f"{i18n.get_text('file_not_exist_open_folder')}: {folder_path}")
                         if os.path.exists(folder_path):
                             os.startfile(folder_path)
                         else:
-                            QMessageBox.warning(self, "错误", f"文件夹不存在: {folder_path}")
+                            QMessageBox.warning(self, i18n.get_text("error"), f"{i18n.get_text('folder_not_exist')}: {folder_path}")
                 elif sys.platform == 'darwin':  # macOS
                     if os.path.exists(file_path):
                         subprocess.call(['open', '-R', file_path])
@@ -513,20 +545,20 @@ class HistoryWindow(QWidget):
                             else:
                                 subprocess.call(['xdg-open', folder_path])
                         except:
-                            QMessageBox.warning(self, "错误", "无法打开文件夹")
+                            QMessageBox.warning(self, i18n.get_text("error"), i18n.get_text("cannot_open_folder"))
     
     def _on_delete_record_clicked(self, row):
         """删除记录按钮点击处理"""
         if row in self.history_items:
             history_item = self.history_items[row]
             if hasattr(history_item, 'history_data'):
-                print(f"尝试删除记录，行号: {row}")
+                print(f"{i18n.get_text('trying_delete_record')}: {row}")
                 self.delete_history_record(row, history_item.history_data)
     
     def open_file(self, file_path):
         """打开下载的文件"""
         if not file_path or not os.path.exists(file_path):
-            QMessageBox.warning(self, "错误", f"文件不存在: {file_path}")
+            QMessageBox.warning(self, i18n.get_text("error"), f"{i18n.get_text('file_not_exist')}: {file_path}")
             return
             
         try:
@@ -541,19 +573,19 @@ class HistoryWindow(QWidget):
             else:  # Linux
                 subprocess.call(['xdg-open', file_path])
                 
-            print(f"打开文件: {file_path}")
+            print(f"{i18n.get_text('file_opened')}: {file_path}")
         except Exception as e:
-            QMessageBox.warning(self, "错误", f"无法打开文件: {str(e)}")
+            QMessageBox.warning(self, i18n.get_text("error"), f"{i18n.get_text('cannot_open_file')}: {str(e)}")
     
     def delete_history_record(self, row, history_record):
         """删除历史记录"""
-        filename = history_record.get('filename', '未知文件')
+        filename = history_record.get('filename', i18n.get_text("unknown_file"))
         save_path = history_record.get('save_path', '')
         
         reply = QMessageBox.question(
             self, 
-            "确认删除", 
-            f"确定要删除'{filename}'的历史记录吗？\n此操作不会删除实际文件。",
+            i18n.get_text("confirm_delete"), 
+            i18n.get_text("delete_record_confirm").format(filename=filename),
             QMessageBox.Yes | QMessageBox.No, 
             QMessageBox.No
         )
@@ -576,15 +608,15 @@ class HistoryWindow(QWidget):
                     
                 # 显示简洁的通知
                 try:
-                    NotifyManager.success(f"已删除历史记录")
+                    NotifyManager.success(i18n.get_text("record_deleted"))
                 except Exception as e:
-                    print(f"显示通知失败: {e}")
+                    print(f"{i18n.get_text('show_notify_failed')}: {e}")
                 
-                QMessageBox.information(self, "成功", f"已删除'{filename}'的历史记录")
+                QMessageBox.information(self, i18n.get_text("success"), i18n.get_text("record_deleted_msg").format(filename=filename))
             else:
                 try:
-                    NotifyManager.error("删除历史记录失败")
+                    NotifyManager.error(i18n.get_text("delete_record_failed"))
                 except Exception as e:
-                    print(f"显示通知失败: {e}")
+                    print(f"{i18n.get_text('show_notify_failed')}: {e}")
                     
-                QMessageBox.warning(self, "错误", f"删除历史记录失败")
+                QMessageBox.warning(self, i18n.get_text("error"), i18n.get_text("delete_record_failed"))

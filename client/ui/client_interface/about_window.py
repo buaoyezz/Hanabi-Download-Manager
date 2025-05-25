@@ -4,6 +4,7 @@ from PySide6.QtGui import QPixmap, QIcon, QPainter, QPainterPath, QBrush, QColor
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.components.customNotify import NotifyManager
+from client.I18N.i18n import i18n
 import webbrowser
 
 class RoundedContainer(QWidget):
@@ -80,10 +81,10 @@ class AboutWindow(QWidget):
         header_layout.addStretch(1)
         
         # 版本信息
-        version_label = QLabel("版本 1.0.6 Release")
-        version_label.setStyleSheet("color: #9E9E9E; font-size: 14px;")
-        self.font_manager.apply_font(version_label)
-        header_layout.addWidget(version_label)
+        self.version_label = QLabel(f"{i18n.get_text('version')} Release")
+        self.version_label.setStyleSheet("color: #9E9E9E; font-size: 14px;")
+        self.font_manager.apply_font(self.version_label)
+        header_layout.addWidget(self.version_label)
         
         about_layout.addLayout(header_layout)
         
@@ -94,30 +95,26 @@ class AboutWindow(QWidget):
         about_layout.addWidget(separator)
         
         # 软件描述
-        desc_label = QLabel("Hanabi Download Manager 使用部分ClutUI NG[PySide6]的组件,在原始上进行创新和自研的Download Manager，搭配自研Hanabi Downlaod Core，提供更高效的下载体验")
-        desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #FFFFFF; font-size: 14px; line-height: 1.5;")
-        self.font_manager.apply_font(desc_label)
-        about_layout.addWidget(desc_label)
+        self.desc_label = QLabel(i18n.get_text("about_description"))
+        self.desc_label.setWordWrap(True)
+        self.desc_label.setStyleSheet("color: #FFFFFF; font-size: 14px; line-height: 1.5;")
+        self.font_manager.apply_font(self.desc_label)
+        about_layout.addWidget(self.desc_label)
         
         # 特性列表
-        features_label = QLabel("主要特性:")
-        features_label.setStyleSheet("color: #B39DDB; font-size: 16px; font-weight: bold;")
-        self.font_manager.apply_font(features_label)
-        about_layout.addWidget(features_label)
+        self.features_label = QLabel(i18n.get_text("main_features") + ":")
+        self.features_label.setStyleSheet("color: #B39DDB; font-size: 16px; font-weight: bold;")
+        self.font_manager.apply_font(self.features_label)
+        about_layout.addWidget(self.features_label)
         
-        features_content = QLabel(
-            "• 现已经支持多线程下载\n"
-            "• 现已支持断点续传\n"
-            "• 全新下载内核\n"
-            "• 浏览器链接本地\n"
-            "• 现代化界面设计\n"
-            "• 下载任务管理\n"
-            "• 努力适配Ubuntu中!"
+        self.features_content = QLabel(
+            i18n.get_text("features_list")
         )
-        features_content.setStyleSheet("color: #E0E0E0; font-size: 14px; line-height: 1.6;")
-        self.font_manager.apply_font(features_content)
-        about_layout.addWidget(features_content)
+        self.features_content.setStyleSheet("color: #E0E0E0; font-size: 14px; line-height: 1.6;")
+        self.features_content.setWordWrap(True)
+        self.features_content.setTextFormat(Qt.RichText)
+        self.font_manager.apply_font(self.features_content)
+        about_layout.addWidget(self.features_content)
         
         # 另一个分隔线
         separator2 = QWidget()
@@ -126,30 +123,30 @@ class AboutWindow(QWidget):
         about_layout.addWidget(separator2)
         
         # 开发者信息
-        dev_label = QLabel("开发者 Developer")
-        dev_label.setStyleSheet("color: #B39DDB; font-size: 16px; font-weight: bold;")
-        self.font_manager.apply_font(dev_label)
-        about_layout.addWidget(dev_label)
+        self.dev_label = QLabel(i18n.get_text("developer"))
+        self.dev_label.setStyleSheet("color: #B39DDB; font-size: 16px; font-weight: bold;")
+        self.font_manager.apply_font(self.dev_label)
+        about_layout.addWidget(self.dev_label)
         
-        dev_content = QLabel("Developer: ZZBuAoYe")
-        dev_content.setWordWrap(True)
-        dev_content.setStyleSheet("color: #E0E0E0; font-size: 14px;")
-        self.font_manager.apply_font(dev_content)
-        about_layout.addWidget(dev_content)
+        self.dev_content = QLabel(i18n.get_text("developer_info"))
+        self.dev_content.setWordWrap(True)
+        self.dev_content.setStyleSheet("color: #E0E0E0; font-size: 14px;")
+        self.font_manager.apply_font(self.dev_content)
+        about_layout.addWidget(self.dev_content)
         
         # 版权信息
-        copyright_label = QLabel("© 2025 ZZBuAoYe - 保留所有权利")
-        copyright_label.setAlignment(Qt.AlignCenter)
-        copyright_label.setStyleSheet("color: #9E9E9E; font-size: 12px;")
-        self.font_manager.apply_font(copyright_label)
-        about_layout.addWidget(copyright_label)
+        self.copyright_label = QLabel(i18n.get_text("copyright_info"))
+        self.copyright_label.setAlignment(Qt.AlignCenter)
+        self.copyright_label.setStyleSheet("color: #9E9E9E; font-size: 12px;")
+        self.font_manager.apply_font(self.copyright_label)
+        about_layout.addWidget(self.copyright_label)
         
         # 相关链接
         links_layout = QHBoxLayout()
         links_layout.setSpacing(15)
         
-        github_btn = QPushButton("GitHub Home")
-        github_btn.setStyleSheet("""
+        self.github_btn = QPushButton(i18n.get_text("github_home"))
+        self.github_btn.setStyleSheet("""
             QPushButton {
                 background-color: #333333;
                 color: #FFFFFF;
@@ -161,13 +158,13 @@ class AboutWindow(QWidget):
                 background-color: #444444;
             }
         """)
-        self.font_manager.apply_font(github_btn)
-        links_layout.addWidget(github_btn)
+        self.font_manager.apply_font(self.github_btn)
+        links_layout.addWidget(self.github_btn)
         # 优化打开网页和显示通知的逻辑
-        github_btn.clicked.connect(lambda: self._open_url("https://github.com/buaoyezz", "正在打开GitHub主页", "info"))
+        self.github_btn.clicked.connect(lambda: self._open_url("https://github.com/buaoyezz", i18n.get_text("opening_github"), "info"))
 
-        website_btn = QPushButton("Official Website")
-        website_btn.setStyleSheet("""
+        self.website_btn = QPushButton(i18n.get_text("official_website"))
+        self.website_btn.setStyleSheet("""
             QPushButton {
                 background-color: #B39DDB;
                 color: #121212;
@@ -179,10 +176,10 @@ class AboutWindow(QWidget):
                 background-color: #9575CD;
             }
         """)
-        self.font_manager.apply_font(website_btn)
-        links_layout.addWidget(website_btn)
+        self.font_manager.apply_font(self.website_btn)
+        links_layout.addWidget(self.website_btn)
         # 优化打开网页和显示通知的逻辑
-        website_btn.clicked.connect(lambda: self._open_url("https://zzbuaoye.dpdns.org/", "正在打开官方网站", "success"))
+        self.website_btn.clicked.connect(lambda: self._open_url("https://zzbuaoye.dpdns.org/", i18n.get_text("opening_website"), "success"))
 
         links_layout.addStretch(1)
         about_layout.addLayout(links_layout)
@@ -209,20 +206,20 @@ class AboutWindow(QWidget):
         thirdparty_title_layout.addWidget(thirdparty_icon)
         
         # 第三方资源标题
-        thirdparty_title = QLabel("第三方资源")
-        thirdparty_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
-        self.font_manager.apply_font(thirdparty_title)
-        thirdparty_title_layout.addWidget(thirdparty_title)
+        self.thirdparty_title = QLabel(i18n.get_text("third_party_resources"))
+        self.thirdparty_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold;")
+        self.font_manager.apply_font(self.thirdparty_title)
+        thirdparty_title_layout.addWidget(self.thirdparty_title)
         thirdparty_title_layout.addStretch()
         
         thirdparty_layout.addLayout(thirdparty_title_layout)
         
         # 第三方资源描述
-        thirdparty_desc = QLabel("本软件使用了以下优秀的第三方资源：")
-        thirdparty_desc.setWordWrap(True)
-        thirdparty_desc.setStyleSheet("color: #E0E0E0; font-size: 14px;")
-        self.font_manager.apply_font(thirdparty_desc)
-        thirdparty_layout.addWidget(thirdparty_desc)
+        self.thirdparty_desc = QLabel(i18n.get_text("third_party_description"))
+        self.thirdparty_desc.setWordWrap(True)
+        self.thirdparty_desc.setStyleSheet("color: #E0E0E0; font-size: 14px;")
+        self.font_manager.apply_font(self.thirdparty_desc)
+        thirdparty_layout.addWidget(self.thirdparty_desc)
         
         # 添加分隔线
         separator3 = QWidget()
@@ -232,15 +229,17 @@ class AboutWindow(QWidget):
         
         # 第三方资源列表
         resources = [
-            ("PySide6", "Qt for Python GUI框架", "https://doc.qt.io/qtforpython/"),
-            ("Microsoft Fluent UI Icons", "现代化图标系统", "https://github.com/microsoft/fluentui-system-icons"),
-            ("HarmonyOS Sans", "华为鸿蒙字体", "https://developer.harmonyos.com/cn/design/resource"),
-            ("Mulish", "开源无衬线字体", "https://fonts.google.com/specimen/Mulish"),
-            ("Xiaoy", "感谢晓宇提供服务器供我部署图标在线查询；感谢Xiaoy提供云服务", "https://apiv2.xiaoy.asia/icons-page/"),
-            ("SadIDC", "Sad IDC 提供云服务支持","https://sadidc.cn/"),
-            ("ClutUI Next Generation", "使用了部分ClutUI NG的控件", "https://github.com/buaoyezz/ClutUI-Nextgen")
-
+            ("PySide6", i18n.get_text("pyside6_desc"), "https://doc.qt.io/qtforpython/"),
+            (i18n.get_text("fluent_ui_icons"), i18n.get_text("fluent_ui_desc"), "https://github.com/microsoft/fluentui-system-icons"),
+            ("HarmonyOS Sans", i18n.get_text("harmonyos_desc"), "https://developer.harmonyos.com/cn/design/resource"),
+            ("Mulish", i18n.get_text("mulish_desc"), "https://fonts.google.com/specimen/Mulish"),
+            ("Xiaoy", i18n.get_text("xiaoy_desc"), "https://apiv2.xiaoy.asia/icons-page/"),
+            ("SadIDC", i18n.get_text("sadidc_desc"), "https://sadidc.cn/"),
+            ("ClutUI Next Generation", i18n.get_text("clutui_desc"), "https://github.com/buaoyezz/ClutUI-Nextgen")
         ]
+        
+        # 保存资源控件引用，以便语言更新
+        self.resource_labels = []
         
         for name, desc, url in resources:
             resource_layout = QVBoxLayout()
@@ -257,6 +256,9 @@ class AboutWindow(QWidget):
             desc_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
             self.font_manager.apply_font(desc_label)
             resource_layout.addWidget(desc_label)
+            
+            # 保存引用
+            self.resource_labels.append((name_label, desc_label))
             
             # 资源链接行
             link_layout = QHBoxLayout()
@@ -286,7 +288,7 @@ class AboutWindow(QWidget):
         """)
             self.font_manager.apply_font(link_btn)
             # 为每个按钮创建一个单独的lambda，捕获当前url值
-            link_btn.clicked.connect(lambda checked=False, url=url: self._open_url(url, f"正在打开: {name}", "info"))
+            link_btn.clicked.connect(lambda checked=False, url=url, name=name: self._open_url(url, f"{i18n.get_text('opening')}: {name}", "info"))
             link_layout.addWidget(link_btn)
             link_layout.addStretch()
             
@@ -308,6 +310,52 @@ class AboutWindow(QWidget):
         
         # 将滚动区域添加到主布局
         main_layout.addWidget(scroll_area)
+        
+        # 连接语言变更信号
+        i18n.language_changed.connect(self.update_ui_texts)
+
+    def update_ui_texts(self):
+        """更新UI上的所有文本以匹配当前语言"""
+        # 版本信息
+        self.version_label.setText(f"{i18n.get_text('version')} 1.0.7 Release")
+        
+        # 软件描述
+        self.desc_label.setText(i18n.get_text("about_description"))
+        
+        # 特性标题和列表
+        self.features_label.setText(i18n.get_text("main_features") + ":")
+        self.features_content.setText(i18n.get_text("features_list"))
+        
+        # 开发者信息
+        self.dev_label.setText(i18n.get_text("developer"))
+        self.dev_content.setText(i18n.get_text("developer_info"))
+        
+        # 版权信息
+        self.copyright_label.setText(i18n.get_text("copyright_info"))
+        
+        # 按钮文本
+        self.github_btn.setText(i18n.get_text("github_home"))
+        self.website_btn.setText(i18n.get_text("official_website"))
+        
+        # 第三方资源标题和描述
+        self.thirdparty_title.setText(i18n.get_text("third_party_resources"))
+        self.thirdparty_desc.setText(i18n.get_text("third_party_description"))
+        
+        # 更新资源描述
+        resources_desc = [
+            i18n.get_text("pyside6_desc"),
+            i18n.get_text("fluent_ui_desc"),
+            i18n.get_text("harmonyos_desc"),
+            i18n.get_text("mulish_desc"),
+            i18n.get_text("xiaoy_desc"),
+            i18n.get_text("sadidc_desc"),
+            i18n.get_text("clutui_desc")
+        ]
+        
+        # 更新资源标签
+        for i, (name_label, desc_label) in enumerate(self.resource_labels):
+            if i < len(resources_desc):
+                desc_label.setText(resources_desc[i])
 
     def create_icon_label(self, icon_name, color="#B39DDB"):
         icon_label = QLabel()
@@ -341,4 +389,4 @@ class AboutWindow(QWidget):
                 NotifyManager.error(message)
         except Exception as e:
             # 如果发生错误，显示错误通知
-            NotifyManager.error(f"打开链接失败: {str(e)}")
+            NotifyManager.error(f"{i18n.get_text('open_link_failed')}: {str(e)}")

@@ -7,6 +7,7 @@ from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from core.history.history_manager import HistoryManager
 from client.ui.extension_interface.extension_window import ExtensionWindow
+from client.I18N.i18n import i18n
 
 class StatCard(QFrame):
     """统计信息卡片"""
@@ -144,6 +145,88 @@ class HomeWindow(QWidget):
         # 加载历史数据并更新统计信息
         self.load_history_stats()
         
+        # 连接语言变更信号
+        i18n.language_changed.connect(self.update_ui_texts)
+    
+    def update_ui_texts(self):
+        """更新UI上的所有文本以匹配当前语言"""
+        # 欢迎标题和文本
+        self.welcome_title.setText(i18n.get_text("app_name"))
+        self.welcome_text.setText(i18n.get_text("stable_channel_version"))
+        
+        # 统计信息标题
+        self.stats_title.setText("| " + i18n.get_text("download_statistics"))
+        
+        # 功能标题
+        self.features_title.setText("| " + i18n.get_text("main_features"))
+        
+        # 操作标题
+        self.actions_title.setText(i18n.get_text("quick_actions"))
+        
+        # 添加新下载按钮
+        self.button_text.setText(i18n.get_text("add_new_download"))
+        
+        # 更新统计卡片标题
+        for key, card in self.stat_cards.items():
+            if key == "active":
+                # 使用布局中的第一个控件（标题标签）
+                layout = card.layout()
+                if layout and layout.count() > 0:
+                    for i in range(layout.count()):
+                        widget = layout.itemAt(i).widget()
+                        if isinstance(widget, QLabel) and widget.text() == "活跃下载":
+                            widget.setText(i18n.get_text("active_downloads"))
+                            break
+            elif key == "completed":
+                layout = card.layout()
+                if layout and layout.count() > 0:
+                    for i in range(layout.count()):
+                        widget = layout.itemAt(i).widget()
+                        if isinstance(widget, QLabel) and widget.text() == "已完成下载":
+                            widget.setText(i18n.get_text("completed_downloads"))
+                            break
+            elif key == "total_size":
+                layout = card.layout()
+                if layout and layout.count() > 0:
+                    for i in range(layout.count()):
+                        widget = layout.itemAt(i).widget()
+                        if isinstance(widget, QLabel) and widget.text() == "总下载量":
+                            widget.setText(i18n.get_text("total_downloads"))
+                            break
+            elif key == "avg_speed":
+                layout = card.layout()
+                if layout and layout.count() > 0:
+                    for i in range(layout.count()):
+                        widget = layout.itemAt(i).widget()
+                        if isinstance(widget, QLabel) and widget.text() == "平均速度":
+                            widget.setText(i18n.get_text("average_speed"))
+                            break
+        
+        # 更新功能卡片
+        if hasattr(self, 'feature_cards'):
+            for card, page in self.feature_cards:
+                if page == "downloads":
+                    card.title = i18n.get_text("downloads")
+                    card.description = i18n.get_text("downloads_description")
+                elif page == "extension":
+                    card.title = i18n.get_text("browser_integration")
+                    card.description = i18n.get_text("browser_integration_description")
+                elif page == "history":
+                    card.title = i18n.get_text("history")
+                    card.description = i18n.get_text("history_description")
+                elif page == "settings":
+                    card.title = i18n.get_text("settings")
+                    card.description = i18n.get_text("settings_description")
+                
+                # 更新卡片UI
+                for i in range(card.layout().count()):
+                    widget = card.layout().itemAt(i).widget()
+                    if isinstance(widget, QLabel):
+                        if i == 1:  # 标题是第二个widget
+                            widget.setText(card.title)
+                        elif i == 2:  # 描述是第三个widget
+                            widget.setText(card.description)
+        
     def setup_ui(self):
         # 设置主布局
         main_layout = QVBoxLayout(self)
@@ -197,26 +280,26 @@ class HomeWindow(QWidget):
         welcome_layout.setSpacing(15)
         
         # 欢迎标题
-        welcome_title = QLabel("Hanabi Download Manager")
-        welcome_title.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: bold;")
-        self.font_manager.apply_font(welcome_title)
-        welcome_layout.addWidget(welcome_title)
+        self.welcome_title = QLabel(i18n.get_text("app_name"))
+        self.welcome_title.setStyleSheet("color: #FFFFFF; font-size: 24px; font-weight: bold;")
+        self.font_manager.apply_font(self.welcome_title)
+        welcome_layout.addWidget(self.welcome_title)
         
         # 欢迎信息
-        welcome_text = QLabel("Stable Channel 1.0.6 Released")
-        welcome_text.setStyleSheet("color: #B0B0B0; font-size: 14px;")
-        welcome_text.setWordWrap(True)
-        self.font_manager.apply_font(welcome_text)
-        welcome_layout.addWidget(welcome_text)
+        self.welcome_text = QLabel(i18n.get_text("stable_channel_version"))
+        self.welcome_text.setStyleSheet("color: #B0B0B0; font-size: 14px;")
+        self.welcome_text.setWordWrap(True)
+        self.font_manager.apply_font(self.welcome_text)
+        welcome_layout.addWidget(self.welcome_text)
         
         parent_layout.addWidget(welcome_card)
         
     def _add_stats_section(self, parent_layout):
         # 统计信息标题
-        stats_title = QLabel("| 下载统计")
-        stats_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
-        self.font_manager.apply_font(stats_title)
-        parent_layout.addWidget(stats_title)
+        self.stats_title = QLabel("| " + i18n.get_text("download_statistics"))
+        self.stats_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
+        self.font_manager.apply_font(self.stats_title)
+        parent_layout.addWidget(self.stats_title)
         
         # 统计卡片容器
         stats_layout = QGridLayout()
@@ -224,10 +307,10 @@ class HomeWindow(QWidget):
         
         # 添加统计卡片
         stats_data = [
-            {"title": "活跃下载", "value": "0", "icon": "ic_fluent_arrow_download_24_regular", "key": "active"},
-            {"title": "已完成下载", "value": "0", "icon": "ic_fluent_checkmark_circle_24_regular", "key": "completed"},
-            {"title": "总下载量", "value": "0 MB", "icon": "ic_fluent_data_histogram_24_regular", "key": "total_size"},
-            {"title": "平均速度", "value": "0 KB/s", "icon": "ic_fluent_arrow_trending_24_regular", "key": "avg_speed"}
+            {"title": i18n.get_text("active_downloads"), "value": "0", "icon": "ic_fluent_arrow_download_24_regular", "key": "active"},
+            {"title": i18n.get_text("completed_downloads"), "value": "0", "icon": "ic_fluent_checkmark_circle_24_regular", "key": "completed"},
+            {"title": i18n.get_text("total_downloads"), "value": "0 MB", "icon": "ic_fluent_data_histogram_24_regular", "key": "total_size"},
+            {"title": i18n.get_text("average_speed"), "value": "0 KB/s", "icon": "ic_fluent_arrow_trending_24_regular", "key": "avg_speed"}
         ]
         
         for i, data in enumerate(stats_data):
@@ -240,10 +323,10 @@ class HomeWindow(QWidget):
         
     def _add_features_section(self, parent_layout):
         # 功能标题
-        features_title = QLabel("| 主要功能")
-        features_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
-        self.font_manager.apply_font(features_title)
-        parent_layout.addWidget(features_title)
+        self.features_title = QLabel("| " + i18n.get_text("main_features"))
+        self.features_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
+        self.font_manager.apply_font(self.features_title)
+        parent_layout.addWidget(self.features_title)
         
         # 功能卡片容器
         features_layout = QGridLayout()
@@ -252,44 +335,48 @@ class HomeWindow(QWidget):
         # 添加功能卡片
         features_data = [
             {
-                "title": "下载管理", 
-                "description": "高效管理所有下载任务", 
+                "title": i18n.get_text("downloads"), 
+                "description": i18n.get_text("downloads_description"), 
                 "icon": "ic_fluent_arrow_download_24_regular",
                 "page": "downloads"
             },
             {
-                "title": "浏览器集成", 
-                "description": "直接从浏览器添加下载任务", 
+                "title": i18n.get_text("browser_integration"), 
+                "description": i18n.get_text("browser_integration_description"), 
                 "icon": "ic_fluent_slide_text_24_regular",
                 "page": "extension"
             },
             {
-                "title": "历史记录", 
-                "description": "查看和管理下载历史", 
+                "title": i18n.get_text("history"), 
+                "description": i18n.get_text("history_description"), 
                 "icon": "ic_fluent_history_24_regular",
                 "page": "history"
             },
             {
-                "title": "设置中心", 
-                "description": "自定义下载管理器设置", 
+                "title": i18n.get_text("settings"), 
+                "description": i18n.get_text("settings_description"), 
                 "icon": "ic_fluent_settings_24_regular",
                 "page": "settings"
             }
         ]
         
+        # 保存卡片引用，以便语言更新
+        self.feature_cards = []
+        
         for i, data in enumerate(features_data):
             card = FeatureCard(data["title"], data["description"], data["icon"])
             card.clicked.connect(lambda checked=False, page=data["page"]: self.navigate_to.emit(page))
             features_layout.addWidget(card, i // 2, i % 2)
+            self.feature_cards.append((card, data["page"]))
         
         parent_layout.addLayout(features_layout)
         
     def _add_actions_section(self, parent_layout):
         # 操作标题
-        actions_title = QLabel("快捷操作")
-        actions_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
-        self.font_manager.apply_font(actions_title)
-        parent_layout.addWidget(actions_title)
+        self.actions_title = QLabel(i18n.get_text("quick_actions"))
+        self.actions_title.setStyleSheet("color: #FFFFFF; font-size: 18px; font-weight: bold; margin-top: 10px;")
+        self.font_manager.apply_font(self.actions_title)
+        parent_layout.addWidget(self.actions_title)
         
         # 操作按钮容器
         actions_layout = QHBoxLayout()
@@ -333,10 +420,10 @@ class HomeWindow(QWidget):
         button_layout.addWidget(icon_label)
         
         # 添加文本标签
-        button_text = QLabel("添加新下载")
-        button_text.setStyleSheet("color: #FFFFFF; background-color: transparent;")
-        self.font_manager.apply_font(button_text)
-        button_layout.addWidget(button_text)
+        self.button_text = QLabel(i18n.get_text("add_new_download"))
+        self.button_text.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+        self.font_manager.apply_font(self.button_text)
+        button_layout.addWidget(self.button_text)
         button_layout.addStretch()
         
         actions_layout.addWidget(add_download_btn)

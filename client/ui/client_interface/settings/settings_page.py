@@ -7,6 +7,7 @@ from client.ui.client_interface.settings.update_page import UpdatePage
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.components.customMessagebox import CustomMessageBox
 from core.font.font_manager import FontManager
+from client.I18N.i18n import i18n
 
 class SettingsPage(QWidget):
     # 设置消息信号
@@ -17,6 +18,9 @@ class SettingsPage(QWidget):
         self.config_manager = config_manager
         self.font_manager = FontManager()
         self.setup_ui()
+        
+        # 连接语言变更信号，动态更新UI文本
+        i18n.language_changed.connect(self.update_ui_texts)
         
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -36,14 +40,14 @@ class SettingsPage(QWidget):
         title_layout.addWidget(icon_label)
         
         # 设置标题
-        title_label = QLabel("设置")
-        title_label.setStyleSheet("""
+        self.title_label = QLabel(i18n.get_text("settings"))
+        self.title_label.setStyleSheet("""
             color: #FFFFFF;
             font-size: 18px;
             font-weight: bold;
         """)
-        self.font_manager.apply_font(title_label)
-        title_layout.addWidget(title_label)
+        self.font_manager.apply_font(self.title_label)
+        title_layout.addWidget(self.title_label)
         
         title_layout.addStretch()
         
@@ -128,21 +132,21 @@ class SettingsPage(QWidget):
         general_scroll = self._create_tab_scroll_area()
         self.general_tab = GeneralControlWidget(self.config_manager)
         general_scroll.setWidget(self.general_tab)
-        general_tab_index = self.tab_widget.addTab(general_scroll, "常规设置")
+        general_tab_index = self.tab_widget.addTab(general_scroll, i18n.get_text("general_settings"))
         self._set_tab_icon(general_tab_index, icons["general"])
         
         # 下载设置页 - 添加滚动区域和图标
         download_scroll = self._create_tab_scroll_area()
         self.download_tab = DownloadControlWidget(self.config_manager)
         download_scroll.setWidget(self.download_tab)
-        download_tab_index = self.tab_widget.addTab(download_scroll, "下载设置")
+        download_tab_index = self.tab_widget.addTab(download_scroll, i18n.get_text("download_settings"))
         self._set_tab_icon(download_tab_index, icons["download"])
         
         # 网络设置页 - 添加滚动区域和图标
         network_scroll = self._create_tab_scroll_area()
         self.network_tab = NetworkControlWidget(self.config_manager)
         network_scroll.setWidget(self.network_tab)
-        network_tab_index = self.tab_widget.addTab(network_scroll, "网络设置")
+        network_tab_index = self.tab_widget.addTab(network_scroll, i18n.get_text("network_settings"))
         self._set_tab_icon(network_tab_index, icons["network"])
         
         # 添加高级设置页
@@ -150,14 +154,14 @@ class SettingsPage(QWidget):
         # 高级设置页暂时留空
         advanced_widget = QWidget()
         advanced_scroll.setWidget(advanced_widget)
-        advanced_tab_index = self.tab_widget.addTab(advanced_scroll, "高级线程")
+        advanced_tab_index = self.tab_widget.addTab(advanced_scroll, i18n.get_text("advanced_settings"))
         self._set_tab_icon(advanced_tab_index, icons["advanced"])
         
         # 添加更新检查页
         update_scroll = self._create_tab_scroll_area()
         self.update_tab = UpdatePage(self.config_manager)
         update_scroll.setWidget(self.update_tab)
-        update_tab_index = self.tab_widget.addTab(update_scroll, "软件更新")
+        update_tab_index = self.tab_widget.addTab(update_scroll, i18n.get_text("software_update"))
         self._set_tab_icon(update_tab_index, icons["update"])
         
         tab_layout.addWidget(self.tab_widget)
@@ -169,6 +173,18 @@ class SettingsPage(QWidget):
         self.network_tab.settings_applied.connect(self._handle_settings_message)
         self.update_tab.updateFound.connect(self._handle_update_found)
         self.update_tab.updateError.connect(self._handle_update_error)
+
+    def update_ui_texts(self):
+        """更新界面上的所有文本"""
+        # 当语言变更时调用
+        self.title_label.setText(i18n.get_text("settings"))
+        
+        # 更新标签页标题
+        self.tab_widget.setTabText(0, i18n.get_text("general_settings"))
+        self.tab_widget.setTabText(1, i18n.get_text("download_settings"))
+        self.tab_widget.setTabText(2, i18n.get_text("network_settings"))
+        self.tab_widget.setTabText(3, i18n.get_text("advanced_settings"))
+        self.tab_widget.setTabText(4, i18n.get_text("software_update"))
 
     def _create_tab_scroll_area(self):
         """创建标准化的滚动区域"""
@@ -216,22 +232,22 @@ class SettingsPage(QWidget):
         # 直接在设置页面显示消息，不再依赖父组件
         if success:
             # 如果是"常规设置已保存"消息，添加闪光图标
-            if message == "常规设置已保存":
+            if message == i18n.get_text("general_settings_saved"):
                 font_manager = FontManager()
                 icon_text = font_manager.get_icon_text("ic_fluent_sparkle_32_regular")
-                CustomMessageBox.info(self, "设置", f"{icon_text} {message}")
+                CustomMessageBox.info(self, i18n.get_text("settings"), f"{icon_text} {message}")
             else:
-                CustomMessageBox.info(self, "设置", message)
+                CustomMessageBox.info(self, i18n.get_text("settings"), message)
         else:
-            CustomMessageBox.warning(self, "设置错误", message)
+            CustomMessageBox.warning(self, i18n.get_text("settings_error"), message)
             
         # 同时发送信号，以便主窗口可以选择性处理
         self.settingsMessage.emit(success, message)
         
     def _handle_update_found(self, version, release_notes):
         # 当找到更新时通知主窗口
-        self.settingsMessage.emit(True, f"发现新版本 {version}")
+        self.settingsMessage.emit(True, f"{i18n.get_text('update_found')} {version}")
         
     def _handle_update_error(self, error_message):
         # 当更新检查出错时通知主窗口
-        self.settingsMessage.emit(False, f"检查更新时出错: {error_message}") 
+        self.settingsMessage.emit(False, f"{i18n.get_text('update_check_error')}: {error_message}") 

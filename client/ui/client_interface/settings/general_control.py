@@ -12,6 +12,7 @@ from client.ui.components.customNotify import NotifyManager
 from client.ui.components.customMessagebox import CustomMessageBox
 from client.ui.components.comboBox import CustomComboBox
 from client.ui.components.checkBox import CustomCheckBox
+from client.I18N.i18n import i18n
 
 class GeneralControlWidget(QWidget):
    
@@ -25,6 +26,12 @@ class GeneralControlWidget(QWidget):
         
         self.setup_ui()
         self.load_config()
+        
+        # 连接语言变更信号，动态更新UI文本
+        i18n.language_changed.connect(self.update_ui_texts)
+        
+        # 连接语言选择框的变更信号
+        self.language_combo.currentIndexChanged.connect(self.on_language_changed)
 
     def load_config(self):
         
@@ -59,7 +66,7 @@ class GeneralControlWidget(QWidget):
             self.close_to_tray_checkbox.setChecked(restore_tasks)
             
         except Exception as e:
-            self.settings_applied.emit(False, f"加载常规设置失败: {str(e)}")
+            self.settings_applied.emit(False, f"{i18n.get_text('settings_load_failed', str(e))}")
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -67,18 +74,18 @@ class GeneralControlWidget(QWidget):
         main_layout.setSpacing(20)
         
         # ===== 界面设置组 =====
-        ui_group = QGroupBox("界面设置")
+        ui_group = QGroupBox(i18n.get_text("ui_settings"))
         ui_layout = QVBoxLayout(ui_group)
         
         # 主题选择
         theme_layout = QHBoxLayout()
-        theme_label = QLabel("界面主题:")
+        theme_label = QLabel(i18n.get_text("theme") + ":")
         self.font_manager.apply_font(theme_label)
         theme_layout.addWidget(theme_label)
         
         self.theme_combo = CustomComboBox()
-        self.theme_combo.addIconItem("深色主题", "ic_fluent_dark_theme_24_regular", "dark")
-        self.theme_combo.addIconItem("浅色主题", "ic_fluent_dark_theme_24_regular", "light")
+        self.theme_combo.addIconItem(i18n.get_text("dark_theme"), "ic_fluent_dark_theme_24_regular", "dark")
+        self.theme_combo.addIconItem(i18n.get_text("light_theme"), "ic_fluent_dark_theme_24_regular", "light")
         self.font_manager.apply_font(self.theme_combo)
         theme_layout.addWidget(self.theme_combo)
         theme_layout.addStretch()
@@ -87,13 +94,13 @@ class GeneralControlWidget(QWidget):
         
         # 语言设置
         language_layout = QHBoxLayout()
-        language_label = QLabel("显示语言:")
+        language_label = QLabel(i18n.get_text("language") + ":")
         self.font_manager.apply_font(language_label)
         language_layout.addWidget(language_label)
         
         self.language_combo = CustomComboBox()
-        self.language_combo.addIconItem("简体中文", "ic_fluent_globe_24_regular", "zh_CN")
-        self.language_combo.addIconItem("English", "ic_fluent_globe_24_regular", "en")
+        self.language_combo.addIconItem(i18n.get_text("simplified_chinese"), "ic_fluent_globe_24_regular", "zh_CN")
+        self.language_combo.addIconItem(i18n.get_text("english"), "ic_fluent_globe_24_regular", "en")
         self.font_manager.apply_font(self.language_combo)
         language_layout.addWidget(self.language_combo)
         language_layout.addStretch()
@@ -102,13 +109,13 @@ class GeneralControlWidget(QWidget):
         
         # 统计参与选项
         stats_layout = QHBoxLayout()
-        stats_label = QLabel("下载统计参与选项:")
+        stats_label = QLabel(i18n.get_text("stats_option") + ":")
         self.font_manager.apply_font(stats_label)
         stats_layout.addWidget(stats_label)
         
         self.stats_combo = CustomComboBox()
-        self.stats_combo.addIconItem("仅参与本地统计", "ic_fluent_data_pie_24_regular", "local")
-        self.stats_combo.addIconItem("参与全局统计", "ic_fluent_data_usage_24_regular", "global")
+        self.stats_combo.addIconItem(i18n.get_text("local_stats"), "ic_fluent_data_pie_24_regular", "local")
+        self.stats_combo.addIconItem(i18n.get_text("global_stats"), "ic_fluent_data_usage_24_regular", "global")
         self.font_manager.apply_font(self.stats_combo)
         stats_layout.addWidget(self.stats_combo)
         stats_layout.addStretch()
@@ -116,33 +123,33 @@ class GeneralControlWidget(QWidget):
         ui_layout.addLayout(stats_layout)
         
         # 通知设置
-        self.show_notifications_checkbox = CustomCheckBox("显示桌面通知")
+        self.show_notifications_checkbox = CustomCheckBox(i18n.get_text("show_notifications"))
         self.font_manager.apply_font(self.show_notifications_checkbox)
         ui_layout.addWidget(self.show_notifications_checkbox)
         
         main_layout.addWidget(ui_group)
         
         # ===== 启动设置组 =====
-        startup_group = QGroupBox("启动设置")
+        startup_group = QGroupBox(i18n.get_text("startup_settings"))
         startup_layout = QVBoxLayout(startup_group)
         
         # 开机自启
-        self.auto_start_checkbox = CustomCheckBox("开机时自动启动")
+        self.auto_start_checkbox = CustomCheckBox(i18n.get_text("auto_start"))
         self.font_manager.apply_font(self.auto_start_checkbox)
         startup_layout.addWidget(self.auto_start_checkbox)
         
         # 启动时自动检查更新
-        self.auto_update_checkbox = CustomCheckBox("启动时自动检查更新")
+        self.auto_update_checkbox = CustomCheckBox(i18n.get_text("check_update"))
         self.font_manager.apply_font(self.auto_update_checkbox)
         startup_layout.addWidget(self.auto_update_checkbox)
         
         # 启动时最小化到系统托盘
-        self.start_minimized_checkbox = CustomCheckBox("启动时最小化到系统托盘")
+        self.start_minimized_checkbox = CustomCheckBox(i18n.get_text("start_minimized"))
         self.font_manager.apply_font(self.start_minimized_checkbox)
         startup_layout.addWidget(self.start_minimized_checkbox)
         
         # 关闭时最小化到系统托盘
-        self.close_to_tray_checkbox = CustomCheckBox("关闭时最小化到系统托盘")
+        self.close_to_tray_checkbox = CustomCheckBox(i18n.get_text("close_to_tray"))
         self.font_manager.apply_font(self.close_to_tray_checkbox)
         startup_layout.addWidget(self.close_to_tray_checkbox)
         
@@ -150,16 +157,16 @@ class GeneralControlWidget(QWidget):
         main_layout.addWidget(startup_group)
         
         # ===== 操作按钮组 =====
-        operation_group = QGroupBox("高级操作")
+        operation_group = QGroupBox(i18n.get_text("advanced_operations"))
         operation_layout = QVBoxLayout(operation_group)
         
         # 清除缓存按钮
         clear_layout = QHBoxLayout()
-        clear_label = QLabel("清除软件缓存和历史记录:")
+        clear_label = QLabel(i18n.get_text("clear_cache_desc"))
         self.font_manager.apply_font(clear_label)
         clear_layout.addWidget(clear_label)
         
-        self.clear_cache_button = QPushButton("清除缓存")
+        self.clear_cache_button = QPushButton(i18n.get_text("clear_cache"))
         self.font_manager.apply_font(self.clear_cache_button)
         self.clear_cache_button.clicked.connect(self.clear_cache)
         clear_layout.addWidget(self.clear_cache_button)
@@ -169,11 +176,11 @@ class GeneralControlWidget(QWidget):
         
         # 重置所有设置按钮
         reset_layout = QHBoxLayout()
-        reset_label = QLabel("恢复所有设置到默认状态:")
+        reset_label = QLabel(i18n.get_text("reset_all_desc"))
         self.font_manager.apply_font(reset_label)
         reset_layout.addWidget(reset_label)
         
-        self.reset_all_button = QPushButton("重置所有设置")
+        self.reset_all_button = QPushButton(i18n.get_text("reset_all"))
         self.font_manager.apply_font(self.reset_all_button)
         self.reset_all_button.clicked.connect(self.reset_all_settings)
         self.reset_all_button.setStyleSheet("color: #ff5252;")
@@ -193,14 +200,14 @@ class GeneralControlWidget(QWidget):
         button_layout.setContentsMargins(0, 10, 0, 0)
         button_layout.setSpacing(10)
         
-        self.reset_button = QPushButton("重置")
+        self.reset_button = QPushButton(i18n.get_text("reset"))
         self.font_manager.apply_font(self.reset_button)
         self.reset_button.clicked.connect(self.reset_settings)
         button_layout.addWidget(self.reset_button)
         
         button_layout.addStretch()
         
-        self.apply_button = QPushButton("应用")
+        self.apply_button = QPushButton(i18n.get_text("apply"))
         self.font_manager.apply_font(self.apply_button)
         self.apply_button.clicked.connect(self.apply_settings)
         button_layout.addWidget(self.apply_button)
@@ -257,49 +264,132 @@ class GeneralControlWidget(QWidget):
             }
         """)
     
+    def on_language_changed(self, index):
+        """
+        当语言选择框变化时调用此方法
+        立即应用语言变更
+        """
+        # 获取选中的语言代码
+        lang_code = self.language_combo.getCurrentUserData()
+        if lang_code and lang_code != i18n.get_current_language():
+            # 立即应用语言变更，不等待用户点击应用按钮
+            i18n.set_language(lang_code)
+            # 更新配置但不保存，等用户点击应用按钮时保存
+            self.config_manager._config["ui"]["language"] = lang_code
+            
+            # 显示语言已更改的通知
+            self.notify_manager.show_message(
+                i18n.get_text("language"), 
+                i18n.get_text("language") + ": " + 
+                (i18n.get_text("simplified_chinese") if lang_code == "zh_CN" else i18n.get_text("english"))
+            )
+    
+    def update_ui_texts(self):
+        """
+        更新界面上的所有文本
+        当语言变更时调用
+        """
+        # 更新组标题
+        for group in self.findChildren(QGroupBox):
+            if group.title() == "界面设置" or group.title() == "UI Settings":
+                group.setTitle(i18n.get_text("ui_settings"))
+            elif group.title() == "启动设置" or group.title() == "Startup Settings":
+                group.setTitle(i18n.get_text("startup_settings"))
+            elif group.title() == "高级操作" or group.title() == "Advanced Operations":
+                group.setTitle(i18n.get_text("advanced_operations"))
+        
+        # 更新标签
+        for label in self.findChildren(QLabel):
+            text = label.text()
+            if text.endswith(":"):
+                text = text[:-1]
+                if text == "界面主题" or text == "Interface Theme":
+                    label.setText(i18n.get_text("theme") + ":")
+                elif text == "显示语言" or text == "Display Language":
+                    label.setText(i18n.get_text("language") + ":")
+                elif text == "下载统计参与选项" or text == "Download Statistics Option":
+                    label.setText(i18n.get_text("stats_option") + ":")
+                elif text == "清除软件缓存和历史记录" or text == "Clear software cache and history":
+                    label.setText(i18n.get_text("clear_cache_desc"))
+                elif text == "恢复所有设置到默认状态" or text == "Restore all settings to default state":
+                    label.setText(i18n.get_text("reset_all_desc"))
+        
+        # 更新复选框
+        self.show_notifications_checkbox.setText(i18n.get_text("show_notifications"))
+        self.auto_start_checkbox.setText(i18n.get_text("auto_start"))
+        self.auto_update_checkbox.setText(i18n.get_text("check_update"))
+        self.start_minimized_checkbox.setText(i18n.get_text("start_minimized"))
+        self.close_to_tray_checkbox.setText(i18n.get_text("close_to_tray"))
+        
+        # 更新按钮
+        self.clear_cache_button.setText(i18n.get_text("clear_cache"))
+        self.reset_all_button.setText(i18n.get_text("reset_all"))
+        self.reset_button.setText(i18n.get_text("reset"))
+        self.apply_button.setText(i18n.get_text("apply"))
+        
+        # 更新下拉框项目
+        # 保存当前选中的项
+        current_theme = self.theme_combo.getCurrentUserData()
+        current_stats = self.stats_combo.getCurrentUserData()
+        
+        # 清空并重新添加项目
+        self.theme_combo.clear()
+        self.theme_combo.addIconItem(i18n.get_text("dark_theme"), "ic_fluent_dark_theme_24_regular", "dark")
+        self.theme_combo.addIconItem(i18n.get_text("light_theme"), "ic_fluent_dark_theme_24_regular", "light")
+        
+        self.stats_combo.clear()
+        self.stats_combo.addIconItem(i18n.get_text("local_stats"), "ic_fluent_data_pie_24_regular", "local")
+        self.stats_combo.addIconItem(i18n.get_text("global_stats"), "ic_fluent_data_usage_24_regular", "global")
+        
+        # 恢复选中状态
+        self.theme_combo.setCurrentByUserData(current_theme)
+        self.stats_combo.setCurrentByUserData(current_stats)
+        
+        # 注意：不更新语言选择框的项目，因为语言名称应该始终以原语言显示
+    
     def clear_cache(self):
         
         try:
             # 确认是否清除缓存
             reply = CustomMessageBox.question(
-                self, "清除缓存", 
-                "确定要清除所有缓存和历史记录吗？这将清空下载历史记录。",
-                [("确定", True), ("取消", False)]
+                self, i18n.get_text("clear_cache"), 
+                i18n.get_text("confirm_clear_cache"),
+                [(i18n.get_text("confirm"), True), (i18n.get_text("cancel"), False)]
             )
             
             if reply:
                 # 在实际应用中，这里会实现缓存清理逻辑
-                self.notify_manager.show_message("清除缓存", "缓存已成功清除")
-                self.settings_applied.emit(True, "缓存已清除")
+                self.notify_manager.show_message(i18n.get_text("clear_cache"), i18n.get_text("cache_cleared"))
+                self.settings_applied.emit(True, i18n.get_text("cache_cleared"))
         except Exception as e:
-            self.settings_applied.emit(False, f"清除缓存失败: {str(e)}")
+            self.settings_applied.emit(False, f"{i18n.get_text('error')}: {str(e)}")
     
     def reset_all_settings(self):
        
         try:
             # 确认是否重置所有设置
             reply = CustomMessageBox.question(
-                self, "重置设置", 
-                "确定要将所有设置恢复到默认状态吗？这将清除所有自定义配置。",
-                [("确定", True), ("取消", False)]
+                self, i18n.get_text("reset_all"), 
+                i18n.get_text("confirm_reset_all"),
+                [(i18n.get_text("confirm"), True), (i18n.get_text("cancel"), False)]
             )
             
             if reply:
                 # 在实际应用中，这里会实现重置所有设置的逻辑
                 self.load_config()  # 重新加载默认配置
-                self.notify_manager.show_message("重置设置", "所有设置已恢复到默认状态")
-                self.settings_applied.emit(True, "所有设置已重置为默认值")
+                self.notify_manager.show_message(i18n.get_text("reset_all"), i18n.get_text("all_settings_reset"))
+                self.settings_applied.emit(True, i18n.get_text("all_settings_reset"))
         except Exception as e:
-            self.settings_applied.emit(False, f"重置所有设置失败: {str(e)}")
+            self.settings_applied.emit(False, f"{i18n.get_text('error')}: {str(e)}")
     
     def reset_settings(self):
        
         try:
             # 重置本页面设置
             self.load_config()
-            CustomMessageBox.info(self, "重置设置", "已重置本页面设置")
+            CustomMessageBox.info(self, i18n.get_text("reset"), i18n.get_text("reset") + ": " + i18n.get_text("success"))
         except Exception as e:
-            CustomMessageBox.error(self, "重置设置失败", str(e))
+            CustomMessageBox.error(self, i18n.get_text("reset") + ": " + i18n.get_text("error"), str(e))
     
     def apply_settings(self):
        
@@ -343,13 +433,19 @@ class GeneralControlWidget(QWidget):
                 # 处理启动最小化设置
                 self._apply_start_minimized_setting(self.start_minimized_checkbox.isChecked())
                 
+                # 应用语言设置
+                current_language = i18n.get_current_language()
+                selected_language = self.language_combo.getCurrentUserData() or "zh_CN"
+                if current_language != selected_language:
+                    i18n.set_language(selected_language)
+                
                 # 只发送信号，不显示额外通知
-                self.settings_applied.emit(True, "常规设置已保存")
+                self.settings_applied.emit(True, i18n.get_text("settings_saved"))
             else:
-                raise Exception("保存配置失败")
+                raise Exception(i18n.get_text("error") + ": " + i18n.get_text("settings_saved"))
         except Exception as e:
             # 只发送信号，不显示额外通知
-            self.settings_applied.emit(False, f"应用设置失败: {str(e)}")
+            self.settings_applied.emit(False, f"{i18n.get_text('error')}: {str(e)}")
             # 不再显示额外的错误对话框
             # CustomMessageBox.error(self, "应用设置失败", str(e))
     

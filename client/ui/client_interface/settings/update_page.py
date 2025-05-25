@@ -5,6 +5,7 @@ from PySide6.QtGui import QFont, QColor
 from core.font.font_manager import FontManager
 from client.ui.components.customMessagebox import CustomMessageBox
 from client.ui.components.customNotify import NotifyManager
+from client.I18N.i18n import i18n  # 添加i18n导入
 import requests
 import json
 import os
@@ -26,7 +27,7 @@ class UpdatePage(QWidget):
         self.font_manager = FontManager()
         
         # 软件当前版本
-        self.current_version = "1.0.6"
+        self.current_version = "1.0.7"
         
         # 更新源配置
         self.primary_api_url = "https://apiv2.xiaoy.asia"  # 主更新源URL
@@ -112,6 +113,30 @@ class UpdatePage(QWidget):
         if self.config_manager.get_auto_check_update() and self.should_check_again():
             # 延迟3秒后自动检查更新
             QTimer.singleShot(3000, lambda: self.check_update(silent=True))
+            
+        # 连接语言变更信号，动态更新UI文本
+        i18n.language_changed.connect(self.update_ui_texts)
+    
+    def update_ui_texts(self):
+        """更新界面上的所有文本"""
+        # 只更新关键UI元素的文本，因为完全更新所有文本工作量太大
+        
+        # 检查更新按钮
+        if hasattr(self, 'check_button'):
+            self.check_button.setText(i18n.get_text("check_update_now"))
+            
+        # 自动检查更新
+        if hasattr(self, 'auto_check_button'):
+            self.auto_check_button.setText(i18n.get_text("auto_check_update"))
+            
+        # 状态标签
+        if hasattr(self, 'status_label') and self.has_newer_version:
+            self.status_label.setText(f"{i18n.get_text('update_found')}: {self.cached_data.get('latest', {}).get('version', '')}")
+        elif hasattr(self, 'status_label') and not self.has_newer_version:
+            self.status_label.setText(i18n.get_text("already_latest_version"))
+            
+        # 更新最后检查时间标签
+        self.load_last_check_time()
     
     def should_check_again(self):
         last_check = self.cached_data.get("last_check_timestamp", 0)
@@ -132,11 +157,11 @@ class UpdatePage(QWidget):
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存缓存失败: {str(e)}")
+            print(f"{i18n.get_text('save_cache_failed')}: {str(e)}")
     
     def load_last_check_time(self):
-        last_check = self.cached_data.get("last_check_time", "从未检查")
-        self.last_check_label.setText(f"上次检查：{last_check}")
+        last_check = self.cached_data.get("last_check_time", i18n.get_text("never_checked"))
+        self.last_check_label.setText(f"{i18n.get_text('last_check_time')}: {last_check}")
     
     def update_ui_from_cache(self):
         if not self.cached_data:
@@ -154,7 +179,7 @@ class UpdatePage(QWidget):
         if self.compare_versions(latest.get("version", "0.0.0"), self.current_version) > 0:
             # 有更新版本
             self.has_newer_version = True
-            self.status_label.setText(f"发现新版本: {latest['version']}")
+            self.status_label.setText(f"{i18n.get_text('update_found')}: {latest['version']}")
             self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
             
             # 更新更新日志
@@ -162,7 +187,7 @@ class UpdatePage(QWidget):
         else:
             # 已经是最新版本
             self.has_newer_version = False
-            self.status_label.setText("您当前使用的已经是最新版本")
+            self.status_label.setText(i18n.get_text("already_latest_version"))
             self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
             
             # 显示当前版本的更新日志
@@ -1020,24 +1045,24 @@ class UpdatePage(QWidget):
     def _update_success_ui(self, latest, has_update, data=None):
         """在主线程中更新成功状态UI"""
         if has_update:
-            self.status_label.setText(f"发现新版本: {latest['version']}")
+            self.status_label.setText(f"{i18n.get_text('update_found')}: {latest['version']}")
             self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
             # 更新更新日志
             self.update_release_notes(latest, True)
             
             # 添加通知
             try:
-                NotifyManager.success(f"发现新版本: {latest['version']}")
+                NotifyManager.success(f"{i18n.get_text('update_found')}: {latest['version']}")
             except Exception as e:
                 print(f"显示通知失败: {e}")
                 
         else:
-            self.status_label.setText("您当前使用的已经是最新版本")
+            self.status_label.setText(i18n.get_text("already_latest_version"))
             self.status_label.setStyleSheet("color: #4CAF50; font-size: 13px; background-color: transparent;")
             
             # 添加通知
             try:
-                NotifyManager.info("您当前使用的已经是最新版本")
+                NotifyManager.info(i18n.get_text("already_latest_version"))
             except Exception as e:
                 print(f"显示通知失败: {e}")
             
@@ -1069,7 +1094,7 @@ class UpdatePage(QWidget):
     
     def _show_secondary_source_warning(self, data):
         """在主线程中显示次更新源警告"""
-        self.status_label.setText(f"{self.status_label.text()} (使用次更新源)")
+        self.status_label.setText(f"{self.status_label.text()} ({i18n.get_text('using_secondary_source')})")
         
         # 添加次更新源警告提示
         source_warning_label = QLabel(data["source_warning"])
@@ -1103,7 +1128,7 @@ class UpdatePage(QWidget):
                 item.widget().deleteLater()
         
         # 添加新版本信息
-        version_label = QLabel(f"<b>版本 {latest['version']}</b> ({latest.get('date', '')})")
+        version_label = QLabel(f"<b>{i18n.get_text('version')} {latest['version']}</b> ({latest.get('date', '')})")
         version_label.setStyleSheet("color: #B39DDB; font-size: 16px; background-color: transparent;")
         self.font_manager.apply_font(version_label)
         self.log_layout.addWidget(version_label)
@@ -1130,7 +1155,7 @@ class UpdatePage(QWidget):
         
         # 如果需要强制更新
         if latest.get("force_update", False) and show_download:
-            required_label = QLabel("此版本为必须更新版本，请尽快更新")
+            required_label = QLabel(i18n.get_text("this_version_is_required_update"))
             required_label.setStyleSheet("color: #FF9800; font-size: 14px; font-weight: bold; background-color: transparent;")
             self.font_manager.apply_font(required_label)
             self.log_layout.addWidget(required_label)
@@ -1144,7 +1169,7 @@ class UpdatePage(QWidget):
         platform = "win"  # 这里可以根据实际系统判断
         download_info = latest.get("download", {}).get(platform, {})
         if download_info.get("size"):
-            size_label = QLabel(f"文件大小：{download_info['size']}")
+            size_label = QLabel(f"{i18n.get_text('file_size')}: {download_info['size']}")
             size_label.setStyleSheet("color: #9E9E9E; font-size: 12px; background-color: transparent;")
             self.font_manager.apply_font(size_label)
             self.log_layout.addWidget(size_label)
@@ -1303,11 +1328,11 @@ class UpdatePage(QWidget):
                                     break
                     
                     # 提示用户
-                    self.status_label.setText(f"更新包已添加到下载列表")
+                    self.status_label.setText(f"{i18n.get_text('update_added_to_download_list')}")
                 else:
                     # 添加失败
-                    self.status_label.setText(f"添加下载任务失败")
-                    logging.error(f"直接添加更新下载任务失败")
+                    self.status_label.setText(f"{i18n.get_text('download_task_failed')}")
+                    logging.error(f"{i18n.get_text('download_task_failed')}")
             else:
                 # 找不到主窗口，使用原来的信号方式
                 self.addDownloadTask.emit(url, filename, filesize)
@@ -1327,11 +1352,9 @@ class UpdatePage(QWidget):
                                 break
                 
                 # 提示用户
-                self.status_label.setText(f"更新包已添加到下载列表")
+                self.status_label.setText(f"{i18n.get_text('update_added_to_download_list')}")
         except Exception as e:
-            logging.error(f"直接添加下载任务失败: {e}")
-            import traceback
-            logging.error(traceback.format_exc())
+            logging.error(f"{i18n.get_text('download_task_failed')}: {e}")
             
             # 出错时使用原来的信号方式
             self.addDownloadTask.emit(url, filename, filesize)
@@ -1351,7 +1374,7 @@ class UpdatePage(QWidget):
                             break
             
             # 提示用户
-            self.status_label.setText(f"更新包已添加到下载列表")
+            self.status_label.setText(f"{i18n.get_text('update_added_to_download_list')}")
     
     def download_update_immediately(self, latest_info):
         """立即下载更新（用于强制更新）"""
@@ -1372,7 +1395,7 @@ class UpdatePage(QWidget):
         CustomMessageBox.warning(
             self,
             "强制更新通知",
-            f"当前版本需要强制更新到 {latest_info['version']}，更新包已添加到下载列表。"
+            f"{i18n.get_text('current_version_needs_update')} {latest_info['version']}，{i18n.get_text('update_added_to_download_list')}"
         )
     
     def toggle_auto_check(self, checked):
@@ -1388,7 +1411,7 @@ class UpdatePage(QWidget):
                 self.current_update_source = None
                 
                 # 更新UI
-                self.status_label.setText("已清除更新缓存，将从主源获取数据")
+                self.status_label.setText(f"{i18n.get_text('update_cache_cleared')}")
                 self.status_label.setStyleSheet("color: #64B5F6; font-size: 13px; background-color: transparent;")
                 
                 # 更新最后检查时间显示
@@ -1404,8 +1427,8 @@ class UpdatePage(QWidget):
                 default_log = QLabel("""
                 <html>
                 <body style="color: #9E9E9E;">
-                <p>已清除更新日志信息</p>
-                <p>请点击检查更新按钮从主更新源获取最新信息</p>
+                <p>{i18n.get_text('update_cache_cleared')}</p>
+                <p>{i18n.get_text('click_check_update_button_to_get_latest_data')}</p>
                 </body>
                 </html>
                 """)
@@ -1418,45 +1441,45 @@ class UpdatePage(QWidget):
                 
                 # 添加通知
                 try:
-                    NotifyManager.success("更新缓存已清除")
+                    NotifyManager.success(i18n.get_text('update_cache_cleared'))
                 except Exception as e:
                     print(f"显示通知失败: {e}")
                 
                 # 弹出提示
                 CustomMessageBox.information(
                     self,
-                    "操作成功",
-                    "已成功清除更新缓存，请点击检查更新按钮从主更新源获取最新数据。"
+                    i18n.get_text('operation_successful'),
+                    i18n.get_text('update_cache_cleared')
                 )
             else:
-                self.status_label.setText("无需清除，更新缓存不存在")
+                self.status_label.setText(i18n.get_text('update_cache_does_not_exist'))
                 
                 # 添加通知
                 try:
-                    NotifyManager.info("更新缓存不存在，无需清除")
+                    NotifyManager.info(i18n.get_text('update_cache_does_not_exist'))
                 except Exception as e:
                     print(f"显示通知失败: {e}")
                     
                 CustomMessageBox.information(
                     self,
-                    "提示",
-                    "无需清除，更新缓存不存在。"
+                    i18n.get_text('提示'),
+                    i18n.get_text('update_cache_does_not_exist')
                 )
                 
         except Exception as e:
-            self.status_label.setText(f"清除缓存失败: {str(e)}")
+            self.status_label.setText(f"{i18n.get_text('clear_cache_failed')}: {str(e)}")
             self.status_label.setStyleSheet("color: #F44336; font-size: 13px; background-color: transparent;")
             
             # 添加通知
             try:
-                NotifyManager.error(f"清除缓存失败: {str(e)}")
+                NotifyManager.error(f"{i18n.get_text('clear_cache_failed')}: {str(e)}")
             except Exception as notify_error:
                 print(f"显示通知失败: {notify_error}")
                 
             CustomMessageBox.warning(
                 self,
-                "操作失败",
-                f"清除更新缓存失败: {str(e)}"
+                i18n.get_text('operation_failed'),
+                f"{i18n.get_text('clear_cache_failed')}: {str(e)}"
             )
     
     def compare_versions(self, version1, version2):

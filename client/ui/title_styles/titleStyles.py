@@ -2,6 +2,7 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSpacer
 from PySide6.QtCore import Qt, QPoint, Signal, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QAction, QFont
 from core.font.font_manager import FontManager
+from client.I18N.i18n import i18n
 import os
 import sys
 
@@ -33,6 +34,9 @@ class TitleBar(QWidget):
         # 拖动相关变量
         self.pressing = False
         self.start_point = QPoint(0, 0)
+        
+        # 连接语言变更信号
+        i18n.language_changed.connect(self.update_tray_menu_texts)
     
     def setup_system_tray(self):
         """初始化系统托盘"""
@@ -67,9 +71,9 @@ class TitleBar(QWidget):
                 self.tray_icon.setIcon(QIcon.fromTheme("application-x-executable"))
         
         # 创建托盘菜单
-        tray_menu = QMenu()
+        self.tray_menu = QMenu()
         # 设置菜单样式，与应用主题一致
-        tray_menu.setStyleSheet("""
+        self.tray_menu.setStyleSheet("""
             QMenu {
                 background-color: #1E1E1E;
                 color: #FFFFFF;
@@ -93,63 +97,82 @@ class TitleBar(QWidget):
         """)
         
         # 添加菜单项 - 使用字体图标
-        show_action = QAction("显示主窗口", self)
+        self.show_action = QAction(i18n.get_text("show_main_window"), self)
         # 设置图标如果有字体管理器
         if hasattr(self, 'font_manager') and self.font_manager:
             show_icon = self.font_manager.get_qicon("ic_fluent_window_24_regular")
             if show_icon:
-                show_action.setIcon(show_icon)
-        show_action.triggered.connect(self.show_window)
-        tray_menu.addAction(show_action)
+                self.show_action.setIcon(show_icon)
+        self.show_action.triggered.connect(self.show_window)
+        self.tray_menu.addAction(self.show_action)
         
         # 添加分隔线
-        tray_menu.addSeparator()
+        self.tray_menu.addSeparator()
         
         # 添加下载管理项
-        download_action = QAction("下载管理", self)
+        self.download_action = QAction(i18n.get_text("downloads"), self)
         if hasattr(self, 'font_manager') and self.font_manager:
             download_icon = self.font_manager.get_qicon("ic_fluent_arrow_download_24_regular")
             if download_icon:
-                download_action.setIcon(download_icon)
-        download_action.triggered.connect(lambda: self.switch_to_page("downloads"))
-        tray_menu.addAction(download_action)
+                self.download_action.setIcon(download_icon)
+        self.download_action.triggered.connect(lambda: self.switch_to_page("downloads"))
+        self.tray_menu.addAction(self.download_action)
         
         # 添加历史记录项
-        history_action = QAction("历史记录", self)
+        self.history_action = QAction(i18n.get_text("history"), self)
         if hasattr(self, 'font_manager') and self.font_manager:
             history_icon = self.font_manager.get_qicon("ic_fluent_history_24_regular")
             if history_icon:
-                history_action.setIcon(history_icon)
-        history_action.triggered.connect(lambda: self.switch_to_page("history"))
-        tray_menu.addAction(history_action)
+                self.history_action.setIcon(history_icon)
+        self.history_action.triggered.connect(lambda: self.switch_to_page("history"))
+        self.tray_menu.addAction(self.history_action)
         
         # 添加设置项
-        settings_action = QAction("设置", self)
+        self.settings_action = QAction(i18n.get_text("settings"), self)
         if hasattr(self, 'font_manager') and self.font_manager:
             settings_icon = self.font_manager.get_qicon("ic_fluent_settings_24_regular")
             if settings_icon:
-                settings_action.setIcon(settings_icon)
-        settings_action.triggered.connect(lambda: self.switch_to_page("settings"))
-        tray_menu.addAction(settings_action)
+                self.settings_action.setIcon(settings_icon)
+        self.settings_action.triggered.connect(lambda: self.switch_to_page("settings"))
+        self.tray_menu.addAction(self.settings_action)
         
         # 添加分隔线
-        tray_menu.addSeparator()
+        self.tray_menu.addSeparator()
         
         # 退出项
-        exit_action = QAction("退出程序", self)
+        self.exit_action = QAction(i18n.get_text("exit_app"), self)
         if hasattr(self, 'font_manager') and self.font_manager:
             exit_icon = self.font_manager.get_qicon("ic_fluent_power_24_regular")
             if exit_icon:
-                exit_action.setIcon(exit_icon)
+                self.exit_action.setIcon(exit_icon)
         # 修改退出动作，确保应用正确退出
-        exit_action.triggered.connect(self.exit_application)
-        tray_menu.addAction(exit_action)
+        self.exit_action.triggered.connect(self.exit_application)
+        self.tray_menu.addAction(self.exit_action)
         
         # 设置托盘菜单
-        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.setContextMenu(self.tray_menu)
         
         # 双击托盘图标显示窗口
         self.tray_icon.activated.connect(self.tray_activated)
+    
+    def update_tray_menu_texts(self):
+        # 更新托盘菜单文本
+        self.show_action.setText(i18n.get_text("show_main_window"))
+        self.download_action.setText(i18n.get_text("downloads"))
+        self.history_action.setText(i18n.get_text("history"))
+        self.settings_action.setText(i18n.get_text("settings"))
+        self.exit_action.setText(i18n.get_text("exit_app"))
+        
+        # 更新按钮提示
+        if hasattr(self, 'minimize_btn'):
+            self.minimize_btn.setToolTip(i18n.get_text("minimize"))
+        if hasattr(self, 'maximize_btn'):
+            if self.parent.isMaximized():
+                self.maximize_btn.setToolTip(i18n.get_text("restore"))
+            else:
+                self.maximize_btn.setToolTip(i18n.get_text("maximize"))
+        if hasattr(self, 'close_btn'):
+            self.close_btn.setToolTip(i18n.get_text("close"))
     
     def tray_activated(self, reason):
         """托盘图标被激活时的处理函数"""
@@ -177,11 +200,11 @@ class TitleBar(QWidget):
         if self.parent.isMaximized():
             self.parent.showNormal()
             # 恢复时显示最大化图标
-            self.set_button_icon(self.maximize_btn, "maximize", "最大化")
+            self.set_button_icon(self.maximize_btn, "maximize", i18n.get_text("maximize"))
         else:
             self.parent.showMaximized()
             # 最大化时显示还原图标
-            self.set_button_icon(self.maximize_btn, "arrow_maximize", "还原窗口")
+            self.set_button_icon(self.maximize_btn, "arrow_maximize", i18n.get_text("restore"))
     
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -244,7 +267,7 @@ class TitleBar(QWidget):
                 scaled_pixmap = pixmap.scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.logo_label.setPixmap(scaled_pixmap)
             else:
-                raise FileNotFoundError(f"Logo文件不存在: {icon_path}")
+                raise FileNotFoundError(f"{i18n.get_text('logo_not_found')}: {icon_path}")
         except:
             # 如果logo加载失败，使用文本替代
             self.logo_label = QLabel("H")
@@ -368,7 +391,7 @@ class TitleBar(QWidget):
                 background-color: rgba(255, 255, 255, 0.05);
             }
         """)
-        self.set_button_icon(self.maximize_btn, "maximize", "最大化")
+        self.set_button_icon(self.maximize_btn, "maximize", i18n.get_text("maximize"))
         self.maximize_btn.clicked.connect(self.toggle_maximize)
         right_layout.addWidget(self.maximize_btn)
         

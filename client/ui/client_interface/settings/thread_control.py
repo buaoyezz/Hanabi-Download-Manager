@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt, Signal
 
 from core.font.font_manager import FontManager
 from client.ui.components.customNotify import NotifyManager
+from client.I18N.i18n import i18n
 
 
 class ThreadControlWidget(QWidget):
@@ -23,6 +24,9 @@ class ThreadControlWidget(QWidget):
         # 创建UI
         self.setup_ui()
         
+        # 连接语言变更信号，动态更新UI文本
+        i18n.language_changed.connect(self.update_ui_texts)
+        
     def load_config(self):
         """从配置文件加载下载线程相关设置"""
         from client.ui.client_interface.settings.config import config
@@ -40,7 +44,7 @@ class ThreadControlWidget(QWidget):
                 self.threads_spinbox.setValue(self.max_threads_per_task)
                 
         except Exception as e:
-            print(f"[ERROR] 加载线程设置失败: {str(e)}")
+            print(f"[ERROR] {i18n.get_text('thread_settings_load_failed')}: {str(e)}")
         
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -48,8 +52,8 @@ class ThreadControlWidget(QWidget):
         main_layout.setSpacing(20)
         
         # 创建线程设置组
-        threads_group = QGroupBox("单任务下载线程")
-        threads_group.setStyleSheet("""
+        self.threads_group = QGroupBox(i18n.get_text("single_task_threads"))
+        self.threads_group.setStyleSheet("""
             QGroupBox {
                 border: 1px solid #3C3C3C;
                 border-radius: 5px;
@@ -63,24 +67,24 @@ class ThreadControlWidget(QWidget):
                 padding: 0 5px;
             }
         """)
-        self.font_manager.apply_font(threads_group)
+        self.font_manager.apply_font(self.threads_group)
         
-        threads_layout = QVBoxLayout(threads_group)
+        threads_layout = QVBoxLayout(self.threads_group)
         
         # 线程数量说明
-        threads_description = QLabel("设置每个下载任务的最大线程数。增加线程数可以提高单文件下载速度，但过多的线程可能导致连接不稳定或被服务器限制。")
-        threads_description.setWordWrap(True)
-        threads_description.setStyleSheet("color: #9E9E9E;")
-        self.font_manager.apply_font(threads_description)
-        threads_layout.addWidget(threads_description)
+        self.threads_description = QLabel(i18n.get_text("threads_description"))
+        self.threads_description.setWordWrap(True)
+        self.threads_description.setStyleSheet("color: #9E9E9E;")
+        self.font_manager.apply_font(self.threads_description)
+        threads_layout.addWidget(self.threads_description)
         
         # 线程数量控制
         threads_control_layout = QHBoxLayout()
         
-        threads_label = QLabel("每任务线程数:")
-        threads_label.setStyleSheet("color: #FFFFFF;")
-        self.font_manager.apply_font(threads_label)
-        threads_control_layout.addWidget(threads_label)
+        self.threads_label = QLabel(i18n.get_text("threads_per_task") + ":")
+        self.threads_label.setStyleSheet("color: #FFFFFF;")
+        self.font_manager.apply_font(self.threads_label)
+        threads_control_layout.addWidget(self.threads_label)
         
         self.threads_spinbox = QSpinBox()
         self.threads_spinbox.setRange(1, 32)
@@ -132,7 +136,7 @@ class ThreadControlWidget(QWidget):
         threads_control_layout.addWidget(threads_slider, 1)
         
         threads_layout.addLayout(threads_control_layout)
-        main_layout.addWidget(threads_group)
+        main_layout.addWidget(self.threads_group)
         
         # 弹性空间
         main_layout.addStretch(1)
@@ -143,7 +147,7 @@ class ThreadControlWidget(QWidget):
         button_layout.setSpacing(10)
         
         # 重置按钮
-        self.reset_btn = QPushButton("重置为默认值")
+        self.reset_btn = QPushButton(i18n.get_text("reset_to_default"))
         self.reset_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2D2D30;
@@ -164,7 +168,7 @@ class ThreadControlWidget(QWidget):
         button_layout.addStretch(1)
         
         # 应用按钮
-        self.apply_btn = QPushButton("应用")
+        self.apply_btn = QPushButton(i18n.get_text("apply"))
         self.apply_btn.setStyleSheet("""
             QPushButton {
                 background-color: #0078D7;
@@ -183,6 +187,21 @@ class ThreadControlWidget(QWidget):
         
         main_layout.addLayout(button_layout)
     
+    def update_ui_texts(self):
+        """更新界面上的所有文本"""
+        # 更新组标题
+        self.threads_group.setTitle(i18n.get_text("single_task_threads"))
+        
+        # 更新描述
+        self.threads_description.setText(i18n.get_text("threads_description"))
+        
+        # 更新标签
+        self.threads_label.setText(i18n.get_text("threads_per_task") + ":")
+        
+        # 更新按钮
+        self.reset_btn.setText(i18n.get_text("reset_to_default"))
+        self.apply_btn.setText(i18n.get_text("apply"))
+    
     def reset_settings(self):
         self.threads_spinbox.setValue(8)
     
@@ -197,11 +216,11 @@ class ThreadControlWidget(QWidget):
             self.config_manager.save_config()
             
             # 显示成功通知
-            self.notify_manager.show_message("设置已保存", "下载线程设置已成功更新")
+            self.notify_manager.show_message(i18n.get_text("settings_saved"), i18n.get_text("thread_settings_updated"))
             
             # 发送设置变更信号
             self.settingsChanged.emit()
             
         except Exception as e:
             # 显示错误通知
-            self.notify_manager.show_message("设置保存失败", f"保存设置时出错: {str(e)}", level="error")
+            self.notify_manager.show_message(i18n.get_text("settings_error"), f"{i18n.get_text('save_settings_failed')}: {str(e)}", is_error=True)

@@ -17,6 +17,7 @@ from client.ui.components.progressBar import ProgressBar
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.client_interface.task_window import TaskWindow, RoundedTaskFrame
 from client.ui.components.customNotify import NotifyManager
+from client.I18N.i18n import i18n
 
 class DownloadWindow(QWidget):
     """下载管理窗口，负责显示下载任务和控制下载操作"""
@@ -49,6 +50,24 @@ class DownloadWindow(QWidget):
         # 创建任务列表区域
         self._create_tasks_area()
         
+        # 连接语言变更信号
+        i18n.language_changed.connect(self.update_ui_texts)
+        
+    def update_ui_texts(self):
+        """更新UI上的所有文本以匹配当前语言"""
+        # URL输入区域标题
+        self.url_title.setText(i18n.get_text("add_download"))
+        
+        # URL输入框提示文本
+        self.url_input.setPlaceholderText(i18n.get_text("enter_download_link"))
+        
+        # 按钮文本
+        self.download_text_label.setText(i18n.get_text("start_download"))
+        self.path_text.setText(i18n.get_text("save_location"))
+        
+        # 保存路径标签
+        self.save_path_label.setText(f"{i18n.get_text('current_save_location')}: {self.save_path}")
+        
     def _create_url_input_section(self):
         """创建URL输入和按钮区域"""
         top_card = RoundedTaskFrame()
@@ -58,11 +77,11 @@ class DownloadWindow(QWidget):
         top_card_layout.setSpacing(15)
         
         # URL输入框标题
-        url_title = QLabel("添加下载")
-        url_title.setAlignment(Qt.AlignCenter)
-        url_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold; background-color: transparent;")
-        self.font_manager.apply_font(url_title)
-        top_card_layout.addWidget(url_title)
+        self.url_title = QLabel(i18n.get_text("add_download"))
+        self.url_title.setAlignment(Qt.AlignCenter)
+        self.url_title.setStyleSheet("color: #FFFFFF; font-size: 16px; font-weight: bold; background-color: transparent;")
+        self.font_manager.apply_font(self.url_title)
+        top_card_layout.addWidget(self.url_title)
         
         # URL输入框和按钮区域
         url_input_layout = QHBoxLayout()
@@ -70,7 +89,7 @@ class DownloadWindow(QWidget):
         
         # URL输入框
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("请输入下载链接...")
+        self.url_input.setPlaceholderText(i18n.get_text("enter_download_link"))
         self.url_input.setMinimumHeight(45)
         self.font_manager.apply_font(self.url_input)
         self.url_input.setStyleSheet("""
@@ -95,7 +114,7 @@ class DownloadWindow(QWidget):
         top_card_layout.addLayout(url_input_layout)
         
         # 显示保存路径
-        self.save_path_label = QLabel(f"当前保存位置: {self.save_path}")
+        self.save_path_label = QLabel(f"{i18n.get_text('current_save_location')}: {self.save_path}")
         self.save_path_label.setStyleSheet("color: #9E9E9E; font-size: 12px; background-color: transparent;")
         self.save_path_label.setAlignment(Qt.AlignCenter)
         top_card_layout.addWidget(self.save_path_label)
@@ -142,10 +161,10 @@ class DownloadWindow(QWidget):
         download_btn_layout.addWidget(icon_label)
         
         # 添加文本
-        text_label = QLabel("开始下载")
-        text_label.setStyleSheet("color: #FFFFFF; background-color: transparent; font-weight: bold;")
-        self.font_manager.apply_font(text_label)
-        download_btn_layout.addWidget(text_label)
+        self.download_text_label = QLabel(i18n.get_text("start_download"))
+        self.download_text_label.setStyleSheet("color: #FFFFFF; background-color: transparent; font-weight: bold;")
+        self.font_manager.apply_font(self.download_text_label)
+        download_btn_layout.addWidget(self.download_text_label)
         
         # 连接点击事件
         self.download_btn.clicked.connect(self._on_download_clicked)
@@ -188,11 +207,11 @@ class DownloadWindow(QWidget):
         path_btn_layout.addWidget(folder_icon)
         
         # 创建文本
-        path_text = QLabel("保存位置")
-        path_text.setStyleSheet("color: #FFFFFF; background-color: transparent;")
-        path_text.setMinimumWidth(70)
-        path_text.setAlignment(Qt.AlignCenter)
-        path_btn_layout.addWidget(path_text)
+        self.path_text = QLabel(i18n.get_text("save_location"))
+        self.path_text.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+        self.path_text.setMinimumWidth(70)
+        self.path_text.setAlignment(Qt.AlignCenter)
+        path_btn_layout.addWidget(self.path_text)
         
         # 连接事件
         self.path_btn.clicked.connect(self._on_select_path_clicked)
@@ -221,10 +240,10 @@ class DownloadWindow(QWidget):
             self.url_input.clear()
             
             # 显示通知
-            NotifyManager.info(f"正在准备下载: {url}")
+            NotifyManager.info(f"{i18n.get_text('preparing_download')}: {url}")
         else:
             # 显示错误通知
-            NotifyManager.warning("请输入有效的下载链接")
+            NotifyManager.warning(i18n.get_text("enter_valid_link"))
     
     def _on_dialog_download_requested(self, task_data):
         """处理弹窗发出的下载请求"""
@@ -232,28 +251,28 @@ class DownloadWindow(QWidget):
         self.downloadAdded.emit(task_data)
         
         # 显示通知
-        filename = task_data.get("file_name", "未知文件")
-        NotifyManager.info(f"已添加下载任务: {filename}")
+        filename = task_data.get("file_name", i18n.get_text("unknown_file"))
+        NotifyManager.info(f"{i18n.get_text('download_task_added')}: {filename}")
     
     def _on_dialog_download_completed(self, task_data):
         """处理弹窗发出的下载完成信号"""
         # 在任务窗口添加已完成的任务
-        task_data["status"] = "已完成"
+        task_data["status"] = i18n.get_text("completed")
         task_data["progress"] = 100
         self.add_download_task(task_data)
         
         # 显示通知
-        filename = task_data.get("file_name", "未知文件")
-        NotifyManager.success(f"下载完成: {filename}")
+        filename = task_data.get("file_name", i18n.get_text("unknown_file"))
+        NotifyManager.success(f"{i18n.get_text('download_completed')}: {filename}")
     
     def _on_select_path_clicked(self):
         """选择保存路径按钮点击事件处理"""
-        folder_path = QFileDialog.getExistingDirectory(self, "选择保存位置", self.save_path)
+        folder_path = QFileDialog.getExistingDirectory(self, i18n.get_text("select_save_location"), self.save_path)
         if folder_path:
             self.set_save_path(folder_path)
             
             # 显示通知
-            NotifyManager.info(f"保存位置已更改: {folder_path}")
+            NotifyManager.info(f"{i18n.get_text('save_location_changed')}: {folder_path}")
         
     def _create_tasks_area(self):
         """创建下载任务列表区域"""
@@ -298,12 +317,12 @@ class DownloadWindow(QWidget):
         """
         try:
             if not hasattr(self, 'task_window') or not self.task_window:
-                logging.error("任务窗口未初始化")
+                logging.error(i18n.get_text("task_window_not_initialized"))
                 return -1
                 
             # 确保任务数据包含必要字段
             if not task_data.get("url"):
-                logging.error("任务数据缺少URL")
+                logging.error(i18n.get_text("task_data_missing_url"))
                 return -1
                 
             # 为任务添加ID和时间戳
@@ -332,11 +351,11 @@ class DownloadWindow(QWidget):
             if row >= 0:
                 # 发送添加下载任务信号
                 self.downloadAdded.emit(task_data)
-                logging.info(f"已添加下载任务: {task_data.get('url')}")
+                logging.info(f"{i18n.get_text('download_task_added')}: {task_data.get('url')}")
                 
             return row
         except Exception as e:
-            logging.error(f"添加下载任务失败: {e}")
+            logging.error(f"{i18n.get_text('add_download_task_failed')}: {e}")
             import traceback
             traceback.print_exc()
             return -1
@@ -383,7 +402,7 @@ class DownloadWindow(QWidget):
             return f"download_{timestamp}.bin"
             
         except Exception as e:
-            logging.warning(f"从URL提取文件名失败: {e}")
+            logging.warning(f"{i18n.get_text('extract_filename_failed')}: {e}")
             timestamp = int(time.time())
             return f"download_{timestamp}.bin"
     
@@ -398,7 +417,7 @@ class DownloadWindow(QWidget):
         """
         try:
             if not filename:
-                return "未命名文件"
+                return i18n.get_text("unnamed_file")
                 
             # 处理URL编码
             try:
@@ -406,7 +425,7 @@ class DownloadWindow(QWidget):
                 if decoded != filename:
                     filename = decoded
             except Exception as e:
-                logging.warning(f"URL解码文件名失败: {e}")
+                logging.warning(f"{i18n.get_text('url_decode_failed')}: {e}")
                 
             # 处理Windows非法字符
             if os.name == 'nt':  # Windows
@@ -420,8 +439,8 @@ class DownloadWindow(QWidget):
                 
             return filename
         except Exception as e:
-            logging.error(f"处理文件名失败: {e}")
-            return "未命名文件"
+            logging.error(f"{i18n.get_text('process_filename_failed')}: {e}")
+            return i18n.get_text("unnamed_file")
     
     def process_browser_extension_download(self, download_data):
         """处理来自浏览器扩展的下载请求
@@ -436,7 +455,7 @@ class DownloadWindow(QWidget):
             # 从下载数据中提取必要信息
             url = download_data.get("url", "")
             if not url:
-                raise ValueError("下载数据缺少URL")
+                raise ValueError(i18n.get_text("download_data_missing_url"))
                 
             # 获取文件名 - 优先使用提供的文件名，否则从URL提取
             filename = download_data.get("filename", "")
@@ -449,9 +468,9 @@ class DownloadWindow(QWidget):
             task_data = {
                 "url": url,
                 "file_name": filename,
-                "total_size": download_data.get("size", "获取中..."),
+                "total_size": download_data.get("size", i18n.get_text("fetching")),
                 "progress": 0,
-                "status": "初始化中",
+                "status": i18n.get_text("initializing"),
                 "speed": "0 B/s",
                 "save_path": self.save_path,
                 "start_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -468,7 +487,7 @@ class DownloadWindow(QWidget):
             return task_data
             
         except Exception as e:
-            logging.error(f"处理浏览器扩展下载失败: {e}")
+            logging.error(f"{i18n.get_text('process_browser_download_failed')}: {e}")
             raise
     
     def update_task_progress(self, row, progress_data, file_size=0):
@@ -521,17 +540,17 @@ class DownloadWindow(QWidget):
     def _on_task_paused(self, row):
         """任务暂停事件处理"""
         self.taskPaused.emit(row)
-        logging.info(f"暂停任务: {row}")
+        logging.info(f"{i18n.get_text('pause_task')}: {row}")
         
     def _on_task_resumed(self, row):
         """任务恢复事件处理"""
         self.taskResumed.emit(row)
-        logging.info(f"恢复任务: {row}")
+        logging.info(f"{i18n.get_text('resume_task')}: {row}")
         
     def _on_task_cancelled(self, row):
         """任务取消事件处理"""
         self.taskCancelled.emit(row)
-        logging.info(f"取消任务: {row}")
+        logging.info(f"{i18n.get_text('cancel_task')}: {row}")
         
     def _on_file_opened(self, file_path):
         """打开文件事件处理"""
@@ -554,13 +573,13 @@ class DownloadWindow(QWidget):
                     subprocess.call(['open', file_path])
                 else:  # Linux
                     subprocess.call(['xdg-open', file_path])
-                logging.info(f"已打开文件: {file_path}")
+                logging.info(f"{i18n.get_text('file_opened')}: {file_path}")
             else:
-                logging.warning(f"尝试打开不存在的文件: {file_path}")
-                QMessageBox.warning(self, "文件不存在", f"无法找到文件:\n{file_path}")
+                logging.warning(f"{i18n.get_text('file_not_exist')}: {file_path}")
+                QMessageBox.warning(self, i18n.get_text("file_not_exist"), f"{i18n.get_text('file_not_found')}:\n{file_path}")
         except Exception as e:
-            logging.error(f"打开文件失败: {e}")
-            QMessageBox.critical(self, "打开失败", f"无法打开文件: {e}")
+            logging.error(f"{i18n.get_text('open_file_failed')}: {e}")
+            QMessageBox.critical(self, i18n.get_text("open_failed"), f"{i18n.get_text('cannot_open_file')}: {e}")
     
     def _open_folder(self, folder_path):
         """打开文件夹"""
@@ -575,13 +594,13 @@ class DownloadWindow(QWidget):
                     subprocess.call(['open', folder_path])
                 else:  # Linux
                     subprocess.call(['xdg-open', folder_path])
-                logging.info(f"已打开文件夹: {folder_path}")
+                logging.info(f"{i18n.get_text('folder_opened')}: {folder_path}")
             else:
-                logging.warning(f"尝试打开不存在的文件夹: {folder_path}")
-                QMessageBox.warning(self, "文件夹不存在", f"无法找到文件夹:\n{folder_path}")
+                logging.warning(f"{i18n.get_text('folder_not_exist')}: {folder_path}")
+                QMessageBox.warning(self, i18n.get_text("folder_not_exist"), f"{i18n.get_text('folder_not_found')}:\n{folder_path}")
         except Exception as e:
-            logging.error(f"打开文件夹失败: {e}")
-            QMessageBox.critical(self, "打开失败", f"无法打开文件夹: {e}")
+            logging.error(f"{i18n.get_text('open_folder_failed')}: {e}")
+            QMessageBox.critical(self, i18n.get_text("open_failed"), f"{i18n.get_text('cannot_open_folder')}: {e}")
         
     def set_save_path(self, path):
         """设置保存路径
@@ -592,11 +611,11 @@ class DownloadWindow(QWidget):
         if path and os.path.isdir(path):
             self.save_path = path
             if hasattr(self, 'save_path_label'):
-                self.save_path_label.setText(f"当前保存位置: {self.save_path}")
+                self.save_path_label.setText(f"{i18n.get_text('current_save_location')}: {self.save_path}")
             self.saveFolderChanged.emit(path)
             
             # 显示通知
-            NotifyManager.info(f"下载保存位置已更新: {path}")
+            NotifyManager.info(f"{i18n.get_text('download_location_updated')}: {path}")
             
             return True
         return False
@@ -612,7 +631,7 @@ class DownloadWindow(QWidget):
         """
         try:
             if not history_record or "url" not in history_record:
-                logging.error("历史记录数据缺少URL")
+                logging.error(i18n.get_text("history_record_missing_url"))
                 return -1
                 
             # 创建任务数据
@@ -635,12 +654,12 @@ class DownloadWindow(QWidget):
             dialog.downloadCompleted.connect(self._on_dialog_download_completed)
             
             # 记录创建的弹窗
-            logging.info(f"[download_window.py] 已为历史记录下载 [URL: {task_data['url']}] 创建下载弹窗")
+            logging.info(f"[download_window.py] {i18n.get_text('created_dialog_for_history')}: {task_data['url']}")
             
             return 0  # 返回成功
             
         except Exception as e:
-            logging.error(f"从历史记录重新下载失败: {e}")
+            logging.error(f"{i18n.get_text('redownload_from_history_failed')}: {e}")
             return -1
             
     def clear_tasks(self):
@@ -671,7 +690,7 @@ class DownloadWindow(QWidget):
             # 从下载数据中提取必要信息
             url = download_data.get("url", "")
             if not url:
-                raise ValueError("下载数据缺少URL")
+                raise ValueError(i18n.get_text("download_data_missing_url"))
                 
             # 获取文件名 - 优先使用提供的文件名，否则从URL提取
             filename = download_data.get("filename", "")
@@ -707,17 +726,17 @@ class DownloadWindow(QWidget):
             dialog.downloadCompleted.connect(self._on_dialog_download_completed)
             
             # 记录创建的弹窗
-            logging.info(f"[download_window.py] 已为下载请求 [ID: {request_id}] 创建下载弹窗")
+            logging.info(f"[download_window.py] {i18n.get_text('created_dialog_for_request')}: {request_id}")
             
             # 显示通知
-            NotifyManager.info(f"浏览器下载请求: {filename}")
+            NotifyManager.info(f"{i18n.get_text('browser_download_request')}: {filename}")
             
             return True
             
         except Exception as e:
-            logging.error(f"处理浏览器下载请求失败: {e}")
+            logging.error(f"{i18n.get_text('process_browser_download_failed')}: {e}")
             
             # 显示错误通知
-            NotifyManager.error(f"处理浏览器下载请求失败: {str(e)}")
+            NotifyManager.error(f"{i18n.get_text('process_browser_download_failed')}: {str(e)}")
             
             return False
