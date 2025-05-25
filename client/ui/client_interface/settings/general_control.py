@@ -33,6 +33,19 @@ class GeneralControlWidget(QWidget):
         # 连接语言选择框的变更信号
         self.language_combo.currentIndexChanged.connect(self.on_language_changed)
 
+    def _get_app_path_args(self):
+        """获取应用程序可执行文件及其参数列表."""
+        if getattr(sys, 'frozen', False):
+            # PyInstaller打包的环境, sys.executable 是exe的绝对路径
+            return [sys.executable]
+        else:
+            # 开发环境
+            python_path = sys.executable
+            # 当前文件路径: client/ui/client_interface/settings/general_control.py
+            # main.py 路径: ../../../../main.py (相对于当前文件)
+            main_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../main.py'))
+            return [python_path, main_script_path]
+
     def load_config(self):
         
         try:
@@ -49,7 +62,12 @@ class GeneralControlWidget(QWidget):
             start_config = self.config_manager.get("startup", {})
             auto_start = start_config.get("auto_start", False)
             check_updates = start_config.get("check_update", True)
-            restore_tasks = start_config.get("restore_tasks", True)
+            # restore_tasks = start_config.get("restore_tasks", True) # 旧的ambiguous key
+
+            # 窗口行为设置 (从 "window" section 读取)
+            window_config = self.config_manager.get("window", {})
+            start_minimized = window_config.get("start_minimized", False) # 默认为 False
+            close_to_tray = window_config.get("close_to_tray", True)     # 默认为 True
             
             # 设置控件值
             # 设置主题和语言选择
@@ -62,8 +80,10 @@ class GeneralControlWidget(QWidget):
             self.show_notifications_checkbox.setChecked(show_notifications)
             self.auto_start_checkbox.setChecked(auto_start)
             self.auto_update_checkbox.setChecked(check_updates)
-            self.start_minimized_checkbox.setChecked(restore_tasks)
-            self.close_to_tray_checkbox.setChecked(restore_tasks)
+            # self.start_minimized_checkbox.setChecked(restore_tasks) # 旧
+            # self.close_to_tray_checkbox.setChecked(restore_tasks)   # 旧
+            self.start_minimized_checkbox.setChecked(start_minimized) # 新
+            self.close_to_tray_checkbox.setChecked(close_to_tray)     # 新
             
         except Exception as e:
             self.settings_applied.emit(False, f"{i18n.get_text('settings_load_failed', str(e))}")
@@ -404,7 +424,7 @@ class GeneralControlWidget(QWidget):
             startup_config = {
                 "auto_start": self.auto_start_checkbox.isChecked(),
                 "check_update": self.auto_update_checkbox.isChecked(),
-                "restore_tasks": self.start_minimized_checkbox.isChecked()
+                # "restore_tasks": self.start_minimized_checkbox.isChecked() # 移除此行
             }
             
             # 统计选项
@@ -452,11 +472,12 @@ class GeneralControlWidget(QWidget):
     def _setup_autostart(self):
         """设置开机自启动"""
         try:
-            # 获取应用程序路径
-            app_path = self._get_app_path()
+            # 获取应用程序路径参数
+            app_args = self._get_app_path_args()
             
             if sys.platform == 'win32':  # Windows
                 import winreg
+                command_line = subprocess.list2cmdline(app_args)
                 # 打开注册表项
                 key = winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER,
@@ -470,7 +491,7 @@ class GeneralControlWidget(QWidget):
                     "HanabiDownloadManager",
                     0,
                     winreg.REG_SZ,
-                    f'"{app_path}"'
+                    command_line #直接使用格式化好的命令行
                 )
                 winreg.CloseKey(key)
                 self.notify_manager.show_message("开机启动", "已设置开机自动启动")
@@ -482,6 +503,13 @@ class GeneralControlWidget(QWidget):
                 
                 # 创建plist文件
                 plist_path = os.path.join(launch_agents_dir, "com.hanabi.downloadmanager.plist")
+                
+                program_arguments_xml = ""
+                for arg in app_args:
+                    # XML 转义特殊字符，例如 &, <, > 等，但路径本身通常不需要
+                    # 这里假设路径已经是安全的，或不需要 XML 转义
+                    program_arguments_xml += f"        <string>{arg}</string>\n"
+
                 plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -490,7 +518,7 @@ class GeneralControlWidget(QWidget):
     <string>com.hanabi.downloadmanager</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{app_path}</string>
+{program_arguments_xml.rstrip()}
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -509,11 +537,12 @@ class GeneralControlWidget(QWidget):
                 autostart_dir = os.path.expanduser("~/.config/autostart")
                 os.makedirs(autostart_dir, exist_ok=True)
                 
+                exec_command = subprocess.list2cmdline(app_args)
                 desktop_path = os.path.join(autostart_dir, "hanabidownloadmanager.desktop")
                 desktop_content = f'''[Desktop Entry]
 Type=Application
 Name=Hanabi Download Manager
-Exec={app_path}
+Exec={exec_command}
 Terminal=false
 X-GNOME-Autostart-enabled=true
 '''
@@ -577,15 +606,16 @@ X-GNOME-Autostart-enabled=true
     
     def _get_app_path(self):
         """获取应用程序可执行文件路径"""
+        # 此方法不再直接使用，由 _get_app_path_args() 替代以提供更灵活的参数列表
+        # 保留此方法以防其他地方意外调用，但其逻辑已合并到 _get_app_path_args
         if getattr(sys, 'frozen', False):
-            # PyInstaller打包的环境
             return sys.executable
         else:
-            # 开发环境，使用python路径运行main.py
             python_path = sys.executable
             main_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../main.py'))
-            return f"{python_path} {main_script}"
-    
+            # return f"{python_path} {main_script}" # 旧的简单拼接方式
+            return subprocess.list2cmdline([python_path, main_script])
+
     def _apply_close_to_tray_setting(self, enabled):
         """应用关闭到托盘设置"""
         # 保存到配置中
