@@ -78,31 +78,40 @@ class ModernNotifyAnimation(QWidget):
     def __del__(self):
         """析构函数，确保安全清理资源"""
         try:
-            # 停止所有动画
-            if hasattr(self, 'show_group'):
-                self.show_group.stop()
-            if hasattr(self, 'hide_group'):
-                self.hide_group.stop()
-            if hasattr(self, 'position_anim'):
-                self.position_anim.stop()
-                
+            # 使用hasattr和getattr的组合来安全检查对象是否还存在
+            # 避免直接访问可能已删除的C++对象
+            
+            # 安全地停止所有动画
+            animations_to_check = ['show_group', 'hide_group', 'position_anim']
+            for anim_name in animations_to_check:
+                if hasattr(self, anim_name):
+                    try:
+                        # 不直接访问对象，而是使用更安全的方式检查
+                        animation = getattr(self, anim_name, None)
+                        if animation is not None:
+                            # 使用异常处理来安全地尝试停止
+                            try:
+                                animation.stop()
+                            except RuntimeError:
+                                # 忽略C++对象已删除的错误
+                                pass
+                    except Exception:
+                        # 忽略所有错误
+                        pass
+            
             # 停止定时器
             if hasattr(self, 'auto_hide_timer') and self.auto_hide_timer:
-                self.auto_hide_timer.stop()
+                try:
+                    self.auto_hide_timer.stop()
+                except Exception:
+                    pass
                 
-            # 移除信号连接
-            try:
-                if hasattr(self, 'show_group'):
-                    self.show_group.finished.disconnect()
-                if hasattr(self, 'hide_group'):
-                    self.hide_group.finished.disconnect()
-                if hasattr(self, 'position_anim'):
-                    self.position_anim.finished.disconnect()
-            except:
-                pass
+            # 不尝试移除信号连接 - 这很可能导致访问已删除的C++对象
+            # 信号连接会在对象被GC时自动清理
                 
         except Exception as e:
-            log.error(f"动画对象析构时发生错误: {e}")
+            # 捕获但不记录错误，避免在析构过程中产生更多日志
+            pass
         
     def _init_animations(self):
         """初始化所有动画组件"""
@@ -173,9 +182,6 @@ class ModernNotifyAnimation(QWidget):
         
     def _connect_signals(self):
         """连接动画信号"""
-        # 修复：使用started()方法时而不是信号
-        # 原来错误的代码：self.show_group.started.connect(...)
-        # 修改为使用自定义方法：
         # 创建开始动画前的函数
         def on_show_animation_start():
             self.is_animating = True
@@ -276,7 +282,7 @@ class ModernNotifyAnimation(QWidget):
                 
             # 计算位置
             if end_pos is None:
-                end_pos = self._calculate_position(self.current_index)
+                end_pos = self._calculate_right_bottom_position(self.current_index)
                 
             if start_pos is None:
                 # 从屏幕右侧滑入
@@ -433,52 +439,110 @@ class ModernNotifyAnimation(QWidget):
         
     def update_position(self, new_index):
         """更新通知位置（用于队列重新排列）"""
-        if self.is_animating or new_index == self.current_index:
-            return False
+        try:
+            # 检查条件：是否正在动画中或索引未变
+            if self.is_animating or new_index == self.current_index:
+                return False
+                
+            self.target_index = new_index
+            new_pos = self._calculate_position(new_index)
             
-        self.target_index = new_index
-        new_pos = self._calculate_position(new_index)
-        
-        # 添加微妙的缩放效果
-        scale_anim = QPropertyAnimation(self, b"scale")
-        scale_anim.setDuration(200)
-        scale_anim.setStartValue(1.0)
-        scale_anim.setKeyValueAt(0.5, 0.98)
-        scale_anim.setEndValue(1.0)
-        scale_anim.setEasingCurve(QEasingCurve.InOutQuad)
-        
-        # 位置动画
-        self.position_anim.setStartValue(self.pos())
-        self.position_anim.setEndValue(new_pos)
-        
-        # 创建序列动画组
-        sequence = QSequentialAnimationGroup()
-        parallel = QParallelAnimationGroup()
-        parallel.addAnimation(self.position_anim)
-        parallel.addAnimation(scale_anim)
-        sequence.addAnimation(parallel)
-        
-        sequence.start()
-        self.position_updated.emit(new_index)
-        
-        log.debug(f"通知位置更新: {self.current_index} -> {new_index}")
-        return True
+            # 安全性检查：确保动画对象有效
+            animations_valid = True
+            
+            # 检查位置动画是否有效
+            if not hasattr(self, 'position_anim') or self.position_anim is None:
+                log.warning(f"位置动画对象无效，重新创建")
+                try:
+                    self.position_anim = QPropertyAnimation(self, b"pos")
+                    self.position_anim.setDuration(self.config['position_duration'])
+                    self.position_anim.setEasingCurve(QEasingCurve.OutCubic)
+                    self.position_anim.finished.connect(lambda: 
+                        setattr(self, 'current_index', self.target_index)
+                    )
+                except Exception as e:
+                    log.error(f"重新创建位置动画失败: {e}")
+                    animations_valid = False
+            
+            # 如果动画不可用，直接移动位置
+            if not animations_valid:
+                self.move(new_pos)
+                self.current_index = new_index
+                self.position_updated.emit(new_index)
+                log.debug(f"通知位置直接更新(无动画): {self.current_index} -> {new_index}")
+                return True
+            
+            # 尝试创建和启动动画 - 使用try-except确保安全
+            try:
+                # 添加微妙的缩放效果
+                scale_anim = QPropertyAnimation(self, b"scale")
+                scale_anim.setDuration(200)
+                scale_anim.setStartValue(1.0)
+                scale_anim.setKeyValueAt(0.5, 0.98)
+                scale_anim.setEndValue(1.0)
+                scale_anim.setEasingCurve(QEasingCurve.InOutQuad)
+                
+                # 位置动画
+                self.position_anim.stop()  # 停止可能正在进行的动画
+                self.position_anim.setStartValue(self.pos())
+                self.position_anim.setEndValue(new_pos)
+                
+                # 创建序列动画组并启动
+                sequence = QSequentialAnimationGroup(self)  # 使用self作为父对象确保不会被提前回收
+                parallel = QParallelAnimationGroup(self)    # 同上
+                
+                parallel.addAnimation(self.position_anim)
+                parallel.addAnimation(scale_anim)
+                sequence.addAnimation(parallel)
+                
+                # 保存对动画组的引用，防止被垃圾回收
+                self._current_position_anim_group = sequence
+                
+                sequence.start()
+                self.position_updated.emit(new_index)
+                
+                log.debug(f"通知位置更新: {self.current_index} -> {new_index}")
+                return True
+            except Exception as e:
+                log.error(f"创建或启动位置更新动画失败: {e}")
+                # 动画失败时的备用方案：直接移动
+                try:
+                    self.move(new_pos)
+                    self.current_index = new_index
+                    self.position_updated.emit(new_index)
+                    log.debug(f"通知位置直接更新(动画失败): {self.current_index} -> {new_index}")
+                    return True
+                except Exception as e2:
+                    log.error(f"直接更新位置也失败: {e2}")
+                    return False
+        except Exception as e:
+            log.error(f"更新位置时发生异常: {e}")
+            return False
         
     # === 辅助方法 ===
     def _calculate_position(self, index):
-        """计算指定索引的位置"""
-        if not self.parent():
-            return QPoint(100, 100)
-            
-        parent_rect = self.parent().rect()
+        """计算指定索引的位置 - 将使用_calculate_right_bottom_position"""
+        return self._calculate_right_bottom_position(index)
+        
+    def _calculate_right_bottom_position(self, index):
+        """计算通知在屏幕右下角的位置"""
         widget_height = self.config['notification_height']
         spacing = self.config['spacing']
         margin_right = self.config['margin_right']
         margin_bottom = self.config['margin_bottom']
         
-        x = parent_rect.width() - self.width() - margin_right
-        y = (parent_rect.height() - margin_bottom - 
-             (index + 1) * (widget_height + spacing))
+        # 获取屏幕尺寸
+        screen = QApplication.primaryScreen().availableGeometry()
+        screen_width = screen.width()
+        screen_height = screen.height()
+        
+        # 计算右下角位置
+        x = screen_width - self.width() - margin_right
+        y = screen_height - self.height() - margin_bottom - (index * (widget_height + spacing))
+        
+        # 确保位置不会超出屏幕
+        x = max(10, min(x, screen_width - self.width() - 10))
+        y = max(10, min(y, screen_height - self.height() - 10))
         
         return QPoint(x, y)
         
@@ -568,19 +632,66 @@ class NotificationAnimationManager:
         
     def _on_notification_hidden(self, notification):
         """通知隐藏后的处理"""
-        if notification in self.active_notifications:
-            index = self.active_notifications.index(notification)
-            self.active_notifications.remove(notification)
-            
-            # 更新后续通知的位置
-            for i in range(index, len(self.active_notifications)):
-                self.active_notifications[i].update_position(i)
+        try:
+            if notification in self.active_notifications:
+                index = self.active_notifications.index(notification)
+                self.active_notifications.remove(notification)
+                
+                # 更新后续通知的位置，添加安全检查
+                for i in range(index, len(self.active_notifications)):
+                    try:
+                        # 检查通知对象是否有效
+                        notif = self.active_notifications[i]
+                        
+                        # 检查对象是否还可用
+                        if not hasattr(notif, 'isVisible') or not notif.isVisible():
+                            continue
+                            
+                        # 安全地更新位置
+                        try:
+                            notif.update_position(i)
+                        except Exception as e:
+                            log.error(f"在隐藏处理中更新通知位置失败: {e}")
+                            # 尝试使用备用方法直接移动
+                            try:
+                                if hasattr(notif, '_calculate_position'):
+                                    new_pos = notif._calculate_position(i)
+                                    notif.move(new_pos)
+                                    # 更新索引
+                                    if hasattr(notif, 'current_index'):
+                                        notif.current_index = i
+                            except Exception as e2:
+                                log.error(f"备用位置更新也失败: {e2}")
+                    except Exception as e:
+                        log.error(f"处理通知对象时发生错误: {e}")
+        except Exception as e:
+            log.error(f"通知隐藏处理函数发生异常: {e}")
                 
     def _update_positions(self):
         """更新所有通知的位置"""
-        for i, notification in enumerate(self.active_notifications):
-            if notification.current_index != i:
-                notification.update_position(i)
+        try:
+            for i, notification in enumerate(self.active_notifications):
+                if notification.current_index != i:
+                    try:
+                        # 检查通知对象是否有效
+                        if not hasattr(notification, 'isVisible') or not notification.isVisible():
+                            continue
+                            
+                        notification.update_position(i)
+                    except Exception as e:
+                        log.error(f"更新通知位置失败: {e}")
+                        # 尝试使用备用方法直接移动
+                        try:
+                            if hasattr(notification, '_calculate_position'):
+                                new_pos = notification._calculate_position(i)
+                                notification.move(new_pos)
+                                # 更新索引
+                                if hasattr(notification, 'current_index'):
+                                    notification.current_index = i
+                        except Exception as e2:
+                            log.error(f"备用位置更新也失败: {e2}")
+        except Exception as e:
+            log.error(f"更新所有通知位置时发生异常: {e}")
                 
     def clear_all(self):
         """清除所有通知"""

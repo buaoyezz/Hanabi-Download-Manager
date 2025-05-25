@@ -6,6 +6,7 @@ from PySide6.QtGui import QFont
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.client_interface.history_window import HistoryWindow
+from client.I18N.i18n import i18n
 
 class CategoryButton(QPushButton):
     def __init__(self, text, parent=None, icon_code=None):
@@ -30,7 +31,7 @@ class CategoryButton(QPushButton):
             
             self.layout.addWidget(self.icon_label)
         
-        # 创建文本标签
+        # 创建文本标签 - 确保只添加一个文本标签
         self.text_label = QLabel(text)
         self.layout.addWidget(self.text_label)
         self.layout.addStretch()
@@ -225,6 +226,9 @@ class PagesManager(QObject):
         self.sync_timer.setInterval(500)  # 每500毫秒检查一次
         self.sync_timer.timeout.connect(self.check_page_button_sync)
         self.sync_timer.start()
+        
+        # 连接语言变更信号
+        i18n.language_changed.connect(self.update_all_button_texts)
     
     def check_page_button_sync(self):
         """检查当前页面与按钮选择状态是否同步"""
@@ -239,6 +243,27 @@ class PagesManager(QObject):
                 # 同步按钮状态
                 for btn_id, btn in self.buttons.items():
                     btn.setChecked(btn_id == self.current_page)
+    
+    def update_all_button_texts(self):
+        # 更新所有按钮文本为当前语言
+        for page_id, button in self.buttons.items():
+            # 查找文本标签并直接设置国际化文本
+            if hasattr(button, 'text_label') and button.text_label:
+                # 设置国际化文本
+                if page_id == "home":
+                    button.text_label.setText(i18n.get_text("home"))
+                elif page_id == "downloads":
+                    button.text_label.setText(i18n.get_text("downloads"))
+                elif page_id == "history":
+                    button.text_label.setText(i18n.get_text("history"))
+                elif page_id == "settings":
+                    button.text_label.setText(i18n.get_text("settings"))
+                elif page_id == "about":
+                    button.text_label.setText(i18n.get_text("about"))
+                elif page_id == "update":
+                    button.text_label.setText(i18n.get_text("update"))
+                elif page_id == "extension":
+                    button.text_label.setText(i18n.get_text("browser_extension"))
     
     def register_common_pages(self):
         """注册常用页面"""
@@ -256,7 +281,7 @@ class PagesManager(QObject):
         except Exception as e:
             print(f"创建首页失败: {e}")
             home_page = self.create_generic_page()
-            home_page.content_widget.layout().addWidget(QLabel("首页加载失败，请检查日志"))
+            home_page.content_widget.layout().addWidget(QLabel(i18n.get_text("home_load_failed")))
         
         download_page = self.create_download_page()
         history_page = self.create_history_page()  # 使用内部方法创建历史页面
@@ -297,27 +322,27 @@ class PagesManager(QObject):
         # 直接按照固定顺序添加各个页面
         # 1. 首页
         if home_page:
-            self.add_page("home", home_page, "ic_fluent_home_24_regular", "首页", "top", 0)
+            self.add_page("home", home_page, "ic_fluent_home_24_regular", i18n.get_text("home"), "top", 0)
         
         # 2. 下载页面
         if download_page:
-            self.add_page("downloads", download_page, "ic_fluent_arrow_download_24_regular", "下载", "top", 1)
+            self.add_page("downloads", download_page, "ic_fluent_arrow_download_24_regular", i18n.get_text("downloads"), "top", 1)
         
         # 3. 历史页面
         if history_page:
-            self.add_page("history", history_page, "ic_fluent_history_24_regular", "历史", "top", 2)
+            self.add_page("history", history_page, "ic_fluent_history_24_regular", i18n.get_text("history"), "top", 2)
         
         # 4. 设置页面
         if settings_page:
-            self.add_page("settings", settings_page, "ic_fluent_settings_24_regular", "设置", "bottom", 1)
+            self.add_page("settings", settings_page, "ic_fluent_settings_24_regular", i18n.get_text("settings"), "bottom", 1)
         
         # 5. 关于页面
         if about_page:
-            self.add_page("about", about_page, "ic_fluent_info_24_regular", "关于", "bottom", 0)
+            self.add_page("about", about_page, "ic_fluent_info_24_regular", i18n.get_text("about"), "bottom", 0)
         
         # 6. 更新页面
         if update_page:
-            self.add_page("update", update_page, "ic_fluent_arrow_sync_24_regular", "更新", "bottom", 2)
+            self.add_page("update", update_page, "ic_fluent_arrow_sync_24_regular", i18n.get_text("update"), "bottom", 2)
         
         # 默认显示首页
         self.switch_page("home")
@@ -348,7 +373,7 @@ class PagesManager(QObject):
         generic_layout = QVBoxLayout(generic_content)
         generic_layout.setContentsMargins(15, 15, 15, 15)
         
-        generic_label = QLabel("此页面尚未实现")
+        generic_label = QLabel(i18n.get_text("page_not_implemented"))
         generic_label.setAlignment(Qt.AlignCenter)
         generic_layout.addWidget(generic_label)
         
@@ -376,7 +401,7 @@ class PagesManager(QObject):
             # 如果创建失败，创建一个通用页面
             print(f"创建历史页面失败: {e}")
             generic_page = self.create_generic_page()
-            generic_page.content_widget.layout().addWidget(QLabel("加载历史记录失败，请检查日志"))
+            generic_page.content_widget.layout().addWidget(QLabel(i18n.get_text("history_load_failed")))
             return generic_page
         
     def create_finished_page(self):
@@ -419,7 +444,7 @@ class PagesManager(QObject):
     def switch_page(self, page_id):
         """切换到指定页面"""
         if page_id not in self.pages:
-            print(f"错误: 页面 '{page_id}' 不存在")
+            print(f"{i18n.get_text('error')}: {i18n.get_text('page_not_exists', page_id)}")
             return
             
         if page_id == self.current_page:
@@ -623,7 +648,7 @@ class PagesManager(QObject):
                         sidebar_layout.insertWidget(insert_pos, button)
                     except Exception as e:
                         import logging
-                        logging.error(f"插入按钮失败: {e}, 位置: {insert_pos}, 最大索引: {total_items-1}")
+                        logging.error(f"{i18n.get_text('button_insert_failed')}: {e}, {i18n.get_text('position')}: {insert_pos}, {i18n.get_text('max_index')}: {total_items-1}")
                         # 出错时使用安全的方式添加
                         sidebar_layout.addWidget(button)
                 else:
@@ -649,7 +674,7 @@ class PagesManager(QObject):
                         sidebar_layout.insertWidget(insert_pos, button)
                     except Exception as e:
                         import logging
-                        logging.error(f"插入底部按钮失败: {e}, 位置: {insert_pos}, 最大索引: {total_items-1}")
+                        logging.error(f"{i18n.get_text('bottom_button_insert_failed')}: {e}, {i18n.get_text('position')}: {insert_pos}, {i18n.get_text('max_index')}: {total_items-1}")
                         # 出错时直接添加到末尾
                         sidebar_layout.addWidget(button)
                 else:

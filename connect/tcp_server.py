@@ -174,7 +174,7 @@ class BasicTCPServer:
                 # 发送版本信息 (WebSocket格式)
                 version_info = {
                     "type": "version",
-                    "ClientVersion": "1.0.6",
+                    "ClientVersion": "1.0.7",
                     "LatestExtensionVersion": "1.0.1"
                 }
                 ws_message = self._encode_websocket_frame(json.dumps(version_info))
@@ -194,7 +194,7 @@ class BasicTCPServer:
                     # 不是有效的JSON，发送版本信息
                     version_info = {
                         "type": "version",
-                        "ClientVersion": "1.0.6",
+                        "ClientVersion": "1.0.7",
                         "LatestExtensionVersion": "1.0.1"
                     }
                     if not await self._safe_write(writer, (json.dumps(version_info) + '\n').encode('utf-8')):

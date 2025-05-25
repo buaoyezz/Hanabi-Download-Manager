@@ -116,6 +116,10 @@ class Notification(ModernNotifyAnimation):
             self.font_manager = FontManager()
             self.font_pages_manager = FontManager()
             
+            # 初始化索引属性
+            self.current_index = 0
+            self.position_initialized = False
+            
             # 初始化UI
             self._init_ui()
             
@@ -393,42 +397,22 @@ class Notification(ModernNotifyAnimation):
             # 调整大小以适应内容
             self.adjustSize()
             
-            # 获取屏幕尺寸
-            screen = QApplication.primaryScreen().availableGeometry()
+            # 预处理通知位置
+            self._preprocess_notification_position()
             
-            # 计算基础位置 - 增强位置策略
-            margin = 25
-            # 策略1: 右下角
-            start_x = screen.right() - self.width() - margin
-            start_y = screen.bottom() - self.height() - margin
-            
-            # 策略2: 右上角 - 基于通知数量
-            total_height = self.height() + margin
-            active_count = len([n for n in Notification.active_notifications if n.isVisible()])
-            max_notifications = min(active_count, 15)  # 限制最大通知数量为15个
-            offset = max_notifications * total_height
-            
-            # 确保y坐标不会超出系统限制
-            max_y = min(screen.top() + offset + total_height, 32700)  # 留一些余量
-            end_y = min(screen.top() + offset + margin, 32700)
-            
-            # 检查位置有效性 - 确保在可见区域内
-            if end_y < screen.top() or end_y > screen.bottom():
-                # 位置无效，调整到可见区域
-                end_y = start_y  # 改用右下角策略
-            
-            # 如果不在活动通知列表中，添加自己
-            if self not in Notification.active_notifications:
-                Notification.active_notifications.append(self)
-            
-            # 使用新的动画接口
-            if start_pos is None:
-                start_pos = QPoint(start_x, max_y)
+            # 使用预处理的位置信息
             if end_pos is None:
-                end_pos = QPoint(start_x, end_y)
+                end_pos = self._calculate_right_bottom_position(self.current_index)
+                
+            # 如果起始位置未指定，默认从右侧滑入
+            if start_pos is None:
+                start_pos = QPoint(end_pos.x() + 300, end_pos.y())
             
             # 确保窗口可以显示
             self.setWindowOpacity(1.0)
+            
+            # 先移动到正确位置，避免动画开始前就显示在错误位置
+            self.move(start_pos)
             self.raise_()  # 提升到顶层
             
             # 增强窗口显示 - 确保显示在最前面
@@ -789,72 +773,16 @@ class Notification(ModernNotifyAnimation):
                 pass
 
     def _adjust_other_notifications(self, start_index):
+        """调整其他通知的位置"""
         try:
-            screen = QApplication.primaryScreen().availableGeometry()
-            margin = 25  # 与其他边距保持一致
-            total_height = self.height() + margin
+            # 先清理通知列表
+            self._cleanup_notification_list()
             
-            # 修改这里：只调整可见的通知，并限制最大数量
-            visible_notifications = []
+            # 然后重新组织位置
+            self._reorganize_notifications()
             
-            # 安全地收集可见通知
-            for n in Notification.active_notifications:
-                if n != self and n.isVisible() and not n._is_closing:
-                    try:
-                        # 额外检查是否有效
-                        n.isVisible()  # 再次调用以确认对象有效
-                        visible_notifications.append(n)
-                    except:
-                        # 忽略已删除的通知
-                        continue
-            
-            # 限制最大数量
-            visible_notifications = visible_notifications[:15]
-            
-            # 从顶部开始重新排列所有可见通知
-            for i, notif in enumerate(visible_notifications):
-                try:
-                    # 确保y坐标不会超出系统限制
-                    target_y = min(screen.top() + (i * total_height) + margin, 32700)
-                    current_x = notif.x()
-                    
-                    # 使用新的位置更新方法
-                    if hasattr(notif, 'update_position') and not getattr(notif, '_is_closing', False):
-                        try:
-                            # 使用索引号更新位置，新系统会根据索引计算准确位置
-                            notif.update_position(i)
-                        except Exception as e:
-                            log.error(f"使用update_position更新位置失败: {e}")
-                            # 如果update_position方法失败，尝试备用方法
-                            try:
-                                notif.move(current_x, target_y)
-                            except:
-                                pass
-                    else:
-                        # 如果没有新方法，使用原来的创建动画方式
-                        try:
-                            anim = QPropertyAnimation(notif, b"pos", notif)
-                            anim.setDuration(self.adjust_animation_duration)
-                            anim.setEasingCurve(QEasingCurve.OutCubic)
-                            anim.setStartValue(notif.pos())
-                            anim.setEndValue(QPoint(current_x, target_y))
-                            anim.start()
-                            
-                            # 存储动画引用，防止被垃圾回收
-                            if not hasattr(notif, '_animations'):
-                                notif._animations = []
-                            notif._animations.append(anim)
-                        except Exception as e:
-                            log.error(f"创建位置调整动画失败: {e}")
-                            # 如果动画失败，直接移动
-                            try:
-                                notif.move(current_x, target_y)
-                            except:
-                                pass
-                except Exception as e:
-                    log.error(f"调整通知位置失败: {e}")
         except Exception as e:
-            log.error(f"整体调整通知位置失败: {e}")
+            log.error(f"调整其他通知位置失败: {e}")
 
     # 添加transform兼容性方法
     def setTransform(self, transform):
@@ -885,14 +813,23 @@ class Notification(ModernNotifyAnimation):
                     self._animations.clear()
                 if hasattr(self, '_fade_animations'):
                     self._fade_animations.clear()
+                if hasattr(self, '_current_position_anim_group'):
+                    try:
+                        self._current_position_anim_group.stop()
+                    except:
+                        pass
+                    self._current_position_anim_group = None
                 
                 # 清除定时器
                 if hasattr(self, 'auto_hide_timer') and self.auto_hide_timer is not None:
                     try:
                         self.auto_hide_timer.stop()
-                        self.auto_hide_timer.timeout.disconnect()
+                        self.auto_hide_timer = None
                     except:
                         pass
+                
+                # 设置标志表明对象正在被清理
+                self._is_closing = True
             except Exception as e:
                 log.error(f"清理资源时出错: {e}")
         except:
@@ -904,6 +841,143 @@ class Notification(ModernNotifyAnimation):
         # 尝试降低索引
         if self.current_index > 0:
             self.current_index -= 1
+
+    def _cleanup_notification_list(self):
+        """清理通知列表，移除无效通知"""
+        try:
+            # 移除无效通知
+            to_remove = []
+            for notif in Notification.active_notifications:
+                try:
+                    # 检查通知是否有效
+                    if not notif.isVisible() or getattr(notif, '_is_closing', False):
+                        to_remove.append(notif)
+                except:
+                    # 如果访问属性失败，通知可能已被删除
+                    to_remove.append(notif)
+                    
+            # 从列表中移除
+            for notif in to_remove:
+                if notif in Notification.active_notifications:
+                    Notification.active_notifications.remove(notif)
+                    
+        except Exception as e:
+            log.error(f"清理通知列表失败: {e}")
+            
+    def _reorganize_notifications(self):
+        """重新组织通知位置"""
+        try:
+            # 只处理可见且未关闭的通知
+            valid_notifications = []
+            
+            for notif in Notification.active_notifications:
+                try:
+                    if notif.isVisible() and not getattr(notif, '_is_closing', False):
+                        valid_notifications.append(notif)
+                except:
+                    continue
+                    
+            # 先按位置排序，再按创建时间排序（这样确保位置一致性）
+            try:
+                # 主要按照Y坐标排序
+                valid_notifications.sort(key=lambda n: n.y(), reverse=True)
+            except:
+                # 如果排序失败，至少确保有一致的顺序
+                pass
+            
+            # 更新每个通知的索引并立即移动到正确位置
+            for i, notif in enumerate(valid_notifications):
+                try:
+                    old_pos = notif.pos()
+                    notif.current_index = i
+                    target_pos = notif._calculate_right_bottom_position(i)
+                    
+                    # 只有位置变化超过5像素才移动，避免抖动
+                    if abs(old_pos.x() - target_pos.x()) > 5 or abs(old_pos.y() - target_pos.y()) > 5:
+                        notif.move(target_pos)
+                except:
+                    continue
+                    
+        except Exception as e:
+            log.error(f"重新组织通知位置失败: {e}")
+
+    def _calculate_right_bottom_position(self, index=0):
+        """自定义位置计算 - 右下角定位"""
+        try:
+            # 获取屏幕尺寸
+            screen = QApplication.primaryScreen().availableGeometry()
+            
+            # 固定参数
+            margin = 25  # 距离屏幕边缘的边距
+            spacing = 20  # 通知之间的间距
+            
+            # 确保窗口有合理的高度值
+            height = max(self.height(), 80)  # 如果高度太小，使用最小值80
+            
+            # 计算右下角位置
+            x = screen.right() - self.width() - margin
+            
+            # 使用固定间距和高度值，避免重叠
+            y = screen.bottom() - height - margin - (index * (height + spacing))
+            
+            # 确保位置在屏幕内
+            x = max(screen.left() + margin, min(x, screen.right() - self.width() - margin))
+            y = max(screen.top() + margin, min(y, screen.bottom() - height - margin))
+            
+            return QPoint(x, y)
+        except Exception as e:
+            log.error(f"计算右下角位置失败: {e}")
+            # 返回安全的默认位置(屏幕右下角)
+            try:
+                screen = QApplication.primaryScreen().availableGeometry()
+                return QPoint(screen.right() - self.width() - 20, 
+                             screen.bottom() - self.height() - 20)
+            except:
+                # 最终备用位置
+                return QPoint(800, 600)
+
+    def _preprocess_notification_position(self):
+        """预处理通知位置，在显示前排列好所有通知"""
+        try:
+            # 清理已关闭的通知
+            self._cleanup_notification_list()
+            
+            # 如果不在活动通知列表中，添加自己
+            if self not in Notification.active_notifications:
+                Notification.active_notifications.append(self)
+            
+            # 收集有效通知
+            valid_notifications = []
+            for notif in Notification.active_notifications:
+                try:
+                    if notif != self and notif.isVisible() and not getattr(notif, '_is_closing', False):
+                        valid_notifications.append(notif)
+                except:
+                    continue
+            
+            # 根据Y坐标排序现有通知
+            valid_notifications.sort(key=lambda n: n.y(), reverse=True)
+            
+            # 分配索引
+            for i, notif in enumerate(valid_notifications):
+                try:
+                    notif.current_index = i
+                    # 立即移动到正确位置
+                    target_pos = notif._calculate_right_bottom_position(i)
+                    notif.move(target_pos)
+                except:
+                    pass
+            
+            # 新通知的索引应该是当前可见通知数量
+            self.current_index = len(valid_notifications)
+            
+            # 标记位置已初始化
+            self.position_initialized = True
+            
+        except Exception as e:
+            log.error(f"预处理通知位置失败: {e}")
+            # 使用安全默认值
+            self.current_index = len(Notification.active_notifications) - 1
 
 class NotifyManager:
     @staticmethod
