@@ -1,23 +1,23 @@
 @echo off
-echo ¿ªÊ¼¹¹½¨ Hanabi Download Manager...
+chcp 65001
+echo å¼€å§‹æ„å»º Hanabi Download Manager...
 echo.
-
-REM ¼ì²é±ØÒªÎÄ¼şÊÇ·ñ´æÔÚ
+REM æ£€æŸ¥å¿…è¦æ–‡ä»¶æ˜¯å¦å­˜åœ¨
 if not exist "main.py" (
-    echo ´íÎó: ÕÒ²»µ½ main.py ÎÄ¼ş
+    echo é”™è¯¯: æ‰¾ä¸åˆ° main.py æ–‡ä»¶
     pause
     exit /b 1
 )
 
 if not exist "resources\logo2.png" (
-    echo ´íÎó: ÕÒ²»µ½Í¼±êÎÄ¼ş resources\logo2.png
+    echo é”™è¯¯: æ‰¾ä¸åˆ°å›¾æ ‡æ–‡ä»¶ resources\logo2.png
     pause
     exit /b 1
 )
 
-REM ¼ì²éversion.jsonÊÇ·ñ´æÔÚ£¬²»´æÔÚÔò´´½¨Ò»¸öÄ¬ÈÏµÄ
+REM æ£€æŸ¥version.jsonæ˜¯å¦å­˜åœ¨ï¼Œå¦‚æœä¸å­˜åœ¨åˆ™åˆ›å»ºä¸€ä¸ªé»˜è®¤çš„
 if not exist "version.json" (
-    echo ¾¯¸æ: version.json ²»´æÔÚ£¬´´½¨Ä¬ÈÏ°æ±¾ÎÄ¼ş...
+    echo è­¦å‘Š: version.json ä¸å­˜åœ¨ï¼Œåˆ›å»ºé»˜è®¤ç‰ˆæœ¬æ–‡ä»¶...
     echo {"version": "1.0.0", "build": "1"} > version.json
 )
 
@@ -34,6 +34,8 @@ python -m nuitka ^
   --include-data-dir=core/font=core/font ^
   --include-data-dir=core/download_core/core=core/download_core/core ^
   --include-data-dir=hdm_chrome_extension=hdm_chrome_extension ^
+  --include-data-dir=client/languages=client/languages ^
+  --include-data-dir=client/I18N=client/I18N ^
   --include-data-files=version.json=version.json ^
   --follow-imports ^
   --prefer-source-code ^
@@ -56,10 +58,10 @@ python -m nuitka ^
 
 echo.
 if %ERRORLEVEL% EQU 0 (
-    echo ? ¹¹½¨³É¹¦Íê³É£¡
-    echo Êä³öÎÄ¼ş: dist\HanabiDownloadManager.exe
-    echo ¹¹½¨±¨¸æ: compilation-report.xml
+    echo âˆš æ„å»ºæˆåŠŸå®Œæˆï¼
+    echo è¾“å‡ºæ–‡ä»¶: dist\HanabiDownloadManager.exe
+    echo ç¼–è¯‘æŠ¥å‘Š: compilation-report.xml
 ) else (
-    echo ? ¹¹½¨Ê§°Ü£¬´íÎó´úÂë: %ERRORLEVEL%
+    echo Ã— æ„å»ºå¤±è´¥ï¼Œé”™è¯¯ä»£ç : %ERRORLEVEL%
 )
 pause

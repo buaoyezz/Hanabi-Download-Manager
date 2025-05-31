@@ -7,9 +7,35 @@ from pathlib import Path
 from re import compile
 
 from PySide6.QtCore import QRect, QStandardPaths
+import logging
+version = "1.0.7"
 
+class UserAgent:
+    @staticmethod
+    def get_user_agent():
+        """获取用户设置的User-Agent
+        
+        返回:
+            str: 用户设置的User-Agent，如未设置则返回默认值
+        """
+        try:
+            if hasattr(UserAgent, 'config_manager') and UserAgent.config_manager:
+                # 优先使用专用方法
+                if hasattr(UserAgent.config_manager, 'get_user_agent'):
+                    return UserAgent.config_manager.get_user_agent()
+                
+                # 直接从配置获取
+                network_config = UserAgent.config_manager.get("network", {})
+                user_agent = network_config.get("user_agent")
+                if user_agent:
+                    return user_agent
+        except Exception as e:
+            logging.warning(f"获取User-Agent失败: {e}")
+        
+        # 返回默认值
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
-version = "1.0.4"
+user_agent = UserAgent.get_user_agent()
 
 class ProxyValidator:
     PATTERN = compile(r'^(socks5|http|https):\/\/'
@@ -374,6 +400,7 @@ ATTACHMENT_TYPES = {
     "apkm", "cab"
 }
 
+# 创建全局配置实例
 cfg = Config()
 
 class DownloadConfig:
@@ -389,7 +416,7 @@ class DownloadConfig:
         self.downloadPath = str(Path.home() / "Downloads")
         
         # 用户代理
-        self.userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        self.userAgent = {UserAgent.get_user_agent()}
         
         # 加载用户配置
         self._load_user_config()
@@ -401,6 +428,14 @@ class DownloadConfig:
             pass
         except Exception as e:
             print(f"加载用户配置失败: {e}")
+    
+    def get_user_agent(self):
+        """获取用户设置的User-Agent"""
+        return self.userAgent
+        
+    def set_user_agent(self, user_agent):
+        """设置User-Agent"""
+        self.userAgent = user_agent
 
-# 创建全局配置实例
-cfg = DownloadConfig()
+# 创建下载配置实例 - 使用不同的变量名避免冲突
+download_cfg = DownloadConfig()

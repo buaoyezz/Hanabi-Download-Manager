@@ -15,6 +15,10 @@ print("使用FallbackConnector")
 from core.font.font_manager import FontManager
 from core.log.log_manager import log
 from client.ui.extension_interface.pop_dialog import DownloadPopDialog
+from client.version.version_manager import VersionManager
+
+# 初始化版本管理器
+version_manager = VersionManager.get_instance()
 
 # 命令行参数解析函数
 def parse_arguments():
@@ -195,7 +199,8 @@ if __name__ == "__main__":
     
     # 处理版本信息参数
     if args.version:
-        print("花火下载管理器 v1.0.0")
+        print(f"花火下载管理器 v{version_manager.get_client_version()}")
+        print(f"浏览器扩展版本: v{version_manager.get_extension_version()}")
         sys.exit(0)
     
     app = QApplication(sys.argv)
@@ -245,6 +250,10 @@ if __name__ == "__main__":
     
     # 创建下载请求处理器
     download_handler = BrowserDownloadHandler()
+    
+    # 记录版本信息
+    log.info(f"花火下载管理器 v{version_manager.get_client_version()}")
+    log.info(f"浏览器扩展版本: v{version_manager.get_extension_version()}")
     
     # 创建主窗口
     window = DownloadManagerWindow()
