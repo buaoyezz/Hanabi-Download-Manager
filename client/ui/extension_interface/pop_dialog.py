@@ -119,7 +119,7 @@ class DownloadPopDialog(QDialog):
         if download_data:
             download_source = download_data.get("download_source", "未知来源")
             request_id = download_data.get("requestId", "无ID")
-            logging.info(f"[pop_dialog.py] 创建下载弹窗 [ID: {request_id}] [来源: {download_source}]")
+            logging.info(f"[pop_dialog.py] 创建下载弹窗 [ID: {request_id}] [来源: {download_source}] [自动下载: {auto_start}]")
         
         # 检查父窗口状态
         parent_minimized = False
@@ -169,28 +169,35 @@ class DownloadPopDialog(QDialog):
             # 预处理下载数据
             task_data = dialog._process_download_data(download_data)
             
-            # 忽略传入的auto_start参数，始终显示添加下载界面供用户确认
-            # 显示添加下载界面，但填入URL和文件名
-            dialog._create_add_download_ui()
-            
-            # 填入URL
-            if "url" in task_data and dialog.url_input:
-                dialog.url_input.setText(task_data.get("url", ""))
+            if auto_start:
+                # 自动开始下载模式
+                logging.info(f"[pop_dialog.py] 自动开始下载模式 [ID: {request_id}]")
                 
-            # 填入文件名
-            if "file_name" in task_data and dialog.filename_input:
-                dialog.filename_input.setText(task_data.get("file_name", ""))
+                # 直接切换到下载UI并开始下载
+                dialog._create_downloading_ui(task_data)
+                dialog._start_download(task_data)
+            else:
+                # 显示添加下载界面，但填入URL和文件名
+                dialog._create_add_download_ui()
                 
-            # 填入保存路径
-            if "save_path" in task_data and dialog.save_path_input:
-                dialog.save_path_input.setText(task_data.get("save_path", ""))
-                
-            # 多线程选项
-            if "multi_thread" in task_data and dialog.multi_thread_checkbox:
-                dialog.multi_thread_checkbox.setChecked(task_data.get("multi_thread", True))
-                
-            # 保存任务数据，以便下载按钮使用
-            dialog.pending_task_data = task_data
+                # 填入URL
+                if "url" in task_data and dialog.url_input:
+                    dialog.url_input.setText(task_data.get("url", ""))
+                    
+                # 填入文件名
+                if "file_name" in task_data and dialog.filename_input:
+                    dialog.filename_input.setText(task_data.get("file_name", ""))
+                    
+                # 填入保存路径
+                if "save_path" in task_data and dialog.save_path_input:
+                    dialog.save_path_input.setText(task_data.get("save_path", ""))
+                    
+                # 多线程选项
+                if "multi_thread" in task_data and dialog.multi_thread_checkbox:
+                    dialog.multi_thread_checkbox.setChecked(task_data.get("multi_thread", True))
+                    
+                # 保存任务数据，以便下载按钮使用
+                dialog.pending_task_data = task_data
         
         # 显示窗口
         dialog.showNormal()
@@ -198,6 +205,13 @@ class DownloadPopDialog(QDialog):
         # 强制激活窗口
         dialog.raise_()
         dialog.activateWindow()
+        
+        # 延迟执行居中和边界检查，确保窗口大小已经计算完成
+        QTimer.singleShot(100, lambda: dialog.move(
+            (QApplication.primaryScreen().availableGeometry().width() - dialog.width()) // 2,
+            (QApplication.primaryScreen().availableGeometry().height() - dialog.height()) // 2
+        ))
+        QTimer.singleShot(150, dialog._ensure_visible_on_screen)
         
         return dialog
     
@@ -1539,8 +1553,10 @@ class DownloadPopDialog(QDialog):
         
         # 确保有标头
         if "headers" not in task_data:
+            # 获取用户设置的UA
+            user_agent = self.get_user_agent()
             task_data["headers"] = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
+                "User-Agent": user_agent
             }
         
         # 处理文件名
@@ -1561,6 +1577,36 @@ class DownloadPopDialog(QDialog):
             task_data["multi_thread"] = True
         
         return task_data
+        
+    def get_user_agent(self):
+        """获取用户设置的User-Agent，查找上层窗口的配置管理器
+        
+        返回:
+            str: 用户设置的User-Agent，如未设置则返回默认值
+        """
+        try:
+            # 向上查找主窗口
+            parent = self.parent()
+            while parent:
+                # 查找主窗口的get_user_agent方法
+                if hasattr(parent, 'get_user_agent'):
+                    return parent.get_user_agent()
+                # 查找主窗口的配置管理器
+                elif hasattr(parent, 'config_manager') and parent.config_manager:
+                    # 尝试获取UA
+                    if hasattr(parent.config_manager, 'get_user_agent'):
+                        return parent.config_manager.get_user_agent()
+                    else:
+                        network_config = parent.config_manager.get("network", {})
+                        user_agent = network_config.get("user_agent")
+                        if user_agent:
+                            return user_agent
+                parent = parent.parent()
+        except Exception as e:
+            logging.warning(f"获取User-Agent失败: {e}")
+        
+        # 返回默认值
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     
     def _set_thread_priority_safely(self):
         """安全地设置线程优先级"""
@@ -3316,6 +3362,16 @@ class DownloadPopDialog(QDialog):
             # 如果当前是自动启动下载，则确保进度更新定时器启动
             if self.current_state == "downloading" and not self.progress_timer.isActive():
                 self.progress_timer.start(1000)  # 每秒更新一次下载信息
+            
+            # 确保窗口居中显示在屏幕上
+            screen_geometry = QApplication.primaryScreen().availableGeometry()
+            x = (screen_geometry.width() - self.width()) // 2
+            y = (screen_geometry.height() - self.height()) // 2
+            self.move(x, y)
+            
+            # 确保窗口在屏幕边界内可见
+            QTimer.singleShot(50, self._ensure_visible_on_screen)
+            
         except Exception as e:
             logging.warning(f"处理窗口显示事件时出错: {e}")
     
