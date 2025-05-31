@@ -274,6 +274,14 @@ class DownloadPopDialog(QDialog):
         # 初始化文件图标获取器
         self.file_icon_getter = FileIconGetter()
         
+        # 添加缓存变量，用于平滑更新进度和大小显示
+        self.last_progress = 0
+        self.last_downloaded_size = 0
+        self.last_total_size = 0
+        self.last_status_text = ""
+        self.last_size_text = ""
+        self.last_segment_statuses = {}
+        
         # 初始化UI
         self._setup_ui()
         
@@ -2031,24 +2039,53 @@ class DownloadPopDialog(QDialog):
                     except Exception as e:
                         logging.debug(f"获取实际文件大小失败: {e}")
                 
-                # 更新进度
-                progress = 0
-                if hasattr(self.download_engine, 'file_size') and self.download_engine.file_size > 0:
-                    progress = min(100, (self.download_engine.current_progress / self.download_engine.file_size) * 100)
-                    self.progress_bar.setValue(int(progress))
+                # 获取当前进度和大小信息
+                current_progress = 0
+                current_downloaded = 0
+                current_total_size = 0
+                
+                if hasattr(self.download_engine, 'current_progress'):
+                    current_downloaded = self.download_engine.current_progress
                     
-                    # 更新状态文本
-                    self.status_label.setText(f"{progress:.1f}%")
+                if hasattr(self.download_engine, 'file_size') and self.download_engine.file_size > 0:
+                    current_total_size = self.download_engine.file_size
+                    current_progress = min(100, (current_downloaded / current_total_size) * 100)
+                
+                # 防止进度回退，使用平滑更新策略
+                if current_progress > 0 and current_progress < self.last_progress and self.last_progress < 99.5:
+                    # 如果进度回退但不是因为完成后重置，则保持上次进度
+                    current_progress = self.last_progress
+                elif current_progress > 0:
+                    # 正常情况下，缓慢更新进度，避免跳动
+                    if self.last_progress > 0 and abs(current_progress - self.last_progress) < 10:
+                        # 小幅度变化时平滑过渡
+                        current_progress = self.last_progress * 0.7 + current_progress * 0.3
+                    
+                    # 更新缓存的进度
+                    self.last_progress = current_progress
+                
+                # 更新进度条
+                if current_progress > 0:
+                    self.progress_bar.setValue(int(current_progress))
+                    
+                    # 更新状态文本 - 避免频繁更新
+                    new_status_text = f"{current_progress:.1f}%"
+                    if new_status_text != self.last_status_text:
+                        self.status_label.setText(new_status_text)
+                        self.last_status_text = new_status_text
                 else:
                     # 文件大小未知，显示下载中状态
-                    self.status_label.setText("下载中...")
+                    if self.last_status_text != "下载中...":
+                        self.status_label.setText("下载中...")
+                        self.last_status_text = "下载中..."
                     
-                    # 对于未知大小的文件，显示不确定进度
-                    if hasattr(self.download_engine, 'current_progress'):
-                        downloaded = self.download_engine.current_progress
-                        if downloaded > 0:
-                            downloaded_str = self._get_readable_size(downloaded)
-                            self.size_label.setText(f"已下载: {downloaded_str}")
+                    # 对于未知大小的文件，显示已下载量
+                    if current_downloaded > 0:
+                        downloaded_str = self._get_readable_size(current_downloaded)
+                        new_size_text = f"已下载: {downloaded_str}"
+                        if new_size_text != self.last_size_text:
+                            self.size_label.setText(new_size_text)
+                            self.last_size_text = new_size_text
                 
                 # 更新速度 - 使用统一格式"速度: {speed_str}"
                 if hasattr(self.download_engine, 'avg_speed'):
@@ -2069,11 +2106,23 @@ class DownloadPopDialog(QDialog):
                         else:
                             self.time_label.setText("计算中...")
                 
-                # 更新文件大小信息
-                if hasattr(self.download_engine, 'file_size') and self.download_engine.file_size > 0:
-                    total_size_str = self._get_readable_size(self.download_engine.file_size)
-                    downloaded_size_str = self._get_readable_size(self.download_engine.current_progress)
-                    self.size_label.setText(f"大小: {downloaded_size_str} / {total_size_str}")
+                # 更新文件大小信息 - 避免频繁更新
+                if current_total_size > 0 and current_downloaded > 0:
+                    # 防止大小信息频繁变化
+                    if (abs(current_downloaded - self.last_downloaded_size) > current_downloaded * 0.01 or 
+                        abs(current_total_size - self.last_total_size) > current_total_size * 0.01):
+                        # 只有当变化超过1%时才更新显示
+                        total_size_str = self._get_readable_size(current_total_size)
+                        downloaded_size_str = self._get_readable_size(current_downloaded)
+                        new_size_text = f"大小: {downloaded_size_str} / {total_size_str}"
+                        
+                        if new_size_text != self.last_size_text:
+                            self.size_label.setText(new_size_text)
+                            self.last_size_text = new_size_text
+                            
+                        # 更新缓存的大小
+                        self.last_downloaded_size = current_downloaded
+                        self.last_total_size = current_total_size
                 
                 # 处理下载块信息 - 从blocks属性获取信息
                 if hasattr(self.download_engine, 'blocks') and self.download_engine.blocks:
@@ -2099,6 +2148,23 @@ class DownloadPopDialog(QDialog):
                             # 检查是否所有块都已完成
                             if current_pos < end_pos:
                                 all_blocks_completed = False
+                            
+                            # 使用缓存的状态，避免状态频繁变化
+                            block_key = f"block_{i}"
+                            if block_key in self.last_segment_statuses:
+                                # 如果状态是"下载中"且之前是"下载中"，保持"下载中"
+                                if status == "下载中" and self.last_segment_statuses[block_key] == "下载中":
+                                    status = "下载中"
+                                # 如果状态变成了"已完成"，则更新
+                                elif status == "已完成" or current_pos >= end_pos:
+                                    status = "已完成"
+                                    self.last_segment_statuses[block_key] = status
+                                # 其他情况保持之前的状态，避免闪烁
+                                else:
+                                    status = self.last_segment_statuses[block_key]
+                            else:
+                                # 首次设置状态
+                                self.last_segment_statuses[block_key] = status
                             
                             # 创建块信息字典
                             block_info = {
