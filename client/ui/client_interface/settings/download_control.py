@@ -581,23 +581,27 @@ class DownloadControlWidget(QWidget):
         self.thread_count_spinbox.setEnabled(not dynamic_enabled)
         
         # 找到线程数滑块
-        thread_count_layout = self.thread_count_spinbox.parent()
-        if thread_count_layout:
-            for i in range(thread_count_layout.count()):
-                item = thread_count_layout.itemAt(i)
-                if item and item.widget() and isinstance(item.widget(), CustomSlider):
-                    item.widget().setEnabled(not dynamic_enabled)
+        thread_count_layout = None
+        if hasattr(self.thread_count_spinbox, 'parent') and self.thread_count_spinbox.parent():
+            thread_count_layout = self.thread_count_spinbox.parent()
+            if thread_count_layout and hasattr(thread_count_layout, 'count'):
+                for i in range(thread_count_layout.count()):
+                    item = thread_count_layout.itemAt(i)
+                    if item and item.widget() and isinstance(item.widget(), CustomSlider):
+                        item.widget().setEnabled(not dynamic_enabled)
         
         # 更新默认分段数和最大线程数设置
         self.max_threads_spinbox.setEnabled(dynamic_enabled)
         
         # 找到最大线程数滑块
-        max_thread_layout = self.max_threads_spinbox.parent()
-        if max_thread_layout:
-            for i in range(max_thread_layout.count()):
-                item = max_thread_layout.itemAt(i)
-                if item and item.widget() and isinstance(item.widget(), CustomSlider):
-                    item.widget().setEnabled(dynamic_enabled)
+        max_thread_layout = None
+        if hasattr(self.max_threads_spinbox, 'parent') and self.max_threads_spinbox.parent():
+            max_thread_layout = self.max_threads_spinbox.parent()
+            if max_thread_layout and hasattr(max_thread_layout, 'count'):
+                for i in range(max_thread_layout.count()):
+                    item = max_thread_layout.itemAt(i)
+                    if item and item.widget() and isinstance(item.widget(), CustomSlider):
+                        item.widget().setEnabled(dynamic_enabled)
         
     def browse_folder(self):
         """选择下载文件夹"""
@@ -709,7 +713,7 @@ class DownloadControlWidget(QWidget):
                     resume_files = list(download_path.glob("*.resume"))
                     
                     if not resume_files:
-                        NotifyManager.info(self, "无需清理", "没有发现断点续传文件")
+                        NotifyManager.info("无需清理，没有发现断点续传文件")
                         return
                     
                     # 删除所有.resume文件
@@ -729,13 +733,13 @@ class DownloadControlWidget(QWidget):
                     
                     # 提示清理结果
                     if cleaned_count > 0:
-                        NotifyManager.success(self, "清理完成", f"成功清理 {cleaned_count} 个断点续传文件")
+                        NotifyManager.success(f"清理完成，成功清理 {cleaned_count} 个断点续传文件")
                     else:
-                        NotifyManager.info(self, "清理完成", "未清理任何文件")
+                        NotifyManager.info("清理完成，未清理任何文件")
                 else:
-                    NotifyManager.warning(self, "路径不存在", f"下载路径 '{save_path}' 不存在")
+                    NotifyManager.warning(f"路径不存在，下载路径 '{save_path}' 不存在")
             else:
-                NotifyManager.warning(self, "无下载路径", "未设置下载路径")
+                NotifyManager.warning("无下载路径，未设置下载路径")
         except Exception as e:
-            NotifyManager.error(self, "清理失败", f"清理断点续传文件失败: {e}")
+            NotifyManager.error(f"清理失败，清理断点续传文件失败: {e}")
             logging.error(f"清理断点续传文件失败: {e}")
