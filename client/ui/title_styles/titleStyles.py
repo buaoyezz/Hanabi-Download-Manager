@@ -237,8 +237,9 @@ class TitleBar(QWidget):
         # 设置图标字体
         button.setFont(QFont(self.font_manager.fluent_icons_font, 14))
         
-        # 设置透明度和文字颜色
-        button.setStyleSheet(button.styleSheet() + "\ncolor: #FFFFFF;")
+        # 不要通过拼接方式添加样式表，这可能导致语法错误
+        # 使用单独的属性设置颜色
+        button.setProperty("iconColor", "#FFFFFF")
         
         # 如果提供了提示文本，设置提示
         if tooltip:
@@ -281,7 +282,7 @@ class TitleBar(QWidget):
                 min-height: 30px;
                 max-width: 30px;
                 max-height: 30px;
-                padding: 0px;
+                padding: 0;
                 text-align: center;
                 font-family: "HarmonyOS Sans SC", "Source Han Sans CN", "Microsoft YaHei";
             """)
@@ -325,11 +326,11 @@ class TitleBar(QWidget):
         self.tray_btn.setStyleSheet("""
             #trayBtn {
                 background-color: transparent;
-                color: #9E9E9E;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 15px;
                 font-size: 16px;
-                padding: 0px;
+                padding: 0;
             }
             #trayBtn:hover {
                 background-color: rgba(255, 255, 255, 0.1);
@@ -351,11 +352,11 @@ class TitleBar(QWidget):
         self.minimize_btn.setStyleSheet("""
             #minimizeBtn {
                 background-color: transparent;
-                color: #9E9E9E;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 15px;
                 font-size: 16px;
-                padding: 0px;
+                padding: 0;
             }
             #minimizeBtn:hover {
                 background-color: rgba(255, 255, 255, 0.1);
@@ -377,11 +378,11 @@ class TitleBar(QWidget):
         self.maximize_btn.setStyleSheet("""
             #maximizeBtn {
                 background-color: transparent;
-                color: #9E9E9E;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 15px;
                 font-size: 16px;
-                padding: 0px;
+                padding: 0;
             }
             #maximizeBtn:hover {
                 background-color: rgba(255, 255, 255, 0.1);
@@ -403,11 +404,11 @@ class TitleBar(QWidget):
         self.close_btn.setStyleSheet("""
             #closeBtn {
                 background-color: transparent;
-                color: #9E9E9E;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 15px;
                 font-size: 16px;
-                padding: 0px;
+                padding: 0;
             }
             #closeBtn:hover {
                 background-color: #E53935;
