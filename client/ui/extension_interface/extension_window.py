@@ -381,8 +381,10 @@ class ExtensionWindow(QWidget):
         
         # 确保有标头
         if "headers" not in processed_data:
+            # 获取用户设置的UA
+            user_agent = self.get_user_agent()
             processed_data["headers"] = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
+                "User-Agent": user_agent
             }
         
         # 处理文件名
@@ -401,6 +403,36 @@ class ExtensionWindow(QWidget):
         processed_data["source"] = "browser_extension"
         
         return processed_data
+    
+    def get_user_agent(self):
+        """获取用户设置的User-Agent，查找上层窗口的配置管理器
+        
+        返回:
+            str: 用户设置的User-Agent，如未设置则返回默认值
+        """
+        try:
+            # 向上查找主窗口
+            parent = self.parent()
+            while parent:
+                # 查找主窗口的get_user_agent方法
+                if hasattr(parent, 'get_user_agent'):
+                    return parent.get_user_agent()
+                # 查找主窗口的配置管理器
+                elif hasattr(parent, 'config_manager') and parent.config_manager:
+                    # 尝试获取UA
+                    if hasattr(parent.config_manager, 'get_user_agent'):
+                        return parent.config_manager.get_user_agent()
+                    else:
+                        network_config = parent.config_manager.get("network", {})
+                        user_agent = network_config.get("user_agent")
+                        if user_agent:
+                            return user_agent
+                parent = parent.parent()
+        except Exception as e:
+            logging.warning(f"获取User-Agent失败: {e}")
+        
+        # 返回默认值
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     
     def _extract_filename_from_url(self, url):
         """从URL中提取文件名"""
