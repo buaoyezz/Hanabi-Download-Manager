@@ -7,7 +7,7 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts=false"
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFontDatabase, QFont, QIcon
-from PySide6.QtCore import QObject, Signal, Slot, Qt
+from PySide6.QtCore import QObject, Signal, Slot, Qt, QTimer
 from client.ui.client_interface.main_window import DownloadManagerWindow
 # 使用FallbackConnector作为默认连接器
 from connect.fallback_connector import FallbackConnector as Connector
@@ -151,7 +151,7 @@ class BrowserDownloadHandler(QObject):
     
     @Slot(dict)
     def _on_download_completed(self, task_data):
-        """下载完成处理"""
+        """下载完成处理 - 使用更稳定的通知处理"""
         request_id = task_data.get("request_id", "")
         log.info(f"下载完成 [ID: {request_id}]: {task_data.get('file_name', '未知文件')}")
         
@@ -159,26 +159,28 @@ class BrowserDownloadHandler(QObject):
         if request_id:
             self.active_requests.pop(request_id, None)
             
-        # 发出完成信号
-        self.downloadCompleted.emit(task_data)
+        try:
+            # 确保通知不会堆叠在一起，使用更长的延迟
+            delay = 500  # 增加延迟以确保之前的通知已经完全显示
+            QTimer.singleShot(delay, lambda: self._emit_completion_signal(task_data))
+        except Exception as e:
+            log.error(f"设置延迟显示通知失败: {e}")
+            # 直接发射信号作为备份方案
+            self.downloadCompleted.emit(task_data)
+    
+    def _emit_completion_signal(self, task_data):
+        """安全发射完成信号，确保进行正确的线程处理"""
+        try:
+            # 在主线程上下文中发射信号
+            self.downloadCompleted.emit(task_data)
+        except Exception as e:
+            log.error(f"发射下载完成信号失败: {e}")
     
     def _remove_dialog(self, dialog, request_id=None):
-        """从活跃列表中移除弹窗"""
+        """从活跃列表中移除弹窗 - 优化引用管理"""
         try:
-            # 清理弱引用 - 安全地检查每个引用
-            new_active_dialogs = []
-            for ref in self.active_dialogs:
-                try:
-                    # 检查引用是否有效
-                    dlg = ref()
-                    if dlg is not None and dlg != dialog:
-                        new_active_dialogs.append(ref)
-                except Exception:
-                    # 忽略任何引用错误
-                    pass
-                    
-            # 更新列表
-            self.active_dialogs = new_active_dialogs
+            # 清理弱引用 - 使用更安全的列表复制方法
+            self.active_dialogs = [ref for ref in self.active_dialogs if ref() is not None and ref() != dialog]
                 
             # 清理请求跟踪
             if request_id and request_id in self.active_requests:
@@ -260,7 +262,6 @@ if __name__ == "__main__":
     
     # 检查是否应该启动时最小化到托盘
     from client.ui.client_interface.settings.config import ConfigManager
-    from PySide6.QtCore import QTimer  # 确保正确导入QTimer
     config = ConfigManager()
     start_minimized = config.get_setting("window", "start_minimized", False)
     
