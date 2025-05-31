@@ -5,6 +5,14 @@ import re
 from core.config.config_manager import config
 from core.log.log_manager import log
 
+# 导入版本管理器
+try:
+    from client.version.version_manager import VersionManager
+    version_manager = VersionManager.get_instance()
+except ImportError:
+    version_manager = None
+    log.warning("无法导入版本管理器，将使用默认版本号")
+
 class I18N(QObject):
     """
     国际化管理类
@@ -30,8 +38,41 @@ class I18N(QObject):
         # 应用当前语言
         self.set_language(self.current_language)
         
-        # 加载版本号
-        self.version = self._load_version()
+        # 初始化版本号
+        self._init_version()
+        
+    def _init_version(self):
+        """初始化版本信息"""
+        try:
+            # 优先使用版本管理器获取版本信息
+            if version_manager:
+                self.client_version = version_manager.get_client_version()
+                self.extension_version = version_manager.get_extension_version()
+                log.info(f"从版本管理器获取版本信息: 客户端={self.client_version}, 扩展={self.extension_version}")
+            else:
+                # 回退到旧方法
+                self.client_version = self._load_version()
+                self.extension_version = "1.0.1"  # 默认扩展版本
+                log.info(f"使用旧方法获取版本信息: 客户端={self.client_version}, 扩展={self.extension_version}")
+        except Exception as e:
+            log.error(f"初始化版本信息失败: {str(e)}")
+            self.client_version = "1.0.0"
+            self.extension_version = "1.0.1"
+    
+    def reload_version(self):
+        """重新加载版本信息"""
+        try:
+            if version_manager:
+                # 使用版本管理器重新加载
+                if version_manager.reload_version():
+                    self.client_version = version_manager.get_client_version()
+                    self.extension_version = version_manager.get_extension_version()
+                    log.info(f"重新加载版本信息: 客户端={self.client_version}, 扩展={self.extension_version}")
+                    return True
+            return False
+        except Exception as e:
+            log.error(f"重新加载版本信息失败: {str(e)}")
+            return False
         
     def _load_version(self):
         try:
@@ -40,10 +81,10 @@ class I18N(QObject):
             
             # 尝试多个可能的版本文件路径
             possible_paths = [
-                os.path.join(base_dir, "../../client/version_assets/VERSION"),  # 开发环境路径
-                os.path.join(base_dir, "../version_assets/VERSION"),            # 相对路径
-                os.path.join(base_dir, "/version_assets/VERSION"),              # 打包后可能的路径
-                os.path.join(os.path.dirname(base_dir), "version_assets/VERSION") # 上级目录
+                os.path.join(base_dir, "../../client/version/VERSION"),  # 开发环境路径
+                os.path.join(base_dir, "../version/VERSION"),            # 相对路径
+                os.path.join(base_dir, "/version/VERSION"),              # 打包后可能的路径
+                os.path.join(os.path.dirname(base_dir), "version/VERSION") # 上级目录
             ]
             
             # 遍历所有可能的路径
@@ -200,14 +241,16 @@ class I18N(QObject):
             log.error(f"保存HDMTR文件失败: {language}, {str(e)}")
             return False
     
-    def get_text(self, key, *args):
+    def get_text(self, key, *args, **kwargs):
         """
         获取翻译文本
         支持参数格式化: i18n.get_text("hello", "world") -> "Hello, world!"
+        支持版本号替换: i18n.get_text("version_string") -> "版本 1.0.7"
         
         Args:
             key: 翻译键
             *args: 格式化参数
+            **kwargs: 格式化参数 (关键字参数)
             
         Returns:
             str: 翻译后的文本，如果找不到则返回键名
@@ -221,15 +264,41 @@ class I18N(QObject):
             # 获取当前语言的翻译
             translation = self.translations.get(self.current_language, {}).get(key, key)
             
-            # 如果是版本号相关请求
+            # 特殊键的处理
             if key == "version":
-                return self.version
+                return self.client_version
+            elif key == "client_version":
+                return self.client_version
+            elif key == "extension_version":
+                # 如果翻译项需要格式化版本号
+                if "{version}" in translation:
+                    return translation.format(version=self.extension_version)
+                return self.extension_version
+            
+            # 检查翻译是否需要版本号替换
+            if "{version}" in translation:
+                # 确定要使用的版本号
+                version_to_use = kwargs.get("version", self.client_version)
+                if "extension" in key.lower():
+                    version_to_use = self.extension_version
+                # 使用版本号替换占位符
+                translation = translation.format(version=version_to_use)
             
             # 如果有参数，进行格式化
-            if args and "{" in translation:
+            if args and "{" in translation and "}" in translation:
                 try:
                     return translation.format(*args)
-                except Exception:
+                except Exception as e:
+                    log.warning(f"格式化翻译失败: {key}, {str(e)}")
+                    # 格式化失败，返回原文
+                    return translation
+            
+            # 如果有关键字参数，进行格式化
+            if kwargs and "{" in translation and "}" in translation:
+                try:
+                    return translation.format(**kwargs)
+                except Exception as e:
+                    log.warning(f"关键字格式化翻译失败: {key}, {str(e)}")
                     # 格式化失败，返回原文
                     return translation
             
