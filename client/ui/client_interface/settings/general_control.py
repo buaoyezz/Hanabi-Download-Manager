@@ -42,8 +42,14 @@ class GeneralControlWidget(QWidget):
             # 开发环境
             python_path = sys.executable
             # 当前文件路径: client/ui/client_interface/settings/general_control.py
-            # main.py 路径: ../../../../main.py (相对于当前文件)
-            main_script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../main.py'))
+            # main.py 路径需要使用绝对路径确保准确性
+            main_script_path = os.path.abspath(os.path.join(
+                os.path.dirname(__file__),  # general_control.py所在目录
+                '..', '..', '..', '..',     # 回到项目根目录
+                'main.py'                   # main.py文件
+            ))
+            # 输出调试信息
+            print(f"开发环境启动路径: {python_path} {main_script_path}")
             return [python_path, main_script_path]
 
     def load_config(self):
@@ -472,12 +478,92 @@ class GeneralControlWidget(QWidget):
     def _setup_autostart(self):
         """设置开机自启动"""
         try:
-            # 获取应用程序路径参数
-            app_args = self._get_app_path_args()
+            # 检测是否为打包状态
+# 检测是否为打包状态
+            is_packaged = getattr(sys, 'frozen', False)
+
+            # 检测是否为发布版EXE文件（而非开发环境的python.exe）
+            force_exe_mode = (is_packaged or 
+                            (sys.executable.lower().endswith('.exe') and 
+                            'hanabi' in sys.executable.lower()))
+            
+            # 调试输出
+            print(f"开机自启动设置 - 检测到的环境信息:")
+            print(f"当前工作目录: {os.getcwd()}")
+            print(f"sys.frozen存在: {is_packaged}")
+            print(f"可执行文件路径: {sys.executable}")
+            print(f"强制EXE模式: {force_exe_mode}")
+            
+            # 获取启动参数
+            start_minimized = self.start_minimized_checkbox.isChecked()
+            startup_args = ["--autostart"]
+            
+            # 如果启用了最小化启动，添加--silent参数以静默启动
+            if start_minimized:
+                startup_args.append("--silent")
             
             if sys.platform == 'win32':  # Windows
                 import winreg
-                command_line = subprocess.list2cmdline(app_args)
+                
+                # 将参数列表转换为字符串
+                startup_args_str = " ".join(startup_args)
+                
+                # 打包环境 或 强制EXE模式
+                if is_packaged or force_exe_mode:
+                    # 直接使用EXE路径
+                    exe_path = sys.executable
+                    
+                    # 确保使用完整路径而非短路径(~1)格式
+                    try:
+                        if '~' in exe_path:
+                            try:
+                                import win32api
+                                exe_path = win32api.GetLongPathName(exe_path)
+                                print(f"转换短路径为完整路径: {exe_path}")
+                            except ImportError:
+                                # 如果没有win32api，使用os.path.abspath
+                                exe_path = os.path.abspath(exe_path)
+                                print(f"使用abspath转换路径: {exe_path}")
+                    except Exception as path_err:
+                        print(f"路径转换错误: {path_err}")
+                    
+                    # 检查路径是否包含HanabiDownloadManager
+                    if "hanabidownloadmanager" not in exe_path.lower() and "hanabi" not in exe_path.lower():
+                        print(f"警告: 可执行文件路径可能不正确，未包含'HanabiDownloadManager'")
+                        
+                        # 尝试查找正确的EXE文件
+                        try:
+                            # 检查常见安装位置
+                            possible_paths = [
+                                r"D:\HanabiDownloadManager\HanabiDownloadManager.exe",
+                                r"C:\Program Files\HanabiDownloadManager\HanabiDownloadManager.exe",
+                                r"C:\Program Files (x86)\HanabiDownloadManager\HanabiDownloadManager.exe"
+                            ]
+                            
+                            for path in possible_paths:
+                                if os.path.exists(path):
+                                    exe_path = path
+                                    print(f"找到可能的正确EXE路径: {exe_path}")
+                                    break
+                        except Exception as find_err:
+                            print(f"查找可能的EXE路径时出错: {find_err}")
+                    
+                    # 添加启动参数 - 直接使用引号包围路径并添加参数，避免使用@符号
+                    command_line = f'"{exe_path}" {startup_args_str}'
+                    print(f"使用EXE模式启动命令: {command_line}")
+                else:
+                    # 开发环境模式 - 修改命令行构造方式
+                    python_path = sys.executable
+                    main_script_path = os.path.abspath(os.path.join(
+                        os.path.dirname(__file__),  # general_control.py所在目录
+                        '..', '..', '..', '..',     # 回到项目根目录
+                        'main.py'                   # main.py文件
+                    ))
+                    
+                    # 直接构造命令行，避免使用list2cmdline可能导致的问题
+                    command_line = f'"{python_path}" "{main_script_path}" {startup_args_str}'
+                    print(f"使用开发环境模式启动命令: {command_line}")
+                
                 # 打开注册表项
                 key = winreg.OpenKey(
                     winreg.HKEY_CURRENT_USER,
@@ -485,18 +571,30 @@ class GeneralControlWidget(QWidget):
                     0,
                     winreg.KEY_SET_VALUE
                 )
+                
                 # 设置注册表值
                 winreg.SetValueEx(
                     key,
                     "HanabiDownloadManager",
                     0,
                     winreg.REG_SZ,
-                    command_line #直接使用格式化好的命令行
+                    command_line
                 )
                 winreg.CloseKey(key)
-                self.notify_manager.show_message("开机启动", "已设置开机自动启动")
                 
+                # 验证注册表设置
+                self._verify_autostart_registry()
+                
+                self.notify_manager.show_message("开机启动", "已设置开机自动启动")
+            
             elif sys.platform == 'darwin':  # macOS
+                # 获取应用程序路径和参数
+                app_args = self._get_app_path_args()
+                
+                # 添加自启动和静默参数
+                for arg in startup_args:
+                    app_args.append(arg)
+                
                 # 创建LaunchAgents目录（如果不存在）
                 launch_agents_dir = os.path.expanduser("~/Library/LaunchAgents")
                 os.makedirs(launch_agents_dir, exist_ok=True)
@@ -533,6 +631,13 @@ class GeneralControlWidget(QWidget):
                 self.notify_manager.show_message("开机启动", "已设置开机自动启动")
                 
             elif sys.platform.startswith('linux'):  # Linux
+                # 获取应用程序路径和参数
+                app_args = self._get_app_path_args()
+                
+                # 添加自启动和静默参数
+                for arg in startup_args:
+                    app_args.append(arg)
+                
                 # 创建桌面文件
                 autostart_dir = os.path.expanduser("~/.config/autostart")
                 os.makedirs(autostart_dir, exist_ok=True)
@@ -561,6 +666,54 @@ X-GNOME-Autostart-enabled=true
             self.notify_manager.show_message("开机启动", f"设置开机自启动失败: {str(e)}")
             print(f"设置开机自启动失败: {str(e)}")
     
+    def _verify_autostart_registry(self):
+        """验证注册表中的自启动设置是否正确"""
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                0,
+                winreg.KEY_READ
+            )
+            value, _ = winreg.QueryValueEx(key, "HanabiDownloadManager")
+            winreg.CloseKey(key)
+            
+            print(f"验证注册表自启动设置: {value}")
+            
+            # 检查是否使用了正确的EXE路径
+            if getattr(sys, 'frozen', False) and ".exe" in sys.executable.lower():
+                if ".exe" not in value.lower():
+                    print("警告: 注册表中没有使用EXE文件路径!")
+                else:
+                    print("✓ 注册表设置使用了正确的EXE文件路径")
+            
+            # 检查是否有@符号问题
+            if "@" in value:
+                print("警告: 注册表命令中包含@符号，可能导致启动失败!")
+                # 尝试修复此问题
+                self._setup_autostart()
+            else:
+                print("✓ 注册表命令中没有@符号问题")
+                
+            # 检查命令格式是否正确
+            if not (value.startswith('"') and " --autostart" in value):
+                print("警告: 注册表命令格式可能不正确，缺少正确的引号或启动参数!")
+            else:
+                print("✓ 注册表命令格式正确")
+                
+            # 检查静默启动参数
+            start_minimized = self.start_minimized_checkbox.isChecked()
+            if start_minimized and " --silent" not in value:
+                print("警告: 启用了最小化启动但注册表命令中缺少--silent参数!")
+                # 尝试修复此问题
+                self._setup_autostart()
+            elif start_minimized:
+                print("✓ 注册表命令包含静默启动参数")
+                
+        except Exception as e:
+            print(f"验证注册表设置时出错: {e}")
+    
     def _remove_autostart(self):
         """移除开机自启动设置"""
         try:
@@ -582,13 +735,13 @@ X-GNOME-Autostart-enabled=true
                     # 注册表项不存在，忽略错误
                     pass
                 
-            elif sys.platform == 'darwin':  # macOS
-                # 卸载并删除plist文件
-                plist_path = os.path.expanduser("~/Library/LaunchAgents/com.hanabi.downloadmanager.plist")
-                if os.path.exists(plist_path):
-                    subprocess.run(['launchctl', 'unload', plist_path])
-                    os.remove(plist_path)
-                    self.notify_manager.show_message("开机启动", "已取消开机自动启动")
+            # elif sys.platform == 'darwin':  # macOS
+            #     # 卸载并删除plist文件
+            #     plist_path = os.path.expanduser("~/Library/LaunchAgents/com.hanabi.downloadmanager.plist")
+            #     if os.path.exists(plist_path):
+            #         subprocess.run(['launchctl', 'unload', plist_path])
+            #         os.remove(plist_path)
+            #         self.notify_manager.show_message("开机启动", "已取消开机自动启动")
                 
             elif sys.platform.startswith('linux'):  # Linux
                 # 删除桌面文件
@@ -609,12 +762,12 @@ X-GNOME-Autostart-enabled=true
         # 此方法不再直接使用，由 _get_app_path_args() 替代以提供更灵活的参数列表
         # 保留此方法以防其他地方意外调用，但其逻辑已合并到 _get_app_path_args
         if getattr(sys, 'frozen', False):
-            return sys.executable
+            return f'"{sys.executable}"'
         else:
             python_path = sys.executable
             main_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../main.py'))
-            # return f"{python_path} {main_script}" # 旧的简单拼接方式
-            return subprocess.list2cmdline([python_path, main_script])
+            # 使用引号包裹路径，避免空格和特殊字符问题
+            return f'"{python_path}" "{main_script}"'
 
     def _apply_close_to_tray_setting(self, enabled):
         """应用关闭到托盘设置"""
