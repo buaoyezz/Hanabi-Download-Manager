@@ -1,9 +1,11 @@
 # Hanabi Download Manager Translation Resource
 # Language: zh_CN
 # Format: key=value
+# Last Update: 2025-05-30
+# Translator: ZZBuAoYe
 
 # 通用
-app_name=花火下载管理器
+app_name=Hanabi Download Manager
 confirm=确认
 cancel=取消
 ok=确定
@@ -315,7 +317,7 @@ record_deleted_msg=已删除'{filename}'的历史记录
 delete_record_failed=删除历史记录失败
 
 # 首页窗口
-stable_channel_version=Stable Channel 1.0.7 Released
+stable_channel_version=Stable Channel {version} Released
 download_statistics=下载统计
 active_downloads=活跃下载
 completed_downloads=已完成下载
@@ -368,3 +370,8 @@ connection_port=连接端口
 websocket_server=WebSocket服务器
 refresh_connection=刷新连接
 manual_download=手动下载
+
+# 版本相关 (用于动态替换)
+version_string=版本 {version}
+client_version={version}
+extension_version=扩展版本 {version}

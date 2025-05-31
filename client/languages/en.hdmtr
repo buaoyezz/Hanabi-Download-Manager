@@ -1,6 +1,8 @@
 # Hanabi Download Manager Translation Resource
 # Language: en
 # Format: key=value
+# Last Update: 2025-05-30
+# Translator: ZZBuAoYe
 
 # General
 app_name=Hanabi Download Manager
@@ -317,7 +319,7 @@ record_deleted_msg=Deleted history record for '{filename}'
 delete_record_failed=Delete record failed
 
 # Home Window
-stable_channel_version=Stable Channel 1.0.7 Released
+stable_channel_version=Stable Channel {version} Released
 download_statistics=Download Statistics
 active_downloads=Active Downloads
 completed_downloads=Completed Downloads
@@ -370,3 +372,8 @@ connection_port=Connection port
 websocket_server=WebSocket server
 refresh_connection=Refresh connection
 manual_download=Manual download
+
+# Version related (for dynamic replacement)
+version_string=Version {version}
+client_version={version}
+extension_version=Extension Version {version}
