@@ -7,7 +7,29 @@ import re
 import base64
 import hashlib
 import socket
+import sys
+import os
 from typing import Dict, List, Optional, Callable
+
+# 添加父目录到sys.path以导入客户端模块
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+# 导入版本管理器
+try:
+    from client.version.version_manager import VersionManager
+    version_manager = VersionManager.get_instance()
+except ImportError:
+    # 创建一个简单的版本管理类作为备用
+    class VersionManagerFallback:
+        def get_client_version(self):
+            return "1.0.7"  # 默认版本
+        def get_extension_version(self):
+            return "1.0.1"  # 默认扩展版本
+    version_manager = VersionManagerFallback()
+    logging.warning("无法导入版本管理器，使用默认版本")
 
 class BasicTCPServer:
     """简单的TCP服务器，用于在WebSocket服务器不可用时作为备选"""
@@ -174,8 +196,8 @@ class BasicTCPServer:
                 # 发送版本信息 (WebSocket格式)
                 version_info = {
                     "type": "version",
-                    "ClientVersion": "1.0.7",
-                    "LatestExtensionVersion": "1.0.1"
+                    "ClientVersion": version_manager.get_client_version(),
+                    "LatestExtensionVersion": version_manager.get_extension_version()
                 }
                 ws_message = self._encode_websocket_frame(json.dumps(version_info))
                 if not await self._safe_write(writer, ws_message):
@@ -194,8 +216,8 @@ class BasicTCPServer:
                     # 不是有效的JSON，发送版本信息
                     version_info = {
                         "type": "version",
-                        "ClientVersion": "1.0.7",
-                        "LatestExtensionVersion": "1.0.1"
+                        "ClientVersion": version_manager.get_client_version(),
+                        "LatestExtensionVersion": version_manager.get_extension_version()
                     }
                     if not await self._safe_write(writer, (json.dumps(version_info) + '\n').encode('utf-8')):
                         return

@@ -6,7 +6,29 @@ import traceback
 import time  # 添加时间模块导入
 import socket  # 添加socket模块导入
 import random  # 添加随机模块导入
+import sys
+import os
 from typing import Dict, List, Optional, Callable
+
+# 添加父目录到sys.path以导入客户端模块
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+# 导入版本管理器
+try:
+    from client.version.version_manager import VersionManager
+    version_manager = VersionManager.get_instance()
+except ImportError:
+    # 创建一个简单的版本管理类作为备用
+    class VersionManagerFallback:
+        def get_client_version(self):
+            return "1.0.7"  # 默认版本
+        def get_extension_version(self):
+            return "1.0.1"  # 默认扩展版本
+    version_manager = VersionManagerFallback()
+    logging.warning("无法导入版本管理器，使用默认版本")
 
 # 尝试导入websockets包的所有必要模块
 try:
@@ -54,8 +76,8 @@ class WebSocketServer:
             # 发送版本信息
             version_info = {
                 "type": "version",
-                "ClientVersion": "1.0.7",
-                "LatestExtensionVersion": "1.0.1",
+                "ClientVersion": version_manager.get_client_version(),
+                "LatestExtensionVersion": version_manager.get_extension_version(),
                 "ServerStatus": "ready"
             }
             await websocket.send(json.dumps(version_info))
