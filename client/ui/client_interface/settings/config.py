@@ -8,36 +8,41 @@ class ConfigManager:
     _instance = None
     _config = None
     
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
+        """单例模式"""
         if cls._instance is None:
             cls._instance = super(ConfigManager, cls).__new__(cls)
-            cls._instance._init_config()
+            cls._instance._initialized = False
         return cls._instance
+    
+    def __init__(self):
+        """初始化配置管理器"""
+        if not self._initialized:
+            self._initialized = True
+            self._init_config()
     
     def _init_config(self):
         # 默认配置
         self._config = {
             "download": {
-                "thread_count": 8,           # 每个任务的默认线程数
-                "dynamic_threads": True,      # 是否启用动态线程
-                "max_thread_count": 32,       # 最大线程数限制
-                "min_segment_size": 10,       # 最小分段大小(MB)
-                "default_segments": 8,        # 默认分段数
-                "save_path": str(Path.home() / "Downloads"),  # 默认保存路径
-                "max_tasks": 5,               # 最大同时下载任务数
-                "buffer_size": 8192,          # 缓冲区大小 (bytes)
-                "chunk_size": 1024 * 1024,    # 分块大小 (1MB)
-                "auto_organize": False,       # 是否自动整理下载文件
-                "auto_start": True,           # 是否自动开始下载
-                "max_retries": 3              # 最大重试次数
+                "default_path": "",          # 默认下载路径
+                "thread_count": 8,           # 默认下载线程数
+                "default_segments": 8,       # 默认下载分段数
+                "dynamic_threads": True,     # 智能线程管理
+                "force_segments": False,     # 强制分段
+                "ask_path": True,            # 是否询问下载路径
+                "auto_rename": True,         # 自动重命名重复文件
+                "continue_download": True,   # 断点续传
+                "category_paths": {}         # 分类下载路径
             },
             "network": {
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",  # 默认UA
                 "proxy": {
-                    "enabled": False,         # 是否启用代理
+                    "enable": False,         # 是否启用代理
                     "type": "http",           # 代理类型: http, socks5
                     "host": "",               # 代理主机
                     "port": 1080,             # 代理端口
-                    "auth": False,            # 是否启用代理认证
+                    "auth_required": False,   # 是否启用代理认证
                     "username": "",           # 代理用户名
                     "password": ""            # 代理密码
                 },
@@ -250,6 +255,19 @@ class ConfigManager:
         if success:
             self.save_config()
         return success
+
+    # 获取用户代理字符串
+    def get_user_agent(self):
+        """获取用户设置的User-Agent"""
+        return self.get("network", {}).get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+    
+    # 设置用户代理字符串
+    def set_user_agent(self, user_agent):
+        """设置User-Agent"""
+        network_config = self.get("network", {})
+        network_config["user_agent"] = user_agent
+        self.set("network", network_config)
+        return True
 
 # 全局访问点
 config = ConfigManager()

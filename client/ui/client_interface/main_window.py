@@ -988,11 +988,14 @@ class DownloadManagerWindow(QMainWindow):
         request_id = f"manual_{int(time.time() * 1000)}"
         logging.info(f"创建手动下载任务 [ID: {request_id}]")
         
+        # 获取用户设置的UA
+        user_agent = self.get_user_agent()
+        
         # 创建下载请求数据，与浏览器扩展格式相同
         download_data = {
             "url": url,
             "headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
+                "User-Agent": user_agent
             },
             "requestId": request_id,
             "type": "manual"  # 标记为手动添加类型
@@ -1865,6 +1868,9 @@ class DownloadManagerWindow(QMainWindow):
             if not hasattr(self, 'task_window') or self.task_window is None:
                 self._create_task_window()
             
+            # 获取用户设置的UA
+            user_agent = self.get_user_agent()
+            
             # 构建下载任务数据
             task_data = {
                 "url": url,
@@ -1884,7 +1890,7 @@ class DownloadManagerWindow(QMainWindow):
                 "url": url,
                 "filename": filename,
                 "headers": {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36"
+                    "User-Agent": user_agent
                 },
                 "requestId": task_data["request_id"],
                 "type": "update"
@@ -2489,6 +2495,30 @@ class DownloadManagerWindow(QMainWindow):
             
             # 显示悬浮窗
             self.weather_popup.show_at(QPoint(popup_x, popup_y))
+
+    # 添加获取用户UA的方法
+    def get_user_agent(self):
+        """获取用户设置的User-Agent
+        
+        返回:
+            str: 用户设置的User-Agent，如未设置则返回默认值
+        """
+        try:
+            if hasattr(self, 'config_manager') and self.config_manager:
+                # 优先使用专用方法
+                if hasattr(self.config_manager, 'get_user_agent'):
+                    return self.config_manager.get_user_agent()
+                
+                # 直接从配置获取
+                network_config = self.config_manager.get("network", {})
+                user_agent = network_config.get("user_agent")
+                if user_agent:
+                    return user_agent
+        except Exception as e:
+            logging.warning(f"获取User-Agent失败: {e}")
+        
+        # 返回默认值
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
 # 添加天气获取线程类
 class WeatherFetchThread(QThread):

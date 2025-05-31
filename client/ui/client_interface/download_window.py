@@ -462,6 +462,9 @@ class DownloadWindow(QWidget):
             if not filename:
                 filename = self._extract_filename_from_url(url)
             
+            # 获取用户设置的UA
+            user_agent = self.get_user_agent()
+            
             # 创建任务数据
             request_id = download_data.get("requestId", f"ext_{int(time.time() * 1000)}")
             
@@ -476,7 +479,7 @@ class DownloadWindow(QWidget):
                 "start_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "source": "browser",  # 标记为浏览器来源
                 "request_id": request_id,
-                "headers": download_data.get("headers", {})
+                "headers": download_data.get("headers", {"User-Agent": user_agent})
             }
             
             # 添加Referer支持
@@ -697,6 +700,9 @@ class DownloadWindow(QWidget):
             if not filename:
                 filename = self._extract_filename_from_url(url)
             
+            # 获取用户设置的UA
+            user_agent = self.get_user_agent()
+            
             # 创建任务数据
             request_id = download_data.get("requestId", f"ext_{int(time.time() * 1000)}")
             
@@ -707,7 +713,7 @@ class DownloadWindow(QWidget):
                 "multi_thread": True,
                 "source": "browser",  # 标记为浏览器来源
                 "request_id": request_id,
-                "headers": download_data.get("headers", {})
+                "headers": download_data.get("headers", {"User-Agent": user_agent})
             }
             
             # 添加Referer支持
@@ -717,13 +723,16 @@ class DownloadWindow(QWidget):
             
             # 显示下载弹窗
             from client.ui.extension_interface.pop_dialog import DownloadPopDialog
+            
             # 添加来源信息到任务数据
             task_data["download_source"] = "client/ui/client_interface/download_window.py:handle_browser_download_request"
-            dialog = DownloadPopDialog.create_and_show(task_data, self, auto_start=True)  # 自动开始下载
+            dialog = DownloadPopDialog.create_and_show(download_data=task_data, parent=self.parent(), auto_start=True)  # 自动开始下载
             
             # 连接信号
-            dialog.downloadRequested.connect(self._on_dialog_download_requested)
-            dialog.downloadCompleted.connect(self._on_dialog_download_completed)
+            if hasattr(dialog, 'downloadRequested'):
+                dialog.downloadRequested.connect(self._on_dialog_download_requested)
+            if hasattr(dialog, 'downloadCompleted'):
+                dialog.downloadCompleted.connect(self._on_dialog_download_completed)
             
             # 记录创建的弹窗
             logging.info(f"[download_window.py] {i18n.get_text('created_dialog_for_request')}: {request_id}")
@@ -739,4 +748,35 @@ class DownloadWindow(QWidget):
             # 显示错误通知
             NotifyManager.error(f"{i18n.get_text('process_browser_download_failed')}: {str(e)}")
             
+            self.show_toast(i18n.get_text("download_add_failed"))
             return False
+            
+    def get_user_agent(self):
+        """获取用户设置的User-Agent，查找上层窗口的配置管理器
+        
+        返回:
+            str: 用户设置的User-Agent，如未设置则返回默认值
+        """
+        try:
+            # 向上查找主窗口
+            parent = self.parent()
+            while parent:
+                # 查找主窗口的get_user_agent方法
+                if hasattr(parent, 'get_user_agent'):
+                    return parent.get_user_agent()
+                # 查找主窗口的配置管理器
+                elif hasattr(parent, 'config_manager') and parent.config_manager:
+                    # 尝试获取UA
+                    if hasattr(parent.config_manager, 'get_user_agent'):
+                        return parent.config_manager.get_user_agent()
+                    else:
+                        network_config = parent.config_manager.get("network", {})
+                        user_agent = network_config.get("user_agent")
+                        if user_agent:
+                            return user_agent
+                parent = parent.parent()
+        except Exception as e:
+            logging.warning(f"获取User-Agent失败: {e}")
+        
+        # 返回默认值
+        return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"

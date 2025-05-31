@@ -5,6 +5,7 @@ from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.components.customNotify import NotifyManager
 from client.I18N.i18n import i18n
+from client.version.version_manager import VersionManager
 import webbrowser
 
 class RoundedContainer(QWidget):
@@ -29,6 +30,9 @@ class RoundedContainer(QWidget):
 class AboutWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # 初始化版本管理器
+        self.version_manager = VersionManager.get_instance()
         
         # 初始化字体管理器
         self.font_manager = FontManager()
@@ -317,7 +321,7 @@ class AboutWindow(QWidget):
     def update_ui_texts(self):
         """更新UI上的所有文本以匹配当前语言"""
         # 版本信息
-        self.version_label.setText(f"{i18n.get_text('version')} 1.0.7 Release")
+        self.version_label.setText(f"{i18n.get_text('version')} {self.version_manager.get_client_version()} Release")
         
         # 软件描述
         self.desc_label.setText(i18n.get_text("about_description"))
