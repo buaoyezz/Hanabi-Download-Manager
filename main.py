@@ -112,7 +112,7 @@ class BrowserDownloadHandler(QObject):
             
             # 创建弹窗 - 优化后的创建方式
             # DownloadPopDialog.create_and_show 方法会根据最小化状态正确处理父窗口关系
-            dialog = DownloadPopDialog.create_and_show(task_data, parent=parent_window, auto_start=True)
+            dialog = DownloadPopDialog.create_and_show(task_data, parent=parent_window, auto_start=False)
             
             # 确保弹窗记录了主窗口最小化的状态
             if dialog:
