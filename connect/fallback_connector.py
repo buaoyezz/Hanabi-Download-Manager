@@ -39,6 +39,7 @@ except Exception as e:
     # 这里不需改变值，因为默认已经是False和TCP
 
 from core.download_core.Hanabi_NSF_Kernel import DownloadEngine
+from core.download_core.Hanabi_AS_Kernel import HanabiASKernel
 
 class FallbackConnector(QObject):
     """
@@ -300,14 +301,43 @@ class FallbackConnector(QObject):
         if 'Accept' not in headers:
             headers['Accept'] = '*/*'
         
-        # 创建下载引擎
-        download_engine = DownloadEngine(
-            url=url,
-            headers=headers,
-            max_concurrent=8,  # 可以从配置中读取
-            save_path=None,    # 使用默认保存路径，也可以从请求中获取
-            file_name=filename,
-            smart_threading=True
+        # 使用自动选择内核创建下载引擎
+        import asyncio
+        
+        # 创建自动调度内核
+        as_kernel = HanabiASKernel()
+        
+        # 初始化下载任务
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        success, error_msg = loop.run_until_complete(
+            as_kernel.initialize_download(
+                url=url,
+                headers=headers,
+                max_concurrent=8,  # 可以从配置中读取
+                save_path=None,    # 使用默认保存路径，也可以从请求中获取
+                file_name=filename,
+                smart_threading=True
+            )
         )
         
-        return download_engine
+        # 检查是否成功初始化
+        if not success:
+            raise Exception(f"初始化下载失败: {error_msg}")
+        
+        # 获取选择的内核类型和下载引擎
+        kernel_type = as_kernel.current_kernel_type
+        
+        # 如果是NSF内核，直接返回其实例
+        if kernel_type == "NSF":
+            # 启动下载线程
+            loop.run_until_complete(as_kernel.start_download())
+            return as_kernel.nsf_kernel
+        elif kernel_type == "NCT":
+            # NCT内核需要特殊处理
+            # 注意：这里仅返回NSF内核作为兼容处理，实际使用需要在调用方处理NCT逻辑
+            loop.run_until_complete(as_kernel.start_download())
+            # 为了兼容性，我们仍然返回NSF内核的实例（如果可用）
+            return as_kernel.nsf_kernel
+        else:
+            raise Exception(f"未知的内核类型: {kernel_type}")
