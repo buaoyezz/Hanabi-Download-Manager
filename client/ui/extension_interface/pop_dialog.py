@@ -21,6 +21,7 @@ from core.animations.window_auto_resize_animation import apply_resize_animation
 from client.ui.client_interface.utils.file_icons_get import FileIconGetter
 
 from core.download_core.Hanabi_NSF_Kernel import DownloadEngine
+from core.download_core.Hanabi_AS_Kernel import HanabiASKernel
 from connect.fallback_connector import FallbackConnector
 from core.font.font_manager import FontManager
 from client.ui.components.scrollStyle import ScrollStyle
@@ -404,105 +405,238 @@ class DownloadPopDialog(QDialog):
                 except Exception:
                     pass
                 
-            # 停止下载引擎
-            if hasattr(self, 'download_engine') and self.download_engine:
+            # 标记已取消 - 确保不会触发后续处理
+            self.cancelled = True
+            
+            # ===== 修复核心：停止下载引擎和AS内核 =====
+            # 先处理AS内核
+            if hasattr(self, 'as_kernel') and self.as_kernel is not None:
                 try:
-                    # 如果是下载中状态，先尝试暂停下载
-                    if self.current_state == "downloading" and hasattr(self, 'pause_resume_btn'):
-                        # 暂停下载，不使用sleep以避免阻塞UI线程
-                        self.download_engine.pause()
+                    logging.info("关闭窗口: 停止AS内核下载任务")
                     
-                    # 如果下载已完成，删除可能存在的断点续传文件
-                    if self.current_state == "completed" and self.download_engine.file_name:
+                    # 如果当前是NSF内核
+                    if self.as_kernel.current_kernel_type == "NSF" and self.as_kernel.nsf_kernel:
+                        # 先断开所有信号
+                        if hasattr(self, 'download_engine') and self.download_engine:
+                            try:
+                                if hasattr(self.download_engine, 'initialized'):
+                                    try:
+                                        self.download_engine.initialized.disconnect()
+                                    except:
+                                        pass
+                                    
+                                if hasattr(self.download_engine, 'block_progress_updated'):
+                                    try:
+                                        self.download_engine.block_progress_updated.disconnect()
+                                    except:
+                                        pass
+                                    
+                                if hasattr(self.download_engine, 'speed_updated'):
+                                    try:
+                                        self.download_engine.speed_updated.disconnect()
+                                    except:
+                                        pass
+                                    
+                                if hasattr(self.download_engine, 'download_completed'):
+                                    try:
+                                        self.download_engine.download_completed.disconnect()
+                                    except:
+                                        pass
+                                    
+                                if hasattr(self.download_engine, 'error_occurred'):
+                                    try:
+                                        self.download_engine.error_occurred.disconnect()
+                                    except:
+                                        pass
+                                    
+                                if hasattr(self.download_engine, 'file_name_changed'):
+                                    try:
+                                        self.download_engine.file_name_changed.disconnect()
+                                    except:
+                                        pass
+                            except Exception as signal_error:
+                                logging.warning(f"断开下载引擎信号时出错: {signal_error}")
+                                
+                            # 安全停止NSF内核
+                            try:
+                                self.as_kernel.nsf_kernel.stop()
+                                
+                                # === 修复：增加线程等待和终止逻辑 ===
+                                # 等待线程停止，增加超时时间
+                                if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
+                                    # 先等待3秒
+                                    if not self.as_kernel.nsf_kernel.wait(3000):
+                                        logging.warning("NSF内核线程停止等待超时(3秒)，尝试额外方法停止线程")
+                                        
+                                        # 尝试用quit
+                                        if hasattr(self.as_kernel.nsf_kernel, 'quit') and callable(self.as_kernel.nsf_kernel.quit):
+                                            try:
+                                                self.as_kernel.nsf_kernel.quit()
+                                                # 再等待2秒
+                                                if not self.as_kernel.nsf_kernel.wait(2000):
+                                                    logging.warning("NSF内核线程quit后等待超时(2秒)，尝试强制终止")
+                                                    
+                                                    # 如果还在运行，尝试terminate强制终止（最后手段）
+                                                    if hasattr(self.as_kernel.nsf_kernel, 'terminate') and callable(self.as_kernel.nsf_kernel.terminate):
+                                                        try:
+                                                            self.as_kernel.nsf_kernel.terminate()
+                                                            # 等待终止完成
+                                                            if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
+                                                                self.as_kernel.nsf_kernel.wait(1000)
+                                                        except Exception as term_error:
+                                                            logging.error(f"强制终止NSF内核线程出错: {term_error}")
+                                            except Exception as quit_error:
+                                                logging.error(f"退出NSF内核线程出错: {quit_error}")
+                            except Exception as e:
+                                logging.error(f"停止NSF内核出错: {e}")
+                    
+                    # 如果是NCT内核
+                    elif self.as_kernel.current_kernel_type == "NCT" and self.as_kernel.nct_kernel:
+                        # 使用异步停止方法
                         try:
-                            import os
-                            from pathlib import Path
-                            file_path = Path(self.download_engine.save_path) / self.download_engine.file_name
-                            resume_file = file_path.with_suffix(file_path.suffix + '.resume')
-                            if resume_file.exists():
-                                resume_file.unlink()
-                                logging.info(f"窗口关闭时已删除断点续传文件: {resume_file}")
-                        except Exception as resume_e:
-                            logging.warning(f"窗口关闭时删除断点续传文件失败: {resume_e}")
-                        
-                    # 断开下载引擎的信号 - 使用更安全的方式
-                    try:
-                        if hasattr(self.download_engine, 'initialized') and self.download_engine.initialized:
+                            import asyncio
+                            
+                            # 创建专用于关闭的事件循环
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            
+                            # 异步停止下载
+                            async def async_stop_nct():
+                                try:
+                                    await self.as_kernel.stop_download()
+                                    return True
+                                except Exception as e:
+                                    logging.error(f"NCT内核停止失败: {e}")
+                                    return False
+                            
+                            # 执行异步停止
                             try:
-                                self.download_engine.initialized.disconnect(self._on_download_initialized)
-                            except (TypeError, RuntimeError):
-                                pass
-                                
-                        if hasattr(self.download_engine, 'block_progress_updated') and self.download_engine.block_progress_updated:
-                            try:
-                                self.download_engine.block_progress_updated.disconnect(self._on_progress_updated)
-                            except (TypeError, RuntimeError):
-                                pass
-                                
-                        if hasattr(self.download_engine, 'speed_updated') and self.download_engine.speed_updated:
-                            try:
-                                self.download_engine.speed_updated.disconnect(self._on_speed_updated)
-                            except (TypeError, RuntimeError):
-                                pass
-                                
-                        if hasattr(self.download_engine, 'download_completed') and self.download_engine.download_completed:
-                            try:
-                                self.download_engine.download_completed.disconnect(self._on_download_completed)
-                            except (TypeError, RuntimeError):
-                                pass
-                                
-                        if hasattr(self.download_engine, 'error_occurred') and self.download_engine.error_occurred:
-                            try:
-                                self.download_engine.error_occurred.disconnect(self._on_download_error)
-                            except (TypeError, RuntimeError):
-                                pass
-                                
-                        if hasattr(self.download_engine, 'file_name_changed') and self.download_engine.file_name_changed:
-                            try:
-                                self.download_engine.file_name_changed.disconnect(self._on_filename_changed)
-                            except (TypeError, RuntimeError):
-                                pass
-                    except Exception as signal_ex:
-                        logging.warning(f"断开下载引擎信号时出错: {signal_ex}")
-
-                    # 安全地停止下载引擎，避免强制终止
-                    try:
-                        self.download_engine.stop()
-                    except Exception as stop_ex:
-                        logging.warning(f"停止下载引擎时出错: {stop_ex}")
+                                loop.run_until_complete(async_stop_nct())
+                            except Exception as e:
+                                logging.error(f"执行NCT内核停止时出错: {e}")
+                            finally:
+                                loop.close()
+                        except Exception as e:
+                            logging.error(f"停止NCT内核出错: {e}")
                     
-                    # 等待下载线程完全结束 - 使用QThread的wait方法，但避免长时间等待
-                    if self.download_engine.isRunning():
-                        # 最多等待1秒钟，避免阻塞UI
-                        if not self.download_engine.wait(1000):
-                            logging.warning("等待下载线程结束超时，不强制终止")
-                    
-                    # 只在必要时使用quit而不是terminate，避免强制终止导致资源泄漏
-                    if self.download_engine.isRunning():
-                        try:
-                            self.download_engine.quit()
-                            # 等待极短时间
-                            if not self.download_engine.wait(500):
-                                logging.warning("线程退出后等待超时，将继续执行")
-                        except Exception as quit_ex:
-                            logging.warning(f"退出下载线程时出错: {quit_ex}")
-                        
+                    # 显式删除AS内核引用
+                    self.as_kernel = None
                 except Exception as e:
-                    logging.error(f"关闭时停止下载引擎失败: {e}")
-                
-                # 使用弱引用避免循环引用
-                import weakref
-                engine_ref = weakref.ref(self.download_engine)
-                self.download_engine = None
-                
-                # 在UI线程空闲时再清理引用
-                QTimer.singleShot(100, lambda: gc.collect())
+                    logging.error(f"关闭AS内核出错: {e}")
+            
+            # 然后处理下载引擎 (可能已经在AS内核处理中被停止，但再次确认)
+            if hasattr(self, 'download_engine') and self.download_engine is not None:
+                try:
+                    logging.info("关闭窗口: 停止下载引擎")
                     
-                if hasattr(self, 'progress_timer'):
-                    del self.progress_timer
+                    # 停止下载引擎 (如果还在运行)
+                    if hasattr(self.download_engine, 'isRunning') and callable(self.download_engine.isRunning):
+                        if self.download_engine.isRunning():
+                            try:
+                                self.download_engine.stop()
+                                
+                                # === 修复：增加更完善的线程等待和终止策略 ===
+                                # 等待线程停止，使用更长的超时时间
+                                if hasattr(self.download_engine, 'wait') and callable(self.download_engine.wait):
+                                    # 先等待3秒
+                                    if not self.download_engine.wait(3000):
+                                        logging.warning("下载引擎线程停止等待超时(3秒)，尝试额外方法停止线程")
+                                        
+                                        # 尝试使用quit优雅退出线程
+                                        if hasattr(self.download_engine, 'quit') and callable(self.download_engine.quit):
+                                            try:
+                                                self.download_engine.quit()
+                                                # 再等待2秒
+                                                if not self.download_engine.wait(2000):
+                                                    logging.warning("下载引擎线程quit后等待超时(2秒)，尝试强制终止")
+                                                    
+                                                    # 如果还在运行，尝试terminate强制终止（最后手段）
+                                                    if hasattr(self.download_engine, 'terminate') and callable(self.download_engine.terminate):
+                                                        try:
+                                                            self.download_engine.terminate()
+                                                            # 等待终止完成
+                                                            self.download_engine.wait(1000)
+                                                        except Exception as term_error:
+                                                            logging.error(f"强制终止下载引擎线程出错: {term_error}")
+                                            except Exception as quit_error:
+                                                logging.error(f"退出下载引擎线程出错: {quit_error}")
+                            except Exception as stop_error:
+                                logging.error(f"停止下载引擎出错: {stop_error}")
                     
-                # 清除布局内容
-                self._clear_content()
+                    # 确保断开所有信号连接
+                    try:
+                        if hasattr(self.download_engine, 'initialized'):
+                            try:
+                                self.download_engine.initialized.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'block_progress_updated'):
+                            try:
+                                self.download_engine.block_progress_updated.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'speed_updated'):
+                            try:
+                                self.download_engine.speed_updated.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'download_completed'):
+                            try:
+                                self.download_engine.download_completed.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'error_occurred'):
+                            try:
+                                self.download_engine.error_occurred.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'file_name_changed'):
+                            try:
+                                self.download_engine.file_name_changed.disconnect()
+                            except:
+                                pass
+                    except Exception as signal_error:
+                        logging.warning(f"断开下载引擎信号时出错: {signal_error}")
+                    
+                    # 显式删除下载引擎引用
+                    self.download_engine = None
+                except Exception as e:
+                    logging.error(f"关闭下载引擎出错: {e}")
+            
+            # 处理NCT下载线程 (如果存在)
+            if hasattr(self, 'nct_download_thread') and self.nct_download_thread is not None:
+                try:
+                    # 标记NCT下载状态为已停止
+                    self.nct_download_started = False
+                    
+                    # === 修复：添加Python线程终止逻辑 ===
+                    # 注意：Python线程没有内置的终止方法，但我们可以设置标志并清除引用
+                    if hasattr(self.nct_download_thread, 'is_alive') and callable(self.nct_download_thread.is_alive):
+                        if self.nct_download_thread.is_alive():
+                            logging.warning("NCT下载线程仍在运行，无法直接终止Python线程，只能清除引用")
+                    
+                    # 清除引用
+                    self.nct_download_thread = None
+                except Exception as e:
+                    logging.error(f"清理NCT下载线程出错: {e}")
+            
+            # 清除布局内容
+            self._clear_content()
+                
+            # 强制垃圾回收，尝试释放线程资源
+            import gc
+            gc.collect()
+            
+            # === 修复：强制第二次垃圾回收，增加清理机会 ===
+            # 短暂延时后再次执行垃圾回收
+            import time
+            time.sleep(0.1)  # 给100毫秒让系统处理资源
+            gc.collect()
             
             # === 最终的安全关闭处理 ===
             try:
@@ -556,28 +690,42 @@ class DownloadPopDialog(QDialog):
                     # 6. 安排延迟销毁，确保完全脱离事件循环
                     def delayed_destroy():
                         try:
+                            # === 修复：最后再次检查线程并强制GC ===
+                            import gc
+                            gc.collect()
+                            
                             # 使用Qt的deleteLater方法彻底销毁窗口
                             self.deleteLater()
                         except:
                             pass
                     
-                    # 延迟200毫秒执行销毁
-                    QTimer.singleShot(200, delayed_destroy)
+                    # 延迟500毫秒执行销毁，给线程更多时间完成
+                    QTimer.singleShot(500, delayed_destroy)
                 else:
                     # 对于普通状态创建的对话框，使用标准关闭流程
                     # 断开父窗口关系
-                    if self.parent():
-                        self.setParent(None)
+                    self.setParent(None)
+                    self.hide()
                     
-                    # 设置自动删除标志，让Qt处理销毁
-                    self.setAttribute(Qt.WA_DeleteOnClose, True)
-                
-                # 强制触发垃圾回收
-                QTimer.singleShot(500, gc.collect)
-                
+                    # === 修复：延迟调用deleteLater，给线程更多时间结束 ===
+                    def delayed_delete():
+                        # 最后再次执行垃圾回收
+                        import gc
+                        gc.collect()
+                        # 删除窗口
+                        self.deleteLater()
+                    
+                    # 延迟300毫秒再删除
+                    QTimer.singleShot(300, delayed_delete)
             except Exception as e:
-                logging.debug(f"处理主窗口关系时出错: {e}")
-                
+                logging.error(f"关闭处理最终阶段出错: {e}")
+                # 尝试标准关闭逻辑作为后备
+                try:
+                    self.hide()
+                    self.deleteLater()
+                except:
+                    pass
+            
             # 始终接受关闭事件
             event.accept()
         except Exception as e:
@@ -973,7 +1121,7 @@ class DownloadPopDialog(QDialog):
         file_icon.setObjectName("file_icon")  # 设置对象名，方便以后查找
         file_icon.setFixedSize(36, 36)
         
-        # 尝试获取文件的真实图标
+        # 获取文件名和路径
         file_name = task_data.get("file_name", "")
         file_path = os.path.join(task_data.get("save_path", ""), file_name)
         
@@ -981,29 +1129,15 @@ class DownloadPopDialog(QDialog):
         file_ext_raw = os.path.splitext(file_name)[1]
         file_ext = file_ext_raw.lstrip('.') if file_ext_raw else "No"
         
-        icon = None
-        if hasattr(self, 'file_icon_getter'):
-            # 先尝试从文件路径获取图标（对于已有的文件）
-            if os.path.exists(file_path):
-                icon = self.file_icon_getter.get_file_icon(file_path=file_path)
-            # 如果没有获取到，尝试从扩展名获取图标
-            if not icon or icon.isNull():
-                icon = self.file_icon_getter.get_file_icon(file_ext=file_ext)
-        
-        # 如果获取到了有效的图标，则使用它
-        if icon and not icon.isNull():
-            pixmap = icon.pixmap(32, 32)
-            file_icon.setPixmap(pixmap)
-            file_icon.setScaledContents(True)
-        else:
-            # 如果没有获取到有效图标，使用字体图标作为备用
+        # 直接为EXE文件使用Fluent Icons
+        if file_ext.lower() == 'exe':
             if hasattr(self, 'font_manager'):
-                self.font_manager.apply_icon_font(file_icon, "ic_fluent_document_24_regular", size=24)
-                file_icon.setStyleSheet("color: #B39DDB; background-color: transparent;")
+                self.font_manager.apply_icon_font(file_icon, "ic_fluent_app_24_regular", size=24)
+                file_icon.setStyleSheet("color: #FF9800; background-color: transparent;")
             else:
                 # 使用emoji作为备用
-                emoji = self.file_icon_getter.get_file_emoji(file_name) if hasattr(self, 'file_icon_getter') else "📄"
-                color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#B39DDB"
+                emoji = "⚙️"
+                color = "#FF9800"  # 橙色
                 pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
                 if pixmap:
                     file_icon.setPixmap(pixmap)
@@ -1012,6 +1146,69 @@ class DownloadPopDialog(QDialog):
                     file_icon.setText(emoji)
                     file_icon.setAlignment(Qt.AlignCenter)
                     file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
+        else:
+            # 对于非EXE文件，尝试获取系统图标或使用Fluent图标
+            icon = None
+            if hasattr(self, 'file_icon_getter'):
+                # 先清除可能的缓存
+                if hasattr(self.file_icon_getter, 'icon_cache') and file_path in self.file_icon_getter.icon_cache:
+                    del self.file_icon_getter.icon_cache[file_path]
+                
+                # 优先使用扩展名安全获取图标
+                icon = self.file_icon_getter.get_icon_by_ext_safe(file_ext)
+                
+                # 如果通过扩展名无法获取图标，再尝试从文件路径获取
+                if (not icon or icon.isNull()) and os.path.exists(file_path):
+                    try:
+                        icon = self.file_icon_getter.get_file_icon(file_path=file_path, file_ext=file_ext)
+                    except Exception as e:
+                        logging.warning(f"从文件路径获取图标失败: {e}")
+            
+            # 如果获取到了有效的图标，则使用它
+            if icon and not icon.isNull():
+                pixmap = icon.pixmap(32, 32)
+                file_icon.setPixmap(pixmap)
+                file_icon.setScaledContents(True)
+            else:
+                # 如果没有获取到有效图标，使用字体图标作为备用
+                if hasattr(self, 'font_manager'):
+                    # 根据文件类型选择合适的Fluent图标
+                    icon_name = "document_24_regular"  # 默认文档图标
+                    icon_color = "#B39DDB"  # 默认紫色
+                    
+                    if file_ext.lower() == 'msi':
+                        icon_name = "app_store_24_regular"
+                        icon_color = "#FF9800"  # 橙色
+                    elif file_ext.lower() in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']:
+                        icon_name = "archive_24_regular"
+                        icon_color = "#FFCA28"  # 黄色
+                    elif file_ext.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
+                        icon_name = "image_24_regular"
+                        icon_color = "#B39DDB"  # 紫色
+                    elif file_ext.lower() in ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']:
+                        icon_name = "music_note_2_24_regular"
+                        icon_color = "#66BB6A"  # 绿色
+                    elif file_ext.lower() in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
+                        icon_name = "video_24_regular"
+                        icon_color = "#FF7043"  # 红色
+                    elif file_ext.lower() in ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
+                        icon_name = "document_24_regular"
+                        icon_color = "#42A5F5"  # 蓝色
+                    
+                    self.font_manager.apply_icon_font(file_icon, f"ic_fluent_{icon_name}", size=24)
+                    file_icon.setStyleSheet(f"color: {icon_color}; background-color: transparent;")
+                else:
+                    # 使用emoji作为备用
+                    emoji = self.file_icon_getter.get_file_emoji(file_name) if hasattr(self, 'file_icon_getter') else "📄"
+                    color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#B39DDB"
+                    pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
+                    if pixmap:
+                        file_icon.setPixmap(pixmap)
+                        file_icon.setScaledContents(True)
+                    else:
+                        file_icon.setText(emoji)
+                        file_icon.setAlignment(Qt.AlignCenter)
+                        file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
         
         file_info_layout.addWidget(file_icon)
         
@@ -1668,36 +1865,151 @@ class DownloadPopDialog(QDialog):
             except Exception as e:
                 logging.warning(f"获取配置失败，使用默认值: {e}")
             
-            # 创建下载引擎
+            # 使用AS内核自动选择最合适的下载内核
             with self.thread_lock:
-                self.download_engine = DownloadEngine(
-                    url=url,
-                    headers=headers,
-                    max_concurrent=max_concurrent,
-                    save_path=save_path,
-                    file_name=file_name,
-                    smart_threading=smart_threading,  # 根据配置决定是否使用智能线程管理
-                    default_segments=default_segments  # 使用从配置获取的分段数
+                # 创建自动调度内核
+                self.as_kernel = HanabiASKernel()
+                
+                # 初始化下载任务，这会自动选择最合适的内核
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                success, error_msg = loop.run_until_complete(
+                    self.as_kernel.initialize_download(
+                        url=url,
+                        headers=headers,
+                        save_path=save_path,
+                        file_name=file_name,
+                        max_concurrent=max_concurrent,
+                        smart_threading=smart_threading,
+                        default_segments=default_segments
+                    )
                 )
                 
-                # 连接信号
-                self.download_engine.initialized.connect(self._on_download_initialized)
-                self.download_engine.block_progress_updated.connect(self._on_progress_updated)
-                self.download_engine.speed_updated.connect(self._on_speed_updated)
-                self.download_engine.download_completed.connect(self._on_download_completed)
-                self.download_engine.error_occurred.connect(self._on_download_error)
-                self.download_engine.file_name_changed.connect(self._on_filename_changed)
+                if not success:
+                    raise Exception(f"初始化下载失败: {error_msg}")
                 
-                # 先启动下载线程
-                self.download_engine.start()
+                # 获取选择的内核类型
+                kernel_type = self.as_kernel.current_kernel_type
                 
-                # 在线程启动后设置优先级
-                try:
-                    # 等待极短时间确保线程已启动
-                    QTimer.singleShot(10, lambda: self._set_thread_priority_safely())
-                except Exception as e:
-                    # 忽略设置优先级可能的错误，不影响下载功能
-                    logging.debug(f"设置线程优先级时出错: {e}")
+                # 如果是NSF内核，直接使用其实例
+                if kernel_type == "NSF":
+                    self.download_engine = self.as_kernel.nsf_kernel
+                    
+                    # 连接信号
+                    self.download_engine.initialized.connect(self._on_download_initialized)
+                    self.download_engine.block_progress_updated.connect(self._on_progress_updated)
+                    self.download_engine.speed_updated.connect(self._on_speed_updated)
+                    self.download_engine.download_completed.connect(self._on_download_completed)
+                    self.download_engine.error_occurred.connect(self._on_download_error)
+                    self.download_engine.file_name_changed.connect(self._on_filename_changed)
+                    
+                    # 启动下载线程
+                    loop.run_until_complete(self.as_kernel.start_download())
+                    
+                    # 在线程启动后设置优先级
+                    try:
+                        # 等待极短时间确保线程已启动
+                        QTimer.singleShot(10, lambda: self._set_thread_priority_safely())
+                    except Exception as e:
+                        # 忽略设置优先级可能的错误，不影响下载功能
+                        logging.debug(f"设置线程优先级时出错: {e}")
+                    
+                elif kernel_type == "NCT":
+                    # 如果是NCT内核，需要不同的处理
+                    self.download_engine = None  # 清除引用
+                    self.nct_kernel = self.as_kernel.nct_kernel
+                    
+                    # 初始化NCT下载相关状态
+                    self.nct_download_started = True
+                    self.nct_download_progress = 0
+                    self.nct_download_speed = 0
+                    self.nct_file_size = 0
+                    self.nct_downloaded = 0
+                    self.nct_last_update_time = time.time()
+                    
+                    # 创建NCT下载进度回调函数
+                    def progress_callback(transferred, total):
+                        try:
+                            self.nct_file_size = total
+                            self.nct_downloaded = transferred
+                            
+                            # 计算下载速度
+                            current_time = time.time()
+                            time_diff = current_time - self.nct_last_update_time
+                            if time_diff > 0.1:  # 至少0.1秒更新一次速度
+                                # 计算速度（字节/秒）
+                                self.nct_download_speed = int((transferred - self.nct_download_progress) / time_diff)
+                                self.nct_download_progress = transferred
+                                self.nct_last_update_time = current_time
+                                
+                                # 更新UI上的速度显示
+                                speed_str = self._get_readable_speed(self.nct_download_speed)
+                                self.speed_label.setText(f"速度: {speed_str}")
+                                
+                                # 更新进度条
+                                if total > 0:
+                                    progress = (transferred / total) * 100
+                                    self.update_progress(progress)
+                                    
+                                    # 更新剩余时间
+                                    if self.nct_download_speed > 0:
+                                        remaining = total - transferred
+                                        seconds_left = remaining / self.nct_download_speed
+                                        time_str = self._get_readable_time(seconds_left)
+                                        self.time_label.setText(time_str)
+                        except Exception as e:
+                            logging.error(f"NCT进度回调处理错误: {e}")
+                    
+                    # 创建NCT下载完成回调函数
+                    def download_complete_callback(success, error=None):
+                        try:
+                            if success:
+                                # 下载成功
+                                logging.info(f"NCT下载完成: {file_name}")
+                                self.update_progress(100)
+                                self._on_download_completed()
+                            else:
+                                # 下载失败
+                                error_msg = error if error else "未知错误"
+                                logging.error(f"NCT下载失败: {error_msg}")
+                                self._on_download_error(error_msg)
+                        except Exception as e:
+                            logging.error(f"NCT完成回调处理错误: {e}")
+                    
+                    # 模拟初始化完成信号
+                    QTimer.singleShot(100, lambda: self._on_download_initialized(True))
+                    
+                    # 启动NCT下载任务（异步）
+                    async def start_nct_download():
+                        try:
+                            # 启动下载并等待完成
+                            await self.as_kernel.download_file(
+                                progress_callback=progress_callback,
+                                complete_callback=download_complete_callback
+                            )
+                        except Exception as e:
+                            logging.error(f"NCT下载任务启动失败: {e}")
+                            self._on_download_error(str(e))
+                    
+                    # 创建新的事件循环来运行异步任务
+                    def run_async_download():
+                        try:
+                            new_loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(new_loop)
+                            new_loop.run_until_complete(start_nct_download())
+                        except Exception as e:
+                            logging.error(f"NCT下载线程执行错误: {e}")
+                    
+                    # 在单独的线程中启动异步下载任务
+                    import threading
+                    self.nct_download_thread = threading.Thread(target=run_async_download)
+                    self.nct_download_thread.daemon = True
+                    self.nct_download_thread.start()
+                    
+                    logging.info(f"使用NCT内核下载: {url}")
+                else:
+                    raise Exception(f"未知的内核类型: {kernel_type}")
                 
                 # 启动进度更新定时器
                 self.progress_timer.start(500)  # 每500毫秒更新一次
@@ -1708,7 +2020,7 @@ class DownloadPopDialog(QDialog):
                 # 更新UI状态
                 self.status_label.setText("初始化中...")
                 
-                logging.info(f"弹窗已启动下载任务: {url}, 智能线程管理: {smart_threading}, 默认分段数: {default_segments}")
+                logging.info(f"弹窗已启动下载任务: {url}, 内核类型: {kernel_type}, 智能线程管理: {smart_threading}, 默认分段数: {default_segments}")
                 
         except Exception as e:
             logging.error(f"启动下载任务失败: {e}")
@@ -1739,6 +2051,13 @@ class DownloadPopDialog(QDialog):
             progress_data (list): 进度数据
         """
         try:
+            # 检查是否是NCT内核下载
+            if hasattr(self, 'nct_download_started') and self.nct_download_started:
+                # NCT内核的进度更新由progress_callback处理
+                # 这里不需要额外处理
+                return
+                
+            # 以下是NSF内核的进度处理
             # 计算总进度百分比
             total_downloaded = 0
             total_size = 0
@@ -1794,16 +2113,22 @@ class DownloadPopDialog(QDialog):
                 if progress > 99.9:
                     progress = 100
                 
-                # 更新进度条
-                self.update_progress(progress)
+                # 修复：添加安全检查，确保progress_bar对象存在
+                if hasattr(self, 'progress_bar') and self.progress_bar is not None:
+                    self.progress_bar.setValue(int(progress))
+                else:
+                    logging.debug("进度条对象不存在，跳过进度更新")
+                    return
             
             # 使用处理后的块信息更新分段信息
-            if processed_blocks:
+            if processed_blocks and hasattr(self, 'segments_scroll_layout'):
                 self._update_segments_info(processed_blocks)
             
         except Exception as e:
             logging.error(f"处理进度更新失败: {e}")
-    
+            import traceback
+            logging.debug(traceback.format_exc())
+            
     def _on_speed_updated(self, speed_bytes):
         """速度更新回调
         
@@ -1970,7 +2295,8 @@ class DownloadPopDialog(QDialog):
         # 尝试更新文件图标
         if hasattr(self, 'file_icon_getter') and hasattr(self, 'download_engine') and self.download_engine:
             try:
-                file_path = os.path.join(self.download_engine.save_path, new_filename)
+                # 优先使用扩展名安全获取图标
+                icon = self.file_icon_getter.get_icon_by_ext_safe(file_ext)
                 
                 # 查找文件图标QLabel
                 file_icon = None
@@ -1989,20 +2315,10 @@ class DownloadPopDialog(QDialog):
                                 break
                 
                 # 如果找到了图标控件，更新图标
-                if file_icon:
-                    icon = None
-                    # 先尝试从文件路径获取图标
-                    if os.path.exists(file_path):
-                        icon = self.file_icon_getter.get_file_icon(file_path=file_path)
-                    # 如果没有获取到，尝试从扩展名获取图标
-                    if not icon or icon.isNull():
-                        icon = self.file_icon_getter.get_file_icon(file_ext=file_ext)
-                    
-                    # 如果获取到了有效的图标，则使用它
-                    if icon and not icon.isNull():
-                        pixmap = icon.pixmap(32, 32)
-                        file_icon.setPixmap(pixmap)
-                        file_icon.setScaledContents(True)
+                if file_icon and icon and not icon.isNull():
+                    pixmap = icon.pixmap(32, 32)
+                    file_icon.setPixmap(pixmap)
+                    file_icon.setScaledContents(True)
             except Exception as e:
                 logging.debug(f"更新文件图标失败: {e}")
     
@@ -2010,11 +2326,17 @@ class DownloadPopDialog(QDialog):
         """更新下载信息"""
         if self.current_state != "downloading":
             return
-        
-        with self.thread_lock:
-            if not self.download_engine or not hasattr(self.download_engine, 'is_running'):
-                return
             
+        # 修复：添加安全检查，确保progress_bar对象存在
+        if not hasattr(self, 'progress_bar') or self.progress_bar is None:
+            self.progress_timer.stop()
+            logging.debug("进度条对象不存在，停止进度更新定时器")
+            return
+            
+        with self.thread_lock:
+            if not hasattr(self, 'download_engine') or not self.download_engine or not hasattr(self.download_engine, 'is_running'):
+                return
+                
             try:
                 # 文件大小未知但已完成下载的情况
                 file_size_unknown = hasattr(self.download_engine, 'file_size') and self.download_engine.file_size <= 0
@@ -2064,23 +2386,41 @@ class DownloadPopDialog(QDialog):
                     # 更新缓存的进度
                     self.last_progress = current_progress
                 
-                # 更新进度条
+                # 更新进度条 - 再次检查进度条对象是否存在
                 if current_progress > 0:
-                    self.progress_bar.setValue(int(current_progress))
-                    
-                    # 更新状态文本 - 避免频繁更新
-                    new_status_text = f"{current_progress:.1f}%"
-                    if new_status_text != self.last_status_text:
-                        self.status_label.setText(new_status_text)
-                        self.last_status_text = new_status_text
+                    if hasattr(self, 'progress_bar') and self.progress_bar is not None:
+                        try:
+                            self.progress_bar.setValue(int(current_progress))
+                        except Exception as e:
+                            logging.error(f"设置进度条值失败: {e}")
+                            # 如果设置进度条失败，停止定时器
+                            self.progress_timer.stop()
+                            return
+                            
+                        # 更新状态文本 - 避免频繁更新
+                        if hasattr(self, 'status_label') and self.status_label is not None:
+                            new_status_text = f"{current_progress:.1f}%"
+                            if new_status_text != self.last_status_text:
+                                self.status_label.setText(new_status_text)
+                                self.last_status_text = new_status_text
+                        else:
+                            # 进度条对象不存在，停止更新
+                            logging.debug("进度条对象不存在，停止进度更新")
+                            self.progress_timer.stop()
+                            return
+                    else:
+                        # 进度条对象不存在，停止更新
+                        logging.debug("进度条对象不存在，停止进度更新")
+                        self.progress_timer.stop()
+                        return
                 else:
                     # 文件大小未知，显示下载中状态
-                    if self.last_status_text != "下载中...":
+                    if hasattr(self, 'status_label') and self.status_label is not None and self.last_status_text != "下载中...":
                         self.status_label.setText("下载中...")
                         self.last_status_text = "下载中..."
                     
                     # 对于未知大小的文件，显示已下载量
-                    if current_downloaded > 0:
+                    if current_downloaded > 0 and hasattr(self, 'size_label') and self.size_label is not None:
                         downloaded_str = self._get_readable_size(current_downloaded)
                         new_size_text = f"已下载: {downloaded_str}"
                         if new_size_text != self.last_size_text:
@@ -2088,13 +2428,13 @@ class DownloadPopDialog(QDialog):
                             self.last_size_text = new_size_text
                 
                 # 更新速度 - 使用统一格式"速度: {speed_str}"
-                if hasattr(self.download_engine, 'avg_speed'):
+                if hasattr(self.download_engine, 'avg_speed') and hasattr(self, 'speed_label') and self.speed_label is not None:
                     speed = self.download_engine.avg_speed
                     speed_str = self._get_readable_speed(speed)
                     self.speed_label.setText(f"速度: {speed_str}")
                     
                     # 更新剩余时间 - 根据下载速度计算
-                    if speed > 0 and hasattr(self.download_engine, 'file_size') and hasattr(self.download_engine, 'current_progress'):
+                    if speed > 0 and hasattr(self.download_engine, 'file_size') and hasattr(self.download_engine, 'current_progress') and hasattr(self, 'time_label') and self.time_label is not None:
                         if self.download_engine.file_size > 0:
                             remaining_bytes = self.download_engine.file_size - self.download_engine.current_progress
                             if remaining_bytes > 0:
@@ -2107,7 +2447,7 @@ class DownloadPopDialog(QDialog):
                             self.time_label.setText("计算中...")
                 
                 # 更新文件大小信息 - 避免频繁更新
-                if current_total_size > 0 and current_downloaded > 0:
+                if current_total_size > 0 and current_downloaded > 0 and hasattr(self, 'size_label') and self.size_label is not None:
                     # 防止大小信息频繁变化
                     if (abs(current_downloaded - self.last_downloaded_size) > current_downloaded * 0.01 or 
                         abs(current_total_size - self.last_total_size) > current_total_size * 0.01):
@@ -2186,15 +2526,17 @@ class DownloadPopDialog(QDialog):
                         logging.info("检测到所有块已完成且无活动块，触发下载完成")
                         self.progress_timer.stop()
                         
-                        # 设置为100%显示
-                        self.progress_bar.setValue(100)
-                        self.status_label.setText("100%")
+                        # 设置为100%显示 - 添加安全检查
+                        if hasattr(self, 'progress_bar') and self.progress_bar is not None:
+                            self.progress_bar.setValue(100)
+                        if hasattr(self, 'status_label') and self.status_label is not None:
+                            self.status_label.setText("100%")
                         
                         # 可能的文件大小更新
                         if file_size_unknown:
                             try:
                                 file_path = Path(self.download_engine.save_path) / self.download_engine.file_name
-                                if file_path.exists():
+                                if file_path.exists() and hasattr(self, 'size_label') and self.size_label is not None:
                                     self.download_engine.file_size = file_path.stat().st_size
                                     total_size_str = self._get_readable_size(self.download_engine.file_size)
                                     downloaded_size_str = self._get_readable_size(self.download_engine.current_progress)
@@ -2207,128 +2549,287 @@ class DownloadPopDialog(QDialog):
                     
                     # 如果是初始化阶段，创建分段信息UI
                     if hasattr(self, 'segment_rows') and not self.segment_rows and blocks_info:
-                        self._update_segments_info(blocks_info)
+                        try:
+                            self._update_segments_info(blocks_info)
+                        except Exception as e:
+                            logging.error(f"更新分段信息失败: {e}")
                     # 否则更新现有分段信息
                     elif hasattr(self, 'segment_rows') and self.segment_rows and blocks_info:
                         for i, block_info in enumerate(blocks_info):
                             if i < len(self.segment_rows):
-                                self._update_segment_row(
-                                    i, 
-                                    status=block_info.get("status"),
-                                    start_pos=block_info.get("start_pos"),
-                                    progress=block_info.get("progress"),
-                                    end_pos=block_info.get("end_pos")
-                                )
+                                try:
+                                    self._update_segment_row(
+                                        i, 
+                                        status=block_info.get("status"),
+                                        start_pos=block_info.get("start_pos"),
+                                        progress=block_info.get("progress"),
+                                        end_pos=block_info.get("end_pos")
+                                    )
+                                except Exception as e:
+                                    logging.debug(f"更新分段行 {i} 失败: {e}")
                 
                 # 如果下载已完成或已暂停，停止定时器
-                if not self.download_engine.is_running or self.download_engine.is_paused:
+                if hasattr(self.download_engine, 'is_running') and (not self.download_engine.is_running or self.download_engine.is_paused):
                     self.progress_timer.stop()
                 
             except Exception as e:
                 logging.error(f"更新下载信息失败: {e}")
                 import traceback
-                traceback.print_exc()
+                logging.debug(traceback.format_exc())
+                # 发生错误时停止定时器
+                self.progress_timer.stop()
     
     def _on_cancel_download(self):
-        """取消下载"""
+        """取消下载按钮点击处理"""
+        # 设置取消标志
+        self.cancelled = True
+        
+        # 检查下载引擎和AS内核是否存在
+        has_download_engine = hasattr(self, 'download_engine') and self.download_engine is not None
+        has_as_kernel = hasattr(self, 'as_kernel') and self.as_kernel is not None
+        
+        if not (has_download_engine or has_as_kernel):
+            logging.warning("无法取消下载：下载引擎和AS内核均不存在")
+            
+            # 尝试关闭窗口
+            try:
+                self.close()
+            except Exception as close_error:
+                logging.error(f"关闭窗口失败: {close_error}")
+            return
+        
+        # 获取当前任务ID
+        task_id = getattr(self, 'task_id', "未知任务")
+        
         try:
-            # 记录最小化状态，这是关键
-            parent_was_minimized = False
-            if hasattr(self, 'parent_was_minimized'):
-                parent_was_minimized = self.parent_was_minimized
-            
-            # 先停止下载，确保所有资源在关闭前释放
-            with self.thread_lock:
-                if hasattr(self, 'download_engine') and self.download_engine:
-                    try:
-                        # 停止下载引擎
-                        self.download_engine.stop()
-                        
-                        # 等待下载线程结束 - 使用QThread的wait方法
-                        if self.download_engine.isRunning():
-                            # 最多等待2秒
-                            if not self.download_engine.wait(2000):
-                                logging.warning("等待下载线程结束超时")
-                                # 如果超时，尝试强制终止
-                                self.download_engine.terminate()
-                                if not self.download_engine.wait(1000):
-                                    logging.warning("强制终止下载线程后等待超时")
-                                
-                        # 确保资源被释放
-                        self.download_engine = None
-                    except Exception as e:
-                        logging.error(f"停止下载引擎失败: {e}")
-                    
-                if self.task_id:
-                    try:
-                        self.downloadCancelled.emit(self.task_id)
-                    except Exception as e:
-                        logging.error(f"发送取消下载信号失败: {e}")
-            
-            # === 关键的安全关闭逻辑 ===
-            # 确保不会影响主应用程序
-            self.setAttribute(Qt.WA_QuitOnClose, False)
-            
-            # 最小化状态特殊处理
-            if parent_was_minimized:
-                                # 1. 彻底分离所有信号连接
+            # 首先停止进度更新定时器
+            if hasattr(self, 'progress_timer') and self.progress_timer.isActive():
                 try:
-                    for signal_name in ['downloadRequested', 'downloadCancelled', 'downloadPaused', 
-                                         'downloadResumed', 'fileOpened', 'folderOpened', 'downloadCompleted']:
-                        if hasattr(self, signal_name):
-                            signal = getattr(self, signal_name)
-                            if hasattr(signal, 'disconnect') and callable(signal.disconnect):
-                                # 检查信号是否真的有连接
+                    self.progress_timer.stop()
+                except Exception as timer_error:
+                    logging.error(f"停止定时器出错: {timer_error}")
+            
+            # 发送取消信号
+            if hasattr(self, 'downloadCancelled'):
+                try:
+                    self.downloadCancelled.emit(task_id)
+                except Exception as signal_error:
+                    logging.error(f"发送取消信号失败: {signal_error}")
+            
+            # 停止下载
+            try:
+                logging.info(f"停止下载任务: {task_id}")
+                
+                # 先处理AS内核（如果有）
+                if has_as_kernel:
+                    # 使用AS内核停止 - 需要处理异步调用
+                    import asyncio
+                    
+                    # 创建一个用于处理异步调用的函数
+                    async def async_stop():
+                        try:
+                            return await self.as_kernel.stop_download()
+                        except Exception as e:
+                            logging.error(f"异步停止下载出错: {e}")
+                            return False
+                    
+                    # 在新的事件循环中运行异步函数
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        success = loop.run_until_complete(async_stop())
+                        if not success:
+                            logging.error("使用AS内核停止下载失败")
+                            if has_download_engine:
+                                # 回退到直接使用下载引擎
+                                self.download_engine.stop()
+                                
+                                # === 修复：增加线程等待逻辑 ===
+                                if hasattr(self.download_engine, 'wait') and callable(self.download_engine.wait):
+                                    # 等待线程停止，最多等待3秒
+                                    if not self.download_engine.wait(3000):
+                                        logging.warning("下载引擎线程停止超时(3秒)，尝试额外方法停止线程")
+                                        
+                                        # 尝试使用quit优雅退出线程
+                                        if hasattr(self.download_engine, 'quit') and callable(self.download_engine.quit):
+                                            try:
+                                                self.download_engine.quit()
+                                                # 再等待2秒
+                                                if not self.download_engine.wait(2000):
+                                                    logging.warning("下载引擎线程quit后等待超时(2秒)，尝试强制终止")
+                                                    
+                                                    # 如果还在运行，尝试terminate强制终止（最后手段）
+                                                    if hasattr(self.download_engine, 'terminate') and callable(self.download_engine.terminate):
+                                                        try:
+                                                            self.download_engine.terminate()
+                                                            # 等待终止完成
+                                                            self.download_engine.wait(1000)
+                                                        except Exception as term_error:
+                                                            logging.error(f"强制终止下载引擎线程出错: {term_error}")
+                                            except Exception as quit_error:
+                                                logging.error(f"退出下载引擎线程出错: {quit_error}")
+                    finally:
+                        loop.close()
+                        
+                        # === 修复：处理NSF内核特殊情况 ===
+                        if has_as_kernel and hasattr(self.as_kernel, 'current_kernel_type') and self.as_kernel.current_kernel_type == "NSF":
+                            if hasattr(self.as_kernel, 'nsf_kernel') and self.as_kernel.nsf_kernel:
+                                # 再次确认NSF内核已停止
                                 try:
-                                    # 使用receivers方法检查有无连接的槽
-                                    if hasattr(signal, 'receivers') and signal.receivers() > 0:
-                                        signal.disconnect()  # 只有在有接收者时断开
-                                except (TypeError, RuntimeError, AttributeError):
-                                    # 静默失败，不影响流程
-                                    pass
-                except Exception as e:
-                    logging.debug(f"断开信号连接时出错: {e}")
+                                    if hasattr(self.as_kernel.nsf_kernel, 'isRunning') and callable(self.as_kernel.nsf_kernel.isRunning):
+                                        if self.as_kernel.nsf_kernel.isRunning():
+                                            logging.warning("NSF内核仍在运行，尝试额外方法停止")
+                                            
+                                            # 尝试停止和等待
+                                            if hasattr(self.as_kernel.nsf_kernel, 'stop') and callable(self.as_kernel.nsf_kernel.stop):
+                                                self.as_kernel.nsf_kernel.stop()
+                                                
+                                                # 等待线程停止
+                                                if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
+                                                    # 等待3秒
+                                                    if not self.as_kernel.nsf_kernel.wait(3000):
+                                                        logging.warning("NSF内核线程额外停止尝试超时")
+                                                        
+                                                        # 尝试terminate作为最后手段
+                                                        if hasattr(self.as_kernel.nsf_kernel, 'terminate') and callable(self.as_kernel.nsf_kernel.terminate):
+                                                            try:
+                                                                self.as_kernel.nsf_kernel.terminate()
+                                                                self.as_kernel.nsf_kernel.wait(1000)
+                                                            except Exception as term_error:
+                                                                logging.error(f"终止NSF内核线程出错: {term_error}")
+                                except Exception as nsf_error:
+                                    logging.error(f"额外处理NSF内核停止时出错: {nsf_error}")
+                elif has_download_engine:
+                    # 直接使用下载引擎
+                    self.download_engine.stop()
+                    
+                    # === 修复：增加等待逻辑 ===
+                    if hasattr(self.download_engine, 'wait') and callable(self.download_engine.wait):
+                        # 等待线程停止，最多等待3秒
+                        if not self.download_engine.wait(3000):
+                            logging.warning("下载引擎线程停止超时(3秒)，尝试额外方法停止线程")
+                            
+                            # 尝试使用quit优雅退出线程
+                            if hasattr(self.download_engine, 'quit') and callable(self.download_engine.quit):
+                                try:
+                                    self.download_engine.quit()
+                                    # 再等待2秒
+                                    if not self.download_engine.wait(2000):
+                                        logging.warning("下载引擎线程quit后等待超时(2秒)，尝试强制终止")
+                                        
+                                        # 如果还在运行，尝试terminate强制终止（最后手段）
+                                        if hasattr(self.download_engine, 'terminate') and callable(self.download_engine.terminate):
+                                            try:
+                                                self.download_engine.terminate()
+                                                # 等待终止完成
+                                                self.download_engine.wait(1000)
+                                            except Exception as term_error:
+                                                logging.error(f"强制终止下载引擎线程出错: {term_error}")
+                                except Exception as quit_error:
+                                    logging.error(f"退出下载引擎线程出错: {quit_error}")
                 
-                # 2. 使其成为独立窗口
-                self.setParent(None)
-                self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
+            except Exception as stop_error:
+                logging.error(f"停止下载引擎出错: {stop_error}")
+            
+            # 清理下载引擎和相关资源
+            try:
+                # 解除信号连接
+                if has_download_engine:
+                    # 断开所有信号连接
+                    try:
+                        if hasattr(self.download_engine, 'initialized'):
+                            try:
+                                self.download_engine.initialized.disconnect()
+                            except:
+                                pass
+                                
+                        if hasattr(self.download_engine, 'block_progress_updated'):
+                            try:
+                                self.download_engine.block_progress_updated.disconnect()
+                            except:
+                                pass
+                                
+                        if hasattr(self.download_engine, 'speed_updated'):
+                            try:
+                                self.download_engine.speed_updated.disconnect()
+                            except:
+                                pass
+                                
+                        if hasattr(self.download_engine, 'download_completed'):
+                            try:
+                                self.download_engine.download_completed.disconnect()
+                            except:
+                                pass
+                                
+                        if hasattr(self.download_engine, 'error_occurred'):
+                            try:
+                                self.download_engine.error_occurred.disconnect()
+                            except:
+                                pass
+                                
+                        if hasattr(self.download_engine, 'file_name_changed'):
+                            try:
+                                self.download_engine.file_name_changed.disconnect()
+                            except:
+                                pass
+                    except Exception as signal_error:
+                        logging.error(f"断开下载引擎信号时出错: {signal_error}")
                 
-                # 3. 禁用自动删除，由我们控制删除过程
-                self.setAttribute(Qt.WA_DeleteOnClose, False)
+                    # 清空引用
+                    self.download_engine = None
+                    self.as_kernel = None
+                    
+                    # 尝试手动触发垃圾回收
+                    import gc
+                    gc.collect()
+                    
+                    # === 修复：再次强制GC ===
+                    # 短暂延时后再次执行垃圾回收
+                    import time
+                    time.sleep(0.1)  # 给100毫秒让系统处理资源
+                    gc.collect()
+            except Exception as cleanup_error:
+                logging.error(f"清理下载资源出错: {cleanup_error}")
+            
+            # 通知用户已取消
+            try:
+                # 更新状态
+                if hasattr(self, 'status_label'):
+                    self.status_label.setText("已取消")
+            except Exception as status_error:
+                logging.error(f"更新状态出错: {status_error}")
+            
+            # 关闭窗口
+            try:
+                # 给UI一点时间更新
+                import time
+                time.sleep(0.1)
                 
-                # 4. 安全保存原始父窗口的弱引用并清除强引用
-                if hasattr(self, 'original_parent') and self.original_parent:
-                    import weakref
-                    self._parent_ref_weak = weakref.ref(self.original_parent)
-                    self.original_parent = None
-                
-                # 5. 先隐藏窗口，防止闪烁
-                self.hide()
-                
-                # 6. 使用延迟删除，确保完全脱离事件循环
                 def complete_destruction():
                     try:
-                        # 最终销毁窗口
-                        self.deleteLater()
-                        # 强制垃圾回收
+                        # === 修复：执行最终垃圾回收 ===
+                        import gc
                         gc.collect()
+                        
+                        self.deleteLater()
                     except:
                         pass
                 
-                # 稍长一些的延迟，确保完全脱离
-                QTimer.singleShot(300, complete_destruction)
-            else:
-                # 正常状态下，可以使用标准关闭流程
-                self.setAttribute(Qt.WA_DeleteOnClose, True)
+                # 在主线程中执行延迟销毁
+                from PySide6.QtCore import QTimer
+                # === 修复：增加延迟时间，给线程更多时间结束 ===
+                QTimer.singleShot(500, complete_destruction)
+                
+                # 关闭窗口
                 self.close()
                 
+            except Exception as close_error:
+                logging.error(f"关闭窗口失败: {close_error}")
+            
         except Exception as e:
-            logging.error(f"取消下载时出错: {e}")
-            # 确保窗口能被关闭，即使出现错误
-            # 使用deleteLater而非close，更安全地销毁窗口
-            self.hide()
-            self.deleteLater()
-    
+            logging.error(f"取消下载过程中出错: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
     def _toggle_segments_display(self):
         """切换分段信息显示状态"""
         self.show_segments = not self.show_segments
@@ -2858,11 +3359,14 @@ class DownloadPopDialog(QDialog):
     
     def _on_pause_resume(self):
         """暂停/继续按钮点击处理"""
-        # 检查下载引擎是否存在
-        if not hasattr(self, 'download_engine') or self.download_engine is None:
-            logging.error("无法暂停/继续下载：下载引擎不存在")
+        # 检查下载引擎和AS内核是否存在
+        has_download_engine = hasattr(self, 'download_engine') and self.download_engine is not None
+        has_as_kernel = hasattr(self, 'as_kernel') and self.as_kernel is not None
+        
+        if not (has_download_engine or has_as_kernel):
+            logging.error("无法暂停/继续下载：下载引擎和AS内核均不存在")
             return
-            
+        
         try:
             if self.is_paused:
                 # 恢复下载
@@ -2895,7 +3399,17 @@ class DownloadPopDialog(QDialog):
                 
                 # 恢复下载
                 logging.info("恢复下载任务")
-                self.download_engine.resume()
+                if has_as_kernel:
+                    # 使用AS内核恢复 - 直接调用同步方法
+                    success = self.as_kernel.resume_download()
+                    if not success:
+                        logging.error("使用AS内核恢复下载失败")
+                        if has_download_engine:
+                            # 回退到直接使用下载引擎
+                            self.download_engine.resume()
+                elif has_download_engine:
+                    # 直接使用下载引擎
+                    self.download_engine.resume()
                 
                 # 更新状态提示
                 self.status_label.setText("下载中...")
@@ -2930,14 +3444,25 @@ class DownloadPopDialog(QDialog):
                 
                 # 暂停下载
                 logging.info("暂停下载任务")
-                self.download_engine.pause()
+                if has_as_kernel:
+                    # 使用AS内核暂停 - 直接调用同步方法
+                    success = self.as_kernel.pause_download()
+                    if not success:
+                        logging.error("使用AS内核暂停下载失败")
+                        if has_download_engine:
+                            # 回退到直接使用下载引擎
+                            self.download_engine.pause()
+                elif has_download_engine:
+                    # 直接使用下载引擎
+                    self.download_engine.pause()
                 
                 # 更新状态提示
                 self.status_label.setText("已暂停")
+                
         except Exception as e:
-            logging.error(f"暂停/继续下载失败: {e}")
+            logging.error(f"暂停/恢复下载时出错: {e}")
             import traceback
-            traceback.print_exc()
+            logging.error(traceback.format_exc())
     
     def _on_url_changed(self, url):
         """URL输入变化处理"""
@@ -2952,22 +3477,32 @@ class DownloadPopDialog(QDialog):
                 
     def update_progress(self, progress_percent, speed_bytes=0, time_left="计算中..."):
         """更新下载进度"""
+        # 检查当前状态
         if self.current_state != "downloading":
             return
             
-        # 更新进度条
-        self.progress_bar.setValue(int(progress_percent))
-        
-        # 更新状态文本
-        self.status_label.setText(f"{progress_percent:.1f}%")
-        
-        # 更新速度 - 保持统一格式"速度: {speed_str}"
-        speed_str = self._get_readable_speed(speed_bytes)
-        self.speed_label.setText(f"速度: {speed_str}")
-        
-        # 更新剩余时间
-        self.time_label.setText(f"剩余时间: {time_left}")
-
+        try:
+            # 修复：添加安全检查，确保progress_bar对象存在
+            if hasattr(self, 'progress_bar') and self.progress_bar is not None:
+                self.progress_bar.setValue(int(progress_percent))
+            else:
+                return
+            
+            # 更新状态文本
+            if hasattr(self, 'status_label') and self.status_label is not None:
+                self.status_label.setText(f"{progress_percent:.1f}%")
+            
+            # 更新速度
+            if speed_bytes > 0 and hasattr(self, 'speed_label') and self.speed_label is not None:
+                speed_str = self._get_readable_speed(speed_bytes)
+                self.speed_label.setText(f"速度: {speed_str}")
+            
+            # 更新剩余时间
+            if hasattr(self, 'time_label') and self.time_label is not None:
+                self.time_label.setText(f"剩余时间: {time_left}")
+        except Exception as e:
+            logging.error(f"更新进度失败: {e}")
+            
     def _create_completed_ui(self, task_data):
         """创建下载完成UI
         
@@ -3006,30 +3541,15 @@ class DownloadPopDialog(QDialog):
         file_ext_raw = os.path.splitext(filename)[1]
         file_ext = file_ext_raw.lstrip('.') if file_ext_raw else "No"
         
-        # 尝试获取文件的真实图标
-        icon = None
-        if hasattr(self, 'file_icon_getter'):
-            # 先尝试从文件路径获取图标（完成后文件应该已存在）
-            if os.path.exists(file_path):
-                icon = self.file_icon_getter.get_file_icon(file_path=file_path)
-            # 如果没有获取到，尝试从扩展名获取图标
-            if not icon or icon.isNull():
-                icon = self.file_icon_getter.get_file_icon(file_ext=file_ext)
-        
-        # 如果获取到了有效的图标，则使用它
-        if icon and not icon.isNull():
-            pixmap = icon.pixmap(32, 32)
-            file_icon.setPixmap(pixmap)
-            file_icon.setScaledContents(True)
-        else:
-            # 如果没有获取到有效图标，使用完成图标
+        # 直接为EXE文件使用Fluent Icons
+        if file_ext.lower() == 'exe':
             if hasattr(self, 'font_manager'):
-                self.font_manager.apply_icon_font(file_icon, "ic_fluent_checkmark_circle_24_regular", size=28)
-                file_icon.setStyleSheet("color: #4CAF50; background-color: transparent;")
+                self.font_manager.apply_icon_font(file_icon, "ic_fluent_app_24_regular", size=28)
+                file_icon.setStyleSheet("color: #FF9800; background-color: transparent;")
             else:
                 # 使用emoji作为备用
-                emoji = "✅"
-                color = "#4CAF50"  # 绿色表示完成
+                emoji = "⚙️"
+                color = "#FF9800"  # 橙色
                 pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
                 if pixmap:
                     file_icon.setPixmap(pixmap)
@@ -3038,6 +3558,69 @@ class DownloadPopDialog(QDialog):
                     file_icon.setText(emoji)
                     file_icon.setAlignment(Qt.AlignCenter)
                     file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
+        else:
+            # 对于非EXE文件，尝试获取系统图标或使用Fluent图标
+            icon = None
+            if hasattr(self, 'file_icon_getter'):
+                # 先清除可能的缓存
+                if hasattr(self.file_icon_getter, 'icon_cache') and file_path in self.file_icon_getter.icon_cache:
+                    del self.file_icon_getter.icon_cache[file_path]
+                
+                # 优先使用扩展名安全获取图标
+                icon = self.file_icon_getter.get_icon_by_ext_safe(file_ext)
+                
+                # 如果通过扩展名无法获取图标，再尝试从文件路径获取
+                if (not icon or icon.isNull()) and os.path.exists(file_path):
+                    try:
+                        icon = self.file_icon_getter.get_file_icon(file_path=file_path, file_ext=file_ext)
+                    except Exception as e:
+                        logging.warning(f"从文件路径获取图标失败: {e}")
+            
+            # 如果获取到了有效的图标，则使用它
+            if icon and not icon.isNull():
+                pixmap = icon.pixmap(32, 32)
+                file_icon.setPixmap(pixmap)
+                file_icon.setScaledContents(True)
+            else:
+                # 如果没有获取到有效图标，使用完成图标或Fluent图标
+                if hasattr(self, 'font_manager'):
+                    # 根据文件类型选择合适的Fluent图标
+                    icon_name = "document_24_regular"  # 默认文档图标
+                    icon_color = "#B39DDB"  # 默认紫色
+                    
+                    if file_ext.lower() == 'msi':
+                        icon_name = "app_store_24_regular"
+                        icon_color = "#FF9800"  # 橙色
+                    elif file_ext.lower() in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']:
+                        icon_name = "archive_24_regular"
+                        icon_color = "#FFCA28"  # 黄色
+                    elif file_ext.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
+                        icon_name = "image_24_regular"
+                        icon_color = "#B39DDB"  # 紫色
+                    elif file_ext.lower() in ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']:
+                        icon_name = "music_note_2_24_regular"
+                        icon_color = "#66BB6A"  # 绿色
+                    elif file_ext.lower() in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
+                        icon_name = "video_24_regular"
+                        icon_color = "#FF7043"  # 红色
+                    elif file_ext.lower() in ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
+                        icon_name = "document_24_regular"
+                        icon_color = "#42A5F5"  # 蓝色
+                    
+                    self.font_manager.apply_icon_font(file_icon, f"ic_fluent_{icon_name}", size=28)
+                    file_icon.setStyleSheet(f"color: {icon_color}; background-color: transparent;")
+                else:
+                    # 使用emoji作为备用
+                    emoji = self.file_icon_getter.get_file_emoji(file_name) if hasattr(self, 'file_icon_getter') else "📄"
+                    color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#B39DDB"
+                    pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
+                    if pixmap:
+                        file_icon.setPixmap(pixmap)
+                        file_icon.setScaledContents(True)
+                    else:
+                        file_icon.setText(emoji)
+                        file_icon.setAlignment(Qt.AlignCenter)
+                        file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
         
         file_info_layout.addWidget(file_icon)
         
@@ -3319,6 +3902,12 @@ class DownloadPopDialog(QDialog):
     def __del__(self):
         """析构函数，确保资源释放"""
         try:
+            # 首先标记取消状态
+            try:
+                self.cancelled = True
+            except:
+                pass
+                
             # 停止所有定时器 - 使用更安全的方式检查
             try:
                 if hasattr(self, 'auto_close_timer') and self.auto_close_timer is not None:
@@ -3337,6 +3926,24 @@ class DownloadPopDialog(QDialog):
             except (RuntimeError, ReferenceError, TypeError) as e:
                 # 忽略QTimer已被删除的错误
                 pass
+                
+            # 安全处理AS内核
+            if hasattr(self, 'as_kernel') and self.as_kernel is not None:
+                try:
+                    # 如果是NSF内核，先确保线程停止
+                    if hasattr(self.as_kernel, 'current_kernel_type') and self.as_kernel.current_kernel_type == "NSF":
+                        if hasattr(self.as_kernel, 'nsf_kernel') and self.as_kernel.nsf_kernel is not None:
+                            # 安全调用stop方法
+                            if hasattr(self.as_kernel.nsf_kernel, 'stop') and callable(self.as_kernel.nsf_kernel.stop):
+                                try:
+                                    self.as_kernel.nsf_kernel.stop()
+                                except:
+                                    pass
+                
+                    # 清除引用
+                    self.as_kernel = None
+                except:
+                    pass
                 
             # 安全停止下载引擎
             if hasattr(self, 'download_engine') and self.download_engine is not None:
@@ -3386,24 +3993,49 @@ class DownloadPopDialog(QDialog):
                     
                     # 检查stop方法是否存在
                     if hasattr(self.download_engine, 'stop') and callable(self.download_engine.stop):
-                        self.download_engine.stop()
+                        try:
+                            # 安全调用stop，确保不会引发异常
+                            self.download_engine.stop()
+                        except:
+                            pass
                     
-                    # 等待下载线程完全结束 - 先检查isRunning方法是否存在
+                    # 检查线程是否仍在运行
                     if (hasattr(self.download_engine, 'isRunning') and 
-                        callable(self.download_engine.isRunning) and 
-                        self.download_engine.isRunning()):
-                        # 检查wait方法是否存在
-                        if hasattr(self.download_engine, 'wait') and callable(self.download_engine.wait):
-                            if not self.download_engine.wait(500):  # 减少等待时间，避免阻塞过久
-                                # 检查terminate方法是否存在
-                                if hasattr(self.download_engine, 'terminate') and callable(self.download_engine.terminate):
-                                    self.download_engine.terminate()
+                        callable(self.download_engine.isRunning)):
+                        try:
+                            if self.download_engine.isRunning():
+                                # 尝试使用更安全的quit方法而不是terminate
+                                if hasattr(self.download_engine, 'quit') and callable(self.download_engine.quit):
+                                    try:
+                                        self.download_engine.quit()
+                                        # 等待极短时间
+                                        if hasattr(self.download_engine, 'wait') and callable(self.download_engine.wait):
+                                            self.download_engine.wait(100)  # 最多等待100毫秒
+                                    except:
+                                        pass
+                        except:
+                            pass
                     
                     # 清除引用，帮助垃圾回收
                     self.download_engine = None
                 except Exception as e:
                     # 忽略析构中的错误
                     pass
+                
+            # 处理NCT下载线程
+            if hasattr(self, 'nct_download_thread') and self.nct_download_thread is not None:
+                try:
+                    # 只需清除引用
+                    self.nct_download_thread = None
+                except:
+                    pass
+                
+            # 强制垃圾回收
+            try:
+                import gc
+                gc.collect()
+            except:
+                pass
         except Exception as e:
             # 完全忽略析构中的任何错误
             pass
