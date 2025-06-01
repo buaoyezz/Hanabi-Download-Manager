@@ -12,9 +12,18 @@ import win32gui
 from PIL import Image
 import io
 
+# 导入FontManager
+from core.font.font_manager import FontManager
+
 class FileIconGetter:
     def __init__(self):
         self.icon_provider = QFileIconProvider()
+        
+        # 添加图标缓存字典
+        self.icon_cache = {}
+        
+        # 初始化FontManager
+        self.font_manager = FontManager()
         
         # 文件类型对应的emoji字典
         self.file_emoji_map = {
@@ -150,6 +159,79 @@ class FileIconGetter:
             
         return None
     
+    def get_icon_by_ext_safe(self, file_ext):
+        """
+        安全地只通过文件扩展名获取图标，并缓存结果
+        :param file_ext: 文件扩展名(不带.)
+        :return: QIcon对象
+        """
+        if not file_ext:
+            return None
+            
+        # 标准化扩展名
+        file_ext = file_ext.lower().strip()
+        
+        # 检查缓存
+        cache_key = f"ext_{file_ext}"
+        if cache_key in self.icon_cache:
+            return self.icon_cache[cache_key]
+            
+        # 处理特殊情况：无扩展名
+        if file_ext == "no" or file_ext == "":
+            # 尝试使用通用文件图标
+            try:
+                generic_icon = self.icon_provider.icon(QFileIconProvider.File)
+                if not generic_icon.isNull():
+                    # 缓存结果
+                    self.icon_cache[cache_key] = generic_icon
+                    return generic_icon
+            except Exception as e:
+                print(f"获取通用文件图标失败: {e}")
+            
+            # 如果无法获取通用图标，创建一个简单的替代图标
+            pixmap = self.create_pixmap_with_emoji("📄", size=32, bg_color="#808080")
+            icon = QIcon(pixmap)
+            self.icon_cache[cache_key] = icon
+            return icon
+            
+        # 尝试使用临时文件路径获取图标
+        try:
+            # 创建临时文件路径，不实际创建文件
+            temp_file_path = os.path.join(os.path.expanduser("~"), f"temp_icon_test.{file_ext}")
+            file_info = QFileInfo(temp_file_path)
+            icon = self.icon_provider.icon(file_info)
+            
+            if not icon.isNull():
+                # 缓存结果
+                self.icon_cache[cache_key] = icon
+                return icon
+        except Exception as e:
+            print(f"从扩展名获取图标失败: {e}")
+            
+        # 尝试使用QFileIconProvider内置图标类型
+        try:
+            # 选择适当的内置图标类型
+            icon_type = QFileIconProvider.File  # 默认文件图标
+            
+            icon = self.icon_provider.icon(icon_type)
+            if not icon.isNull():
+                # 缓存结果
+                self.icon_cache[cache_key] = icon
+                return icon
+        except Exception as e:
+            print(f"获取内置类型图标失败: {e}")
+            
+        # 创建一个带有emoji的图标作为后备
+        emoji = self.file_emoji_map.get(file_ext, self.file_emoji_map['default'])
+        color = self.file_type_colors.get(file_ext, self.file_type_colors['default'])
+        
+        pixmap = self.create_pixmap_with_emoji(emoji, size=32, bg_color=color)
+        icon = QIcon(pixmap)
+        
+        # 缓存结果
+        self.icon_cache[cache_key] = icon
+        return icon
+    
     def get_file_icon(self, file_path=None, file_ext=None):
         """
         获取文件图标
@@ -157,6 +239,14 @@ class FileIconGetter:
         :param file_ext: 文件扩展名(不带.)
         :return: QIcon对象或None
         """
+        # 如果只提供了扩展名，使用安全的扩展名图标获取方法
+        if not file_path and file_ext:
+            return self.get_icon_by_ext_safe(file_ext)
+            
+        # 检查缓存 - 如果文件路径在缓存中
+        if file_path and file_path in self.icon_cache:
+            return self.icon_cache[file_path]
+            
         # 处理特殊情况：无扩展名
         if file_ext == "No" or file_ext == "":
             # 尝试使用通用文件图标
@@ -170,89 +260,116 @@ class FileIconGetter:
             # 如果无法获取通用图标，返回None，让上层使用默认图标
             return None
 
-        # 尝试多种方式获取系统图标
+        # 直接处理特定文件类型 - 强制使用Fluent图标
+        use_fluent_icon = False
+        
+        # 对于EXE、MSI等特定类型，直接使用Fluent图标，不尝试获取系统图标
+        if file_ext and file_ext.lower() in ['exe', 'msi', 'bat', 'cmd', 'com', 'ps1', 'app']:
+            use_fluent_icon = True
+            print(f"强制对 {file_ext} 类型使用Fluent图标")
+        
+        # 如果不需要强制使用Fluent图标，尝试多种方式获取系统图标
         icon = None
-        
-        # 特殊处理Windows下的EXE文件
-        if file_path and file_ext and file_ext.lower() == 'exe' and sys.platform.startswith('win'):
-            try:
-                # 首先尝试提取EXE自身的图标
-                exe_icon = self.get_windows_exe_icon(file_path)
-                if exe_icon and not exe_icon.isNull():
-                    print("成功获取EXE文件自身图标")
-                    return exe_icon
-            except Exception as e:
-                print(f"获取EXE自身图标失败: {e}")
-        
-        # 方法1: 如果传入了文件路径，尝试获取系统图标
-        if file_path and os.path.exists(file_path):
-            try:
-                print(f"尝试从实际文件获取图标: {file_path}")
-                file_info = QFileInfo(file_path)
-                icon = self.icon_provider.icon(file_info)
-                if not icon.isNull():
-                    print(f"成功从实际文件获取图标")
-                    return icon
-            except Exception as e:
-                print(f"从实际文件获取图标失败: {e}")
-        
-        # 方法2: 使用临时文件路径尝试获取扩展名对应的图标
-        if file_ext:
-            try:
-                # 对于Windows系统上的exe文件，尝试特殊处理
-                if file_ext.lower() == 'exe':
-                    # 尝试使用特殊类型获取可执行文件图标
-                    print(f"尝试获取可执行文件图标")
-                    exe_icon = self.icon_provider.icon(QFileIconProvider.File)
-                    if not exe_icon.isNull():
-                        print(f"成功获取可执行文件通用图标")
-                        return exe_icon
-                
-                # 创建临时文件路径，不实际创建文件
-                temp_file_path = os.path.join(os.path.expanduser("~"), f"temp_icon_test.{file_ext}")
-                print(f"尝试从扩展名构建的路径获取图标: {temp_file_path}")
-                
-                file_info = QFileInfo(temp_file_path)
-                icon = self.icon_provider.icon(file_info)
-                if not icon.isNull():
-                    print(f"成功从扩展名获取图标")
-                    return icon
-            except Exception as e:
-                print(f"从扩展名获取图标失败: {e}")
-                
-        # 方法3: 尝试使用QFileIconProvider内置的图标类型
-        try:
-            if file_ext:
-                file_ext = file_ext.lower()
-                
-                # 选择适当的内置图标类型
-                icon_type = None
-                if file_ext in ['exe', 'msi', 'bat']:
-                    icon_type = QFileIconProvider.File  # 可执行文件
-                elif file_ext in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']:
-                    icon_type = QFileIconProvider.File  # 压缩文件
-                elif file_ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
-                    icon_type = QFileIconProvider.File  # 图片文件
-                elif file_ext in ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']:
-                    icon_type = QFileIconProvider.File  # 音频文件
-                elif file_ext in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
-                    icon_type = QFileIconProvider.File  # 视频文件
-                elif file_ext in ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
-                    icon_type = QFileIconProvider.File  # 文档文件
-                else:
-                    icon_type = QFileIconProvider.File  # 默认文件图标
-                
-                if icon_type:
-                    print(f"尝试使用内置图标类型")
-                    icon = self.icon_provider.icon(icon_type)
+        if not use_fluent_icon:
+            # 方法1: 如果传入了文件路径，尝试获取系统图标
+            if file_path and os.path.exists(file_path):
+                try:
+                    print(f"尝试从实际文件获取图标: {file_path}")
+                    file_info = QFileInfo(file_path)
+                    icon = self.icon_provider.icon(file_info)
                     if not icon.isNull():
-                        print(f"成功获取内置类型图标")
+                        print(f"成功从实际文件获取图标")
+                        # 缓存结果
+                        self.icon_cache[file_path] = icon
                         return icon
-        except Exception as e:
-            print(f"获取内置类型图标失败: {e}")
+                except Exception as e:
+                    print(f"从实际文件获取图标失败: {e}")
+            
+            # 方法2: 使用临时文件路径尝试获取扩展名对应的图标
+            if file_ext:
+                try:
+                    # 创建临时文件路径，不实际创建文件
+                    temp_file_path = os.path.join(os.path.expanduser("~"), f"temp_icon_test.{file_ext}")
+                    print(f"尝试从扩展名构建的路径获取图标: {temp_file_path}")
+                    
+                    file_info = QFileInfo(temp_file_path)
+                    icon = self.icon_provider.icon(file_info)
+                    if not icon.isNull():
+                        print(f"成功从扩展名获取图标")
+                        # 缓存结果
+                        if file_path:
+                            self.icon_cache[file_path] = icon
+                        return icon
+                except Exception as e:
+                    print(f"从扩展名获取图标失败: {e}")
+                    
+            # 方法3: 尝试使用QFileIconProvider内置的图标类型
+            try:
+                if file_ext:
+                    file_ext = file_ext.lower()
+                    
+                    # 选择适当的内置图标类型
+                    icon_type = None
+                    if file_ext in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']:
+                        icon_type = QFileIconProvider.File  # 压缩文件
+                    elif file_ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
+                        icon_type = QFileIconProvider.File  # 图片文件
+                    elif file_ext in ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']:
+                        icon_type = QFileIconProvider.File  # 音频文件
+                    elif file_ext in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
+                        icon_type = QFileIconProvider.File  # 视频文件
+                    elif file_ext in ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
+                        icon_type = QFileIconProvider.File  # 文档文件
+                    else:
+                        icon_type = QFileIconProvider.File  # 默认文件图标
+                    
+                    if icon_type:
+                        print(f"尝试使用内置图标类型")
+                        icon = self.icon_provider.icon(icon_type)
+                        if not icon.isNull():
+                            print(f"成功获取内置类型图标")
+                            # 缓存结果
+                            if file_path:
+                                self.icon_cache[file_path] = icon
+                            return icon
+            except Exception as e:
+                print(f"获取内置类型图标失败: {e}")
         
-        # 无法获取系统图标，返回None，上层应该使用emoji替代
-        print("无法获取系统图标，将使用替代图标")
+        # 使用Fluent图标作为备选或强制选项
+        print("使用Fluent图标")
+        fluent_icon = None
+        
+        # 根据文件类型选择合适的Fluent图标
+        if file_ext:
+            file_ext = file_ext.lower()
+            if file_ext == 'exe':
+                fluent_icon = self.font_manager.get_qicon("app_24_regular", "#FF9800")
+            elif file_ext == 'msi':
+                fluent_icon = self.font_manager.get_qicon("app_store_24_regular", "#FF9800")
+            elif file_ext == 'bat' or file_ext == 'cmd' or file_ext == 'ps1':
+                fluent_icon = self.font_manager.get_qicon("code_24_regular", "#FF9800")
+            elif file_ext in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']:
+                fluent_icon = self.font_manager.get_qicon("archive_24_regular", "#FFCA28")
+            elif file_ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
+                fluent_icon = self.font_manager.get_qicon("image_24_regular", "#B39DDB")
+            elif file_ext in ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']:
+                fluent_icon = self.font_manager.get_qicon("music_note_2_24_regular", "#66BB6A")
+            elif file_ext in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
+                fluent_icon = self.font_manager.get_qicon("video_24_regular", "#FF7043")
+            elif file_ext in ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
+                fluent_icon = self.font_manager.get_qicon("document_24_regular", "#42A5F5")
+            else:
+                fluent_icon = self.font_manager.get_qicon("document_24_regular", self.file_type_colors.get(file_ext, self.file_type_colors['default']))
+        
+        if fluent_icon and not fluent_icon.isNull():
+            print("成功获取Fluent图标")
+            # 缓存结果
+            if file_path:
+                self.icon_cache[file_path] = fluent_icon
+            return fluent_icon
+        
+        # 无法获取任何图标，返回None，上层应该使用emoji替代
+        print("无法获取任何图标，将使用替代图标")
         return None
     
     def get_file_emoji(self, filename):
