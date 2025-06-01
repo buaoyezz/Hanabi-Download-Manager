@@ -15,6 +15,12 @@ if not exist "resources\logo2.png" (
     exit /b 1
 )
 
+REM 检查Fluent Icons字体文件是否存在
+if not exist "core\font\icons\FluentSystemIcons-Regular.ttf" (
+    echo 警告: 找不到Fluent Icons字体文件，图标可能无法正常显示
+    pause
+)
+
 REM 检查version.json是否存在，如果不存在则创建一个默认的
 if not exist "version.json" (
     echo 警告: version.json 不存在，创建默认版本文件...
@@ -32,6 +38,8 @@ python -m nuitka ^
   --include-package-data=connect,client,core,hdm_chrome_extension ^
   --include-data-dir=resources=resources ^
   --include-data-dir=core/font=core/font ^
+  --include-data-dir=core/font/icons=core/font/icons ^
+  --include-data-dir=core/font/font=core/font/font ^
   --include-data-dir=core/download_core/core=core/download_core/core ^
   --include-data-dir=hdm_chrome_extension=hdm_chrome_extension ^
   --include-data-dir=client/languages=client/languages ^
@@ -48,7 +56,7 @@ python -m nuitka ^
   --report=compilation-report.xml ^
   --windows-company-name="ZZBuAoYe" ^
   --windows-product-name="Hanabi Download Manager" ^
-  --windows-file-description="HDM A Download Manager" ^
+  --windows-file-description="Hanabi Download Manager" ^
   --windows-file-version="1.0.0.0" ^
   --windows-product-version="1.0.0.0" ^
   --python-flag=no_site ^
