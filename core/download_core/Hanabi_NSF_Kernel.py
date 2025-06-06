@@ -1,6 +1,6 @@
-#==================================
 # Hanabi Nextgen Speed Force Kernel
 # GNU General Public License v3.0
+# Code Name: H-NSF
 # Developed by ZZBuAoYe
 # H-NSF Kernel Version: 1.2.0 Stable
 #==================================
