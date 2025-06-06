@@ -204,22 +204,12 @@ class DownloadPopDialog(QDialog):
                 # 保存任务数据，以便下载按钮使用
                 dialog.pending_task_data = task_data
         
-        # 显示窗口前先设置透明度为0
-        dialog.setWindowOpacity(0.0)
-        
         # 显示窗口
         dialog.showNormal()
         
-        # 使用动画平滑显示窗口
-        fade_in = QPropertyAnimation(dialog, b"windowOpacity")
-        fade_in.setDuration(150)  # 150毫秒的淡入效果
-        fade_in.setStartValue(0.0)
-        fade_in.setEndValue(1.0)
-        fade_in.start()
-        
-        # 延迟执行窗口激活和居中操作
-        QTimer.singleShot(50, dialog.raise_)
-        QTimer.singleShot(100, dialog.activateWindow)
+        # 强制激活窗口
+        dialog.raise_()
+        dialog.activateWindow()
         
         # 延迟执行居中和边界检查，确保窗口大小已经计算完成
         QTimer.singleShot(100, lambda: dialog.move(
