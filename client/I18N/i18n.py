@@ -52,12 +52,12 @@ class I18N(QObject):
             else:
                 # 回退到旧方法
                 self.client_version = self._load_version()
-                self.extension_version = "1.0.1"  # 默认扩展版本
+                self.extension_version = "1.0.2"  # 默认扩展版本
                 log.info(f"使用旧方法获取版本信息: 客户端={self.client_version}, 扩展={self.extension_version}")
         except Exception as e:
             log.error(f"初始化版本信息失败: {str(e)}")
             self.client_version = "1.0.0"
-            self.extension_version = "1.0.1"
+            self.extension_version = "1.0.2"
     
     def reload_version(self):
         """重新加载版本信息"""

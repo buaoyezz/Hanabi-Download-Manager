@@ -27,7 +27,7 @@ except ImportError:
         def get_client_version(self):
             return "1.0.7"  # 默认版本
         def get_extension_version(self):
-            return "1.0.1"  # 默认扩展版本
+            return "1.0.2"  # 默认扩展版本
     version_manager = VersionManagerFallback()
     logging.warning("无法导入版本管理器，使用默认版本")
 
