@@ -13,6 +13,9 @@ from datetime import datetime
 import logging
 import urllib.request
 import urllib3
+import random
+# 导入版本信息获取工具
+from client.ui.client_interface.settings.utils.net_update_get import get_version_info
 
 class UpdateCheckerThread(QThread):
     """更新检查线程，避免UI阻塞"""
@@ -26,409 +29,89 @@ class UpdateCheckerThread(QThread):
         self.silent = silent
         
     def run(self):
-        # 优先使用缓存的更新源
-        if self.update_page.cached_data and self.update_page.cached_data.get("working_source"):
-            source = self.update_page.cached_data.get("working_source")
-            endpoint = self.update_page.cached_data.get("working_endpoint", "")
+        """线程主函数：获取更新信息"""
+        try:
+            # 构建请求头
+            headers = None
+            if hasattr(self.update_page, 'get_user_agent'):
+                user_agent = self.update_page.get_user_agent()
+                if user_agent:
+                    headers = {"User-Agent": user_agent}
             
-            if source == "primary":
-                logging.info("使用缓存中记录的主更新源")
-                self.update_page.primary_endpoint = endpoint
-                self.try_primary_source()
+            # 使用net_update_get获取版本信息，传递代理设置和请求头
+            data = get_version_info(
+                proxy_settings=self.update_page.proxy_settings if self.update_page.use_proxy else None,
+                headers=headers
+            )
+            
+            # 检查数据是否有效
+            if data:
+                # 标记为主源
+                self.update_page.current_update_source = "primary"
+                logging.info("通过net_update_get获取版本信息成功")
+                
+                # 保存工作的源信息
+                data["working_source"] = "primary"
+                data["working_endpoint"] = self.update_page.primary_endpoint
+                
+                # 发送信号
+                self.updateDataReady.emit(data, self.check_time)
+                return
             else:
-                logging.info("使用缓存中记录的次更新源")
-                self.update_page.secondary_endpoint = endpoint
-                self.try_secondary_source()
-        else:
-            # 没有缓存的可用源，按正常顺序尝试
-            self.try_primary_source()
+                # 获取失败，尝试备用方案
+                logging.warning("主更新源通过net_update_get获取失败，尝试备用方案")
+                self.try_backup_sources()
+        except Exception as e:
+            logging.error(f"通过net_update_get获取版本信息出错: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
+            self.try_backup_sources()
     
-    def try_primary_source(self):
-        """尝试从主更新源获取更新信息"""
-        retry_count = 0
+    def try_backup_sources(self):
+        """尝试使用备用方法获取更新信息"""
+        # 尝试从备用源获取更新
+        logging.info("尝试使用备用源获取更新信息")
         
-        # 禁止不安全连接警告 - 仅在此函数中禁用
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        while retry_count <= self.update_page.primary_max_retries:
-            try:
-                primary_url = f"{self.update_page.primary_api_url}{self.update_page.primary_endpoint}"
-                logging.info(f"正在从主更新源获取更新信息 [尝试 {retry_count+1}/{self.update_page.primary_max_retries+1}]: {primary_url}")
-                
-                # 准备代理设置
-                proxy_info = ""
-                if self.update_page.use_proxy and self.update_page.proxy_settings:
-                    proxy_info = f"（使用代理）"
-                    logging.info(f"使用代理访问主更新源")
-                else:
-                    logging.info(f"直接连接主更新源（不使用代理）")
-                
-                logging.info(f"主更新源请求开始 {proxy_info}")
-                
-                # 创建新的会话对象
-                session = requests.Session()
-                
-                # 设置代理（如果启用）
-                if self.update_page.use_proxy and self.update_page.proxy_settings:
-                    session.proxies.update(self.update_page.proxy_settings)
-                
-                # 模拟浏览器头部
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", 
-                    "Accept-Encoding": "gzip, deflate, br",
-                    "Connection": "close",
-                    "Cache-Control": "no-cache",
-                    "Pragma": "no-cache",
-                    "Sec-Fetch-Dest": "document",
-                    "Sec-Fetch-Mode": "navigate",
-                    "Sec-Fetch-Site": "none",
-                    "Sec-Fetch-User": "?1",
-                    "Upgrade-Insecure-Requests": "1",
-                    "DNT": "1"
-                }
-                
-                # 使用requests
-                response = session.get(
-                    primary_url,
-                    headers=headers,
-                    timeout=10,
-                    verify=False,  # 禁用SSL验证
-                    allow_redirects=True,
-                    proxies=self.update_page.proxy_settings if self.update_page.use_proxy else None
-                )
-                
-                # 检查响应
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                        
-                        # 标记为主源
-                        self.update_page.current_update_source = "primary"
-                        logging.info("主更新源连接成功")
-                        
-                        # 保存工作的源信息
-                        data["working_source"] = "primary"
-                        data["working_endpoint"] = self.update_page.primary_endpoint
-                        
-                        # 发送信号
-                        self.updateDataReady.emit(data, self.check_time)
-                        return  # 成功后返回
-                    except json.JSONDecodeError as json_err:
-                        logging.error(f"响应不是有效的JSON: {json_err}")
-                        # 这里尝试打印响应内容以便调试
-                        logging.debug(f"响应内容: {response.text[:200]}...")
-                        
-                        # 尝试检查并手动解析响应内容
-                        if response.content and len(response.content) > 0:
-                            # 检查是否有BOM标记或其他编码问题
-                            try:
-                                text = response.content.decode('utf-8-sig')
-                                logging.info("尝试使用utf-8-sig解码响应内容")
-                                data = json.loads(text)
-                                logging.info("成功使用utf-8-sig解析JSON")
-                                
-                                # 保存和处理数据
-                                self.update_page.current_update_source = "primary"
-                                data["working_source"] = "primary"
-                                data["working_endpoint"] = self.update_page.primary_endpoint
-                                self.updateDataReady.emit(data, self.check_time)
-                                return
-                            except Exception as decode_err:
-                                logging.error(f"尝试替代解码方法失败: {decode_err}")
-                        raise
-                else:
-                    logging.warning(f"主更新源返回状态码: {response.status_code}")
-                    
-                    # 尝试备用路径
-                    alternate_url = f"{self.update_page.primary_api_url}/version.json"
-                    logging.info(f"尝试备用主源路径: {alternate_url}")
-                    
-                    alt_response = session.get(
-                        alternate_url,
-                        headers=headers,
-                        timeout=10,
-                        verify=False,
-                        allow_redirects=True,
-                        proxies=self.update_page.proxy_settings if self.update_page.use_proxy else None
-                    )
-                    
-                    if alt_response.status_code == 200:
-                        try:
-                            data = alt_response.json()
-                            
-                            # 更新端点
-                            self.update_page.primary_endpoint = "/version.json"
-                            
-                            # 标记为主源
-                            self.update_page.current_update_source = "primary"
-                            logging.info("主更新源备用路径连接成功")
-                            
-                            # 保存工作的源信息
-                            data["working_source"] = "primary"
-                            data["working_endpoint"] = self.update_page.primary_endpoint
-                            
-                            # 发送信号
-                            self.updateDataReady.emit(data, self.check_time)
-                            return  # 成功后返回
-                        except json.JSONDecodeError:
-                            logging.error(f"备用路径响应不是有效的JSON")
-                            # 尝试手动解码
-                            try:
-                                text = alt_response.content.decode('utf-8-sig')
-                                data = json.loads(text)
-                                logging.info("备用路径使用utf-8-sig解析成功")
-                                
-                                # 处理数据
-                                self.update_page.primary_endpoint = "/version.json"
-                                self.update_page.current_update_source = "primary"
-                                data["working_source"] = "primary"
-                                data["working_endpoint"] = self.update_page.primary_endpoint
-                                self.updateDataReady.emit(data, self.check_time)
-                                return
-                            except Exception as alt_decode_err:
-                                logging.error(f"备用路径解码失败: {alt_decode_err}")
-                            raise
-                    else:
-                        logging.warning(f"备用主源路径返回状态码: {alt_response.status_code}")
-                
-            except requests.exceptions.ConnectionError as conn_err:
-                logging.error(f"主更新源连接错误 [尝试 {retry_count+1}]: {conn_err}")
-            except requests.exceptions.Timeout as timeout_err:
-                logging.error(f"主更新源连接超时 [尝试 {retry_count+1}]: {timeout_err}")
-            except ValueError as json_err:
-                logging.error(f"主更新源JSON解析错误: {json_err}")
-                # JSON解析错误不重试，直接尝试次源
-                break
-            except Exception as e:
-                logging.error(f"主更新源连接尝试过程中出现未预期错误: {e}")
-            finally:
-                # 确保关闭session
-                if 'session' in locals():
-                    session.close()
+        try:
+            # 构建请求头
+            headers = None
+            if hasattr(self.update_page, 'get_user_agent'):
+                user_agent = self.update_page.get_user_agent()
+                if user_agent:
+                    headers = {"User-Agent": user_agent}
             
-            # 增加重试计数
-            retry_count += 1
+            # 调用net_update_get.py中的get_version_info，指定备用URL
+            # 通过第二个参数传递备用URL
+            data = get_version_info(
+                proxy_settings=self.update_page.proxy_settings if self.update_page.use_proxy else None,
+                headers=headers,
+                alt_url="https://zzbuaoye.dpdns.org/HanabiDM/version.json"  # 指定备用URL
+            )
             
-            # 如果还有重试机会，等待一段时间再重试
-            if retry_count <= self.update_page.primary_max_retries:
-                retry_delay = self.update_page.primary_retry_delay * retry_count  # 逐次增加等待时间
-                logging.info(f"等待 {retry_delay} 秒后重试主更新源连接...")
-                time.sleep(retry_delay)
+            # 检查数据是否有效
+            if data:
+                # 标记为次源
+                self.update_page.current_update_source = "secondary"
+                logging.info("备用更新源连接成功")
+                
+                # 保存工作的源信息
+                data["working_source"] = "secondary"
+                data["working_endpoint"] = "/HanabiDM/version.json"
+                
+                # 添加警告标记
+                if not data.get("warning_shown", False):
+                    data["warning_shown"] = True
+                    data["source_warning"] = "备用更新源数据可能不是最新的"
+                
+                # 发送信号
+                self.updateDataReady.emit(data, self.check_time)
+                return
+        except Exception as e:
+            logging.error(f"备用更新源请求出错: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
         
-        # 所有主源重试都失败了，尝试次源
-        logging.warning("主更新源所有尝试均失败，切换到次更新源")
-        self.try_secondary_source()
-    
-    def try_secondary_source(self):
-        """从次更新源获取更新信息，支持多次重试，模拟浏览器行为，支持代理"""
-        retry_count = 0
-        
-        # 禁止不安全连接警告 - 仅在此函数中禁用
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        while retry_count <= self.update_page.secondary_max_retries:
-            try:
-                secondary_url = f"{self.update_page.secondary_api_url}{self.update_page.secondary_endpoint}"
-                logging.info(f"正在从次更新源获取更新信息 [尝试 {retry_count+1}/{self.update_page.secondary_max_retries+1}]: {secondary_url}")
-                
-                # 准备代理设置
-                proxy_info = ""
-                if self.update_page.use_proxy and self.update_page.proxy_settings:
-                    proxy_info = f"（使用代理）"
-                    logging.info(f"使用代理访问次更新源")
-                else:
-                    logging.info(f"直接连接次更新源（不使用代理）")
-                
-                logging.info(f"次更新源请求开始 {proxy_info}")
-                
-                # 使用模拟浏览器行为的方式
-                try:
-                    # 创建新的会话对象
-                    session = requests.Session()
-                    
-                    # 设置代理（如果启用）
-                    if self.update_page.use_proxy and self.update_page.proxy_settings:
-                        session.proxies.update(self.update_page.proxy_settings)
-                    
-                    # 模拟浏览器头部
-                    headers = {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                        "Accept": "application/json, text/plain, */*",
-                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8", 
-                        "Accept-Encoding": "gzip, deflate, br",
-                        "Connection": "close",
-                        "Cache-Control": "no-cache",
-                        "Pragma": "no-cache",
-                        "Sec-Fetch-Dest": "document",
-                        "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "none",
-                        "Sec-Fetch-User": "?1",
-                        "Upgrade-Insecure-Requests": "1",
-                        "DNT": "1"
-                    }
-                    
-                    # 优先使用requests，不再尝试urllib
-                    logging.info(f"使用requests请求更新信息")
-                    
-                    # 直接使用requests
-                    response = session.get(
-                        secondary_url,
-                        headers=headers,
-                        timeout=30,
-                        verify=False,  # 禁用SSL验证
-                        allow_redirects=True,
-                        proxies=self.update_page.proxy_settings if self.update_page.use_proxy else None
-                    )
-                    
-                    # 检查响应
-                    if response.status_code == 200:
-                        try:
-                            data = response.json()
-                            
-                            # 标记为次源
-                            self.update_page.current_update_source = "secondary"
-                            logging.info("次更新源连接成功 (通过requests)")
-                            
-                            # 保存工作的源信息
-                            data["working_source"] = "secondary"
-                            data["working_endpoint"] = self.update_page.secondary_endpoint
-                            
-                            # 添加警告标记
-                            if not data.get("warning_shown", False):
-                                data["warning_shown"] = True
-                                data["source_warning"] = "次更新源数据可能不是最新的"
-                            
-                            # 发送信号
-                            self.updateDataReady.emit(data, self.check_time)
-                            return  # 成功后返回
-                        except json.JSONDecodeError as json_err:
-                            logging.error(f"响应不是有效的JSON: {json_err}")
-                            # 这里尝试打印响应内容以便调试
-                            logging.debug(f"响应内容: {response.text[:200]}...")
-                            
-                            # 尝试检查并手动解析响应内容
-                            if response.content and len(response.content) > 0:
-                                # 检查是否有BOM标记或其他编码问题
-                                try:
-                                    text = response.content.decode('utf-8-sig')
-                                    logging.info("尝试使用utf-8-sig解码响应内容")
-                                    data = json.loads(text)
-                                    logging.info("成功使用utf-8-sig解析JSON")
-                                    
-                                    # 保存和处理数据
-                                    self.update_page.current_update_source = "secondary"
-                                    data["working_source"] = "secondary"
-                                    data["working_endpoint"] = self.update_page.secondary_endpoint
-                                    if not data.get("warning_shown", False):
-                                        data["warning_shown"] = True
-                                        data["source_warning"] = "次更新源数据可能不是最新的"
-                                    self.updateDataReady.emit(data, self.check_time)
-                                    return
-                                except Exception as decode_err:
-                                    logging.error(f"尝试替代解码方法失败: {decode_err}")
-                            raise
-                    else:
-                        logging.warning(f"次更新源返回状态码: {response.status_code}")
-                        
-                        # 尝试备用路径
-                        alternate_url = f"{self.update_page.secondary_api_url}/version.json"
-                        logging.info(f"尝试备用次源路径: {alternate_url}")
-                        
-                        alt_response = session.get(
-                            alternate_url,
-                            headers=headers,
-                            timeout=30,
-                            verify=False,
-                            allow_redirects=True,
-                            proxies=self.update_page.proxy_settings if self.update_page.use_proxy else None
-                        )
-                        
-                        if alt_response.status_code == 200:
-                            try:
-                                data = alt_response.json()
-                                
-                                # 更新端点
-                                self.update_page.secondary_endpoint = "/version.json"
-                                
-                                # 标记为次源
-                                self.update_page.current_update_source = "secondary"
-                                logging.info("次更新源备用路径连接成功")
-                                
-                                # 保存工作的源信息
-                                data["working_source"] = "secondary"
-                                data["working_endpoint"] = self.update_page.secondary_endpoint
-                                
-                                # 添加警告标记
-                                if not data.get("warning_shown", False):
-                                    data["warning_shown"] = True
-                                    data["source_warning"] = "次更新源数据可能不是最新的"
-                                
-                                # 发送信号
-                                self.updateDataReady.emit(data, self.check_time)
-                                return  # 成功后返回
-                            except json.JSONDecodeError:
-                                logging.error(f"备用路径响应不是有效的JSON")
-                                # 尝试手动解码
-                                try:
-                                    text = alt_response.content.decode('utf-8-sig')
-                                    data = json.loads(text)
-                                    logging.info("备用路径使用utf-8-sig解析成功")
-                                    
-                                    # 处理数据
-                                    self.update_page.secondary_endpoint = "/version.json"
-                                    self.update_page.current_update_source = "secondary"
-                                    data["working_source"] = "secondary"
-                                    data["working_endpoint"] = self.update_page.secondary_endpoint
-                                    if not data.get("warning_shown", False):
-                                        data["warning_shown"] = True
-                                        data["source_warning"] = "次更新源数据可能不是最新的"
-                                    self.updateDataReady.emit(data, self.check_time)
-                                    return
-                                except Exception as alt_decode_err:
-                                    logging.error(f"备用路径解码失败: {alt_decode_err}")
-                                raise
-                        else:
-                            logging.warning(f"备用次源路径返回状态码: {alt_response.status_code}")
-                            raise requests.exceptions.HTTPError(f"HTTP {alt_response.status_code}")
-                    
-                except (requests.exceptions.ConnectionError, urllib.error.URLError) as conn_err:
-                    logging.error(f"次更新源请求错误 [尝试 {retry_count+1}]: {conn_err}")
-                    # 继续尝试重试
-                    
-                except requests.exceptions.Timeout as timeout_err:
-                    logging.error(f"次更新源连接超时 [尝试 {retry_count+1}]: {timeout_err}")
-                    # 继续尝试重试
-                    
-                except json.JSONDecodeError as json_err:
-                    logging.error(f"次更新源JSON解析错误: {json_err}")
-                    # JSON解析错误不重试，直接尝试缓存
-                    break
-                    
-                except Exception as req_err:
-                    logging.error(f"次更新源请求过程中出现其他错误 [尝试 {retry_count+1}]: {req_err}")
-                    # 继续尝试重试
-                
-                finally:
-                    # 确保关闭session
-                    if 'session' in locals():
-                        session.close()
-                
-            except Exception as e:
-                # 捕获所有异常，确保重试循环不会中断
-                logging.error(f"次更新源连接尝试过程中出现未预期错误: {str(e)}")
-            
-            # 增加重试计数
-            retry_count += 1
-            
-            # 如果还有重试机会，等待一段时间再重试
-            if retry_count <= self.update_page.secondary_max_retries:
-                retry_delay = self.update_page.secondary_retry_delay * retry_count  # 逐次增加等待时间
-                logging.info(f"等待 {retry_delay} 秒后重试次更新源连接...")
-                time.sleep(retry_delay)
-        
-        # 所有重试都失败了，报告错误
+        # 所有更新源连接均失败
         logging.warning("所有更新源连接均失败")
         if self.update_page.cached_data and self.update_page.cached_data.get("latest"):
             logging.info("但有缓存的更新数据可用")
@@ -454,22 +137,9 @@ class UpdatePage(QWidget):
         # 软件当前版本
         self.current_version = self.version_manager.get_client_version()
         
-        # 更新源配置
+        # 更新源配置 - 用于显示和标记，实际获取已移至net_update_get.py
         self.primary_api_url = "https://apiv2.xiaoy.asia"  # 主更新源URL
-        # 次更新源 - 已知目前可能有连接问题
-        self.secondary_api_url = "https://zzbuaoye.dpdns.org"  
-        
-        # 更新源端点
-        self.primary_endpoint = "/custody-project/hdm/api/version.php"  # 新的API地址
-        self.secondary_endpoint = "/HanabiDM/version.json"
-        
-        # 主更新源尝试次数和连接参数
-        self.primary_max_retries = 3  # 主更新源重试次数更多
-        self.primary_retry_delay = 1  # 秒
-        
-        # 次更新源尝试次数和连接参数
-        self.secondary_max_retries = 2
-        self.secondary_retry_delay = 1  # 秒
+        self.primary_endpoint = "/custody-project/hdm/api/version.php"  # 主API路径
         
         # 代理设置
         self.use_proxy = self.config_manager.get_use_proxy() if hasattr(self.config_manager, 'get_use_proxy') else False
