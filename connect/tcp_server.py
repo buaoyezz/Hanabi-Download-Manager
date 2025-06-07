@@ -9,6 +9,7 @@ import hashlib
 import socket
 import sys
 import os
+import time
 from typing import Dict, List, Optional, Callable
 
 # 添加父目录到sys.path以导入客户端模块
@@ -27,7 +28,7 @@ except ImportError:
         def get_client_version(self):
             return "1.0.7"  # 默认版本
         def get_extension_version(self):
-            return "1.0.2"  # 默认扩展版本
+            return "1.0.3"  # 默认扩展版本
     version_manager = VersionManagerFallback()
     logging.warning("无法导入版本管理器，使用默认版本")
 
@@ -37,11 +38,12 @@ class BasicTCPServer:
     def __init__(self, host: str = "localhost", port: int = 20971):
         self.host = host
         self.port = port
-        self.clients = set()
+        self.clients = {}  # 修改为字典，存储writer对象
         self.server = None
         self.server_thread = None
         self.is_running = False
         self._download_handler: Optional[Callable] = None
+        self._clients_lock = threading.Lock()  # 添加锁以保护clients字典
         
         # 设置日志
         logging.basicConfig(
@@ -55,7 +57,8 @@ class BasicTCPServer:
     
     def has_clients(self):
         """检查是否有客户端连接"""
-        return len(self.clients) > 0
+        with self._clients_lock:
+            return len(self.clients) > 0
     
     def _is_websocket_handshake(self, data: bytes) -> tuple:
         """判断是否是WebSocket握手请求"""
@@ -168,7 +171,15 @@ class BasicTCPServer:
         addr = writer.get_extra_info('peername')
         self.logger.info(f"客户端已连接: {addr}")
         client_id = id(writer)
-        self.clients.add(client_id)
+        
+        # 使用锁保护添加客户端操作
+        with self._clients_lock:
+            self.clients[client_id] = {
+                "writer": writer, 
+                "addr": addr,
+                "is_websocket": False,  # 默认为非WebSocket连接
+                "last_activity": time.time()  # 记录最后活动时间
+            }
         
         # 用于跟踪连接类型
         is_websocket = False
@@ -192,6 +203,11 @@ class BasicTCPServer:
                 if not await self._safe_write(writer, handshake_response):
                     return
                 is_websocket = True
+                
+                # 更新客户端的WebSocket状态
+                with self._clients_lock:
+                    if client_id in self.clients:
+                        self.clients[client_id]["is_websocket"] = True
                 
                 # 发送版本信息 (WebSocket格式)
                 version_info = {
@@ -328,8 +344,10 @@ class BasicTCPServer:
             except Exception as e:
                 self.logger.debug(f"处理客户端关闭时出错: {e}")
             
-            if client_id in self.clients:
-                self.clients.remove(client_id)
+            # 使用锁保护删除客户端操作
+            with self._clients_lock:
+                if client_id in self.clients:
+                    self.clients.pop(client_id, None)
             self.logger.info(f"客户端已断开连接: {addr}")
     
     async def _process_json_message(self, data, writer):
@@ -422,6 +440,84 @@ class BasicTCPServer:
             self.logger.info("TCP服务器已标记为停止")
         except Exception as e:
             self.logger.error(f"停止TCP服务器出错: {e}")
+
+    async def _safe_broadcast(self, message, exclude_client_id=None):
+        """安全地广播消息到所有客户端"""
+        with self._clients_lock:
+            clients_copy = dict(self.clients)  # 创建客户端字典的副本，避免在迭代过程中修改
+
+        # 记录开始广播
+        self.logger.debug(f"开始广播消息到 {len(clients_copy)} 个客户端")
+        
+        # 使用副本进行迭代
+        for client_id, client_info in clients_copy.items():
+            # 如果指定了排除的客户端ID，则跳过该客户端
+            if exclude_client_id and client_id == exclude_client_id:
+                continue
+            
+            writer = client_info.get("writer")
+            is_websocket = client_info.get("is_websocket", False)
+            
+            if writer:
+                try:
+                    # 根据连接类型选择发送格式
+                    if is_websocket:
+                        # WebSocket格式
+                        ws_message = self._encode_websocket_frame(message)
+                        await self._safe_write(writer, ws_message)
+                    else:
+                        # 普通TCP格式
+                        await self._safe_write(writer, (message + '\n').encode('utf-8'))
+                    
+                    # 更新最后活动时间
+                    with self._clients_lock:
+                        if client_id in self.clients:
+                            self.clients[client_id]["last_activity"] = time.time()
+                            
+                except Exception as e:
+                    self.logger.error(f"广播到客户端 {client_id} 时出错: {e}")
+                    # 可能需要移除失效的客户端连接
+                    with self._clients_lock:
+                        if client_id in self.clients:
+                            self.clients.pop(client_id, None)
+                            self.logger.info(f"已从客户端列表中移除失效客户端 {client_id}")
+        
+        # 记录广播完成
+        self.logger.debug("广播消息完成")
+
+    def broadcast_message(self, message):
+        """向所有连接的客户端广播消息"""
+        if not self.is_running:
+            self.logger.info("服务器未运行，无法广播消息，但会记录此消息")
+            # 记录消息但不返回，以防未来有客户端连接
+        
+        # 即使没有客户端也安全处理
+        with self._clients_lock:
+            if len(self.clients) == 0:
+                self.logger.debug("当前没有连接的客户端，消息已记录但不会发送")
+                # 不再直接返回，继续尝试创建任务
+        
+        # 创建异步任务
+        async def _do_broadcast():
+            await self._safe_broadcast(message)
+        
+        # 获取当前事件循环，或创建新的
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果循环已经运行，使用事件循环的create_task
+                asyncio.create_task(_do_broadcast())
+            else:
+                # 如果循环没有运行，使用run_until_complete
+                loop.run_until_complete(_do_broadcast())
+        except RuntimeError:
+            # 如果无法获取当前循环，创建新的
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(_do_broadcast())
+        except Exception as e:
+            self.logger.error(f"广播消息时出错: {e}")
+            self.logger.error(traceback.format_exc())
 
 # 单例模式，全局访问点
 _server_instance = None

@@ -453,16 +453,10 @@ class GeneralControlWidget(QWidget):
             if self.config_manager.save_config():
                 # 处理自启动设置 - 如果启用了最小化启动，则自启动时也添加静默参数
                 if self.auto_start_checkbox.isChecked():
-<<<<<<< HEAD
                     # 根据是否启用最小化启动决定是否添加静默参数
                     add_to_startup(use_silent_mode=start_minimized)
                 else:
                     remove_from_startup()
-=======
-                    add_to_startup()  # 使用导入的函数，现在会带静默启动参数
-                else:
-                    remove_from_startup()  # 使用导入的函数
->>>>>>> 28724b36bd6128e814ac7cd634005f5e35da5122
                 
                 # 处理关闭到托盘设置
                 self._apply_close_to_tray_setting(self.close_to_tray_checkbox.isChecked())
@@ -489,15 +483,10 @@ class GeneralControlWidget(QWidget):
     def _setup_autostart(self):
         """设置开机自启动"""
         try:
-<<<<<<< HEAD
             # 获取是否启用最小化启动
             start_minimized = self.start_minimized_checkbox.isChecked()
             # core/autoboot/auto_boot.py
             add_to_startup(use_silent_mode=start_minimized)
-=======
-            # core/autoboot/auto_boot.py
-            add_to_startup()
->>>>>>> 28724b36bd6128e814ac7cd634005f5e35da5122
             self.notify_manager.show_message(i18n.get_text("auto_start"), i18n.get_text("auto_start_enabled"))
         except Exception as e:
             self.notify_manager.show_message(i18n.get_text("auto_start"), f"{i18n.get_text('auto_start_failed')}: {str(e)}")

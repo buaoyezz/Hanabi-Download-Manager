@@ -23,7 +23,7 @@ class VersionManager:
         VersionManager._initialized = True
         
         self.client_version = "1.0.0"  # 初始的版本
-        self.extension_version = "1.0.2"  # 初始的扩展版本
+        self.extension_version = "1.0.3"  # 初始的扩展版本
         
         # 设置日志
         self._init_logger()

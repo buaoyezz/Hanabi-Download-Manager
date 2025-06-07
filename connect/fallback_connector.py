@@ -20,6 +20,20 @@ except (ImportError, ModuleNotFoundError) as e:
     logging.error(traceback.format_exc())
     raise
 
+# 导入版本管理器
+try:
+    from client.version.version_manager import VersionManager
+    version_manager = VersionManager.get_instance()
+except ImportError:
+    # 创建一个简单的版本管理类作为备用
+    class VersionManagerFallback:
+        def get_client_version(self):
+            return "1.0.7"  # 默认版本
+        def get_extension_version(self):
+            return "1.0.3"  # 默认扩展版本
+    version_manager = VersionManagerFallback()
+    logging.warning("无法导入版本管理器，使用默认版本")
+
 # WebSocket相关导入放在这里，但不使用
 try:
     import websockets.legacy
@@ -57,6 +71,7 @@ class FallbackConnector(QObject):
         self._request_queue_lock = threading.Lock()  # 请求队列锁
         self._is_processing = False  # 是否正在处理请求队列
         self._request_count = 0  # 请求计数
+        self._alive_timer = None  # 保存alive信号定时器
         
         # 尝试初始化服务器
         self.initialize_server()
@@ -101,6 +116,12 @@ class FallbackConnector(QObject):
                 
                 # 处理之前积压的请求
                 self.process_queued_requests()
+                
+                # 立即发送一次alive信号，通知扩展程序服务器已启动
+                self._send_alive_signal_now()
+                
+                # 启动alive信号定时器
+                self.start_alive_signal()
             except Exception as e:
                 self.logger.error(f"启动服务器失败: {e}")
                 self.logger.error(traceback.format_exc())
@@ -115,6 +136,12 @@ class FallbackConnector(QObject):
                     
                     # 再次尝试处理队列
                     self.process_queued_requests()
+                    
+                    # 立即发送一次alive信号
+                    self._send_alive_signal_now()
+                    
+                    # 启动alive信号定时器
+                    self.start_alive_signal()
                 except Exception as retry_error:
                     self.logger.error(f"重启TCP服务器也失败了: {retry_error}")
                     self.logger.error(traceback.format_exc())
@@ -133,9 +160,96 @@ class FallbackConnector(QObject):
                     
                     # 再次尝试处理队列
                     self.process_queued_requests()
+                    
+                    # 立即发送一次alive信号
+                    self._send_alive_signal_now()
+                    
+                    # 启动alive信号定时器
+                    self.start_alive_signal()
             except Exception as retry_error:
                 self.logger.error(f"重试初始化服务器失败: {retry_error}")
                 self.logger.error(traceback.format_exc())
+    
+    def _send_alive_signal_now(self):
+        """立即发送一次alive信号，不依赖定时器"""
+        try:
+            # 准备alive信号数据
+            alive_data = {
+                "type": "alive",
+                "timestamp": int(time.time() * 1000),
+                "ClientVersion": version_manager.get_client_version() if hasattr(version_manager, 'get_client_version') else "unknown",
+                "message": "HDM客户端已连接",
+                "status": "online"
+            }
+            
+            # 检查服务器状态，但不阻止发送
+            server_status = "running" if self.server and self.is_running() else "not_running"
+            
+            # 发送信号
+            if self.server and hasattr(self.server, 'broadcast_message') and callable(self.server.broadcast_message):
+                self.server.broadcast_message(json.dumps(alive_data))
+                self.logger.info(f"已立即发送alive信号通知扩展程序服务器在线 (服务器状态: {server_status})")
+            else:
+                # 如果当前服务器不可用，尝试创建一个新的临时服务器
+                self.logger.warning("当前服务器不可用，尝试创建临时服务器发送alive信号")
+                try:
+                    temp_server = get_tcp_server(port=20971)
+                    temp_server.broadcast_message(json.dumps(alive_data))
+                    self.logger.info("通过临时服务器发送了alive信号")
+                except Exception as temp_error:
+                    self.logger.error(f"通过临时服务器发送alive信号失败: {temp_error}")
+                
+        except Exception as e:
+            self.logger.error(f"立即发送alive信号时出错: {e}")
+            self.logger.error(traceback.format_exc())
+    
+    def start_alive_signal(self):
+        """启动定期发送alive信号的定时器"""
+        if self._alive_timer:
+            # 如果定时器已存在，先停止它
+            self.stop_alive_signal()
+            
+        # 创建定时器，每30秒发送一次alive信号
+        self._alive_timer = threading.Timer(30.0, self._send_alive_signal)
+        self._alive_timer.daemon = True  # 设为守护线程，主程序退出时自动结束
+        self._alive_timer.start()
+        self.logger.info("已启动alive信号定时器")
+    
+    def _send_alive_signal(self):
+        """发送alive信号到所有连接的客户端"""
+        try:
+            if self.server and self.is_running():
+                # 准备alive信号数据
+                alive_data = {
+                    "type": "alive",
+                    "timestamp": int(time.time() * 1000),
+                    "ClientVersion": version_manager.get_client_version() if hasattr(version_manager, 'get_client_version') else "unknown",
+                    "message": "HDM客户端已连接",
+                    "status": "online"
+                }
+                
+                # 发送信号，即使没有客户端连接也尝试发送
+                if hasattr(self.server, 'broadcast_message') and callable(self.server.broadcast_message):
+                    self.server.broadcast_message(json.dumps(alive_data))
+                    self.logger.debug("已发送alive信号到所有客户端")
+                else:
+                    self.logger.warning("服务器不支持广播消息，无法发送alive信号")
+        except Exception as e:
+            self.logger.error(f"发送alive信号时出错: {e}")
+            self.logger.error(traceback.format_exc())
+        finally:
+            # 重新启动定时器，保持定期发送
+            if not self._alive_timer or not self._alive_timer.is_alive():
+                self._alive_timer = threading.Timer(30.0, self._send_alive_signal)
+                self._alive_timer.daemon = True
+                self._alive_timer.start()
+    
+    def stop_alive_signal(self):
+        """停止发送alive信号"""
+        if self._alive_timer:
+            self._alive_timer.cancel()
+            self._alive_timer = None
+            self.logger.info("已停止alive信号定时器")
     
     def process_queued_requests(self):
         """处理积压的下载请求"""
@@ -233,6 +347,9 @@ class FallbackConnector(QObject):
     
     def stop(self):
         """停止服务器"""
+        # 先停止alive信号
+        self.stop_alive_signal()
+        
         if self.server:
             try:
                 self.server.stop()

@@ -187,31 +187,15 @@ class TitleBar(QWidget):
     
     def minimize_to_tray(self):
         """最小化到系统托盘"""
-        logging.info("执行 TitleBar.minimize_to_tray()")
-        
         # 显示系统托盘图标
         if not self.tray_icon.isVisible():
-            logging.info("托盘图标未显示，正在显示...")
             self.tray_icon.show()
-            
-            # 确保托盘图标显示
-            QTimer.singleShot(100, self._ensure_tray_visible)
         
         # 隐藏主窗口
         self.parent.hide()
-        logging.info("已隐藏主窗口")
         
         # 发送信号
         self.minimizeToTray.emit()
-        logging.info("发送了 minimizeToTray 信号")
-    
-    def _ensure_tray_visible(self):
-        """确保托盘图标可见的辅助方法"""
-        if not self.tray_icon.isVisible():
-            logging.info("托盘图标仍未显示，第二次尝试显示")
-            self.tray_icon.show()
-        else:
-            logging.info("托盘图标已显示成功")
     
     def toggle_maximize(self):
         if self.parent.isMaximized():
@@ -243,111 +227,123 @@ class TitleBar(QWidget):
             icon_name: Fluent图标名称
             tooltip: 按钮提示文本
         """
-        import logging
-        logging.debug(f"设置按钮图标: {icon_name}")
+        # 确保图标名称正确
+        if not icon_name.startswith("ic_fluent_"):
+            icon_name = f"ic_fluent_{icon_name}_24_regular"
         
-        try:
-            # 获取图标Unicode并设置
-            icon_text = self.font_manager.get_icon_text(icon_name)
-            if not icon_text:
-                # 如果没有找到图标，尝试添加前缀再查找
-                if not icon_name.startswith("ic_fluent_"):
-                    icon_name = f"ic_fluent_{icon_name}_24_regular"
-                    icon_text = self.font_manager.get_icon_text(icon_name)
-                
-                # 如果仍然找不到图标，使用默认的"⚠"字符
-                if not icon_text:
-                    icon_text = "⚠"
-                    logging.warning(f"未找到图标: {icon_name}，使用默认警告符号")
-            
-            button.setText(icon_text)
-            
-            # 设置图标字体
-            button.setFont(QFont(self.font_manager.fluent_icons_font, 14))
-            
-            # 不要通过拼接方式添加样式表，这可能导致语法错误
-            # 使用单独的属性设置颜色
-            button.setProperty("iconColor", "#FFFFFF")
-            
-            # 如果提供了提示文本，设置提示
-            if tooltip:
-                button.setToolTip(tooltip)
-                
-        except Exception as e:
-            logging.error(f"设置按钮图标失败: {e}")
-            # 使用默认的"⚠"字符作为回退图标
-            button.setText("⚠")
-            if tooltip:
-                button.setToolTip(tooltip)
+        # 获取图标Unicode并设置
+        icon_text = self.font_manager.get_icon_text(icon_name)
+        button.setText(icon_text)
+        
+        # 设置图标字体
+        button.setFont(QFont(self.font_manager.fluent_icons_font, 14))
+        
+        # 不要通过拼接方式添加样式表，这可能导致语法错误
+        # 使用单独的属性设置颜色
+        button.setProperty("iconColor", "#FFFFFF")
+        
+        # 如果提供了提示文本，设置提示
+        if tooltip:
+            button.setToolTip(tooltip)
 
     def build_ui(self):
         """构建标题栏UI"""
-        # 标题区域布局
-        left_layout = QHBoxLayout()
+        # 左侧Logo
+        self.logo_label = QLabel()
+        self.logo_label.setAttribute(Qt.WA_TranslucentBackground)  # 确保透明
+        try:
+            # 获取与托盘图标相同的图标路径
+            if getattr(sys, 'frozen', False):
+                # 如果是打包环境
+                application_path = os.path.dirname(sys.executable)
+            else:
+                # 如果是开发环境
+                application_path = os.path.dirname(os.path.abspath(__file__))
+                # 转到项目根目录
+                application_path = os.path.dirname(os.path.dirname(os.path.dirname(application_path)))
+                
+            icon_path = os.path.join(application_path, "resources", "logo.png")
+            
+            if os.path.exists(icon_path):
+                pixmap = QPixmap(icon_path)
+                scaled_pixmap = pixmap.scaled(30, 30, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.logo_label.setPixmap(scaled_pixmap)
+            else:
+                raise FileNotFoundError(f"{i18n.get_text('logo_not_found')}: {icon_path}")
+        except:
+            # 如果logo加载失败，使用文本替代
+            self.logo_label = QLabel("H")
+            self.logo_label.setStyleSheet("""
+                background-color: #B39DDB;
+                color: #121212;
+                font-size: 18px;
+                font-weight: bold;
+                border-radius: 15px;
+                min-width: 30px;
+                min-height: 30px;
+                max-width: 30px;
+                max-height: 30px;
+                padding: 0;
+                text-align: center;
+                font-family: "HarmonyOS Sans SC", "Source Han Sans CN", "Microsoft YaHei";
+            """)
+            self.font_manager.apply_font(self.logo_label)
+        
+        # 左侧部分
+        left_part = QWidget()
+        left_part.setAttribute(Qt.WA_TranslucentBackground)  # 确保透明
+        left_layout = QHBoxLayout(left_part)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(15)
+        left_layout.setSpacing(0)
+        left_layout.addWidget(self.logo_label)
+        # 设置左侧部分宽度固定，与右侧按钮组保持一致
+        left_part.setFixedWidth(130)  # 调整为与右侧宽度一致，保持对称
         
-        # 使用QSpacerItem使标题区域和右侧控制按钮分隔
-        spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-        
-        # 右侧区域布局
-        right_layout = QHBoxLayout()
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)  # 控制按钮之间的间距
-        
-        # 添加自定义区域到布局
-        self.layout.addLayout(left_layout)
-        self.layout.addItem(spacer)
-        self.layout.addLayout(right_layout)
-        
-        # ==== 标题部分 ====
-        # 添加应用标题
-        title_label = QLabel("Hanabi Download Manager")
-        title_font = self.font_manager.create_optimized_font(is_bold=False, size=11)
-        title_label.setFont(title_font)
-        title_label.setStyleSheet("""
+        # 中间标题
+        self.title_label = QLabel("Hanabi Download Manager")
+        self.title_label.setAttribute(Qt.WA_TranslucentBackground)  # 确保透明
+        self.title_label.setAlignment(Qt.AlignCenter)
+        self.title_label.setStyleSheet("""
             color: #FFFFFF;
-            background-color: transparent;
+            font-size: 16px;
             font-weight: bold;
-            margin-left: 5px;
-        """)
-        left_layout.addWidget(title_label)
-        
-        # ==== 右侧控制按钮 ====
-        # 先添加版本标签
-        version_label = QLabel(f"v{i18n.client_version}")
-        version_label.setStyleSheet("""
-            color: #9E9E9E;
             background-color: transparent;
-            font-size: 10px;
-            margin-right: 8px;
+            font-family: "HarmonyOS Sans SC", "Source Han Sans CN", "Microsoft YaHei";
         """)
-        right_layout.addWidget(version_label)
+        self.font_manager.apply_font(self.title_label)
         
-        # 最小化到托盘按钮
-        self.min_to_tray_btn = QPushButton()
-        self.min_to_tray_btn.setAttribute(Qt.WA_TranslucentBackground)
-        self.min_to_tray_btn.setFixedSize(30, 30)
-        self.min_to_tray_btn.setObjectName("minToTrayBtn")
-        self.min_to_tray_btn.setStyleSheet("""
-            QPushButton {
+        # 右侧控制按钮
+        right_part = QWidget()
+        right_part.setAttribute(Qt.WA_TranslucentBackground)  # 确保透明
+        right_layout = QHBoxLayout(right_part)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        
+        # 创建托盘按钮
+        self.tray_btn = QPushButton()
+        self.tray_btn.setAttribute(Qt.WA_TranslucentBackground)
+        self.tray_btn.setFixedSize(30, 30)
+        self.tray_btn.setObjectName("trayBtn")
+        self.tray_btn.setStyleSheet("""
+            #trayBtn {
+                background-color: transparent;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 15px;
-                background-color: transparent;
-                margin: 0;
+                font-size: 16px;
                 padding: 0;
             }
-            QPushButton:hover {
+            #trayBtn:hover {
                 background-color: rgba(255, 255, 255, 0.1);
+                color: #FFFFFF;
             }
-            QPushButton:pressed {
-                background-color: rgba(255, 255, 255, 0.2);
+            #trayBtn:pressed {
+                background-color: rgba(255, 255, 255, 0.05);
             }
         """)
-        # 设置托盘图标
-        self.set_button_icon(self.min_to_tray_btn, "ic_fluent_minimize_24_regular", "最小化到托盘")
-        self.min_to_tray_btn.clicked.connect(self.minimize_to_tray)
-        right_layout.addWidget(self.min_to_tray_btn)
+        self.set_button_icon(self.tray_btn, "tab_group", "最小化到托盘")
+        self.tray_btn.clicked.connect(self.minimize_to_tray)
+        right_layout.addWidget(self.tray_btn)
         
         # 最小化按钮
         self.minimize_btn = QPushButton()
@@ -355,22 +351,23 @@ class TitleBar(QWidget):
         self.minimize_btn.setFixedSize(30, 30)
         self.minimize_btn.setObjectName("minimizeBtn")
         self.minimize_btn.setStyleSheet("""
-            QPushButton {
+            #minimizeBtn {
+                background-color: transparent;
+                color: #FFFFFF;
                 border: none;
                 border-radius: 15px;
-                background-color: transparent;
-                margin: 0;
+                font-size: 16px;
                 padding: 0;
             }
-            QPushButton:hover {
+            #minimizeBtn:hover {
                 background-color: rgba(255, 255, 255, 0.1);
+                color: #FFFFFF;
             }
-            QPushButton:pressed {
-                background-color: rgba(255, 255, 255, 0.2);
+            #minimizeBtn:pressed {
+                background-color: rgba(255, 255, 255, 0.05);
             }
         """)
-        # 设置最小化图标
-        self.set_button_icon(self.minimize_btn, "ic_fluent_subtract_24_regular", "最小化")
+        self.set_button_icon(self.minimize_btn, "subtract", "最小化")
         self.minimize_btn.clicked.connect(self.parent.showMinimized)
         right_layout.addWidget(self.minimize_btn)
         
@@ -425,6 +422,14 @@ class TitleBar(QWidget):
         self.set_button_icon(self.close_btn, "dismiss", "关闭")
         self.close_btn.clicked.connect(self.handle_close_button)
         right_layout.addWidget(self.close_btn)
+        
+        # 设置右侧部分宽度固定
+        right_part.setFixedWidth(130)  # 增加宽度以适应新增的托盘按钮
+        
+        # 将三个部分添加到主布局中，确保标题居中
+        self.layout.addWidget(left_part)
+        self.layout.addWidget(self.title_label, 1)  # 1表示拉伸系数，确保中间标题可以拉伸
+        self.layout.addWidget(right_part)
 
     def switch_to_page(self, page_id):
         """切换到指定页面"""
@@ -450,7 +455,6 @@ class TitleBar(QWidget):
         # 退出应用程序
         import sys
         sys.exit(0)
-<<<<<<< HEAD
         
     def handle_close_button(self):
         """处理关闭按钮点击事件，根据设置决定行为"""
@@ -474,31 +478,3 @@ class TitleBar(QWidget):
             # 出错时默认正常关闭
             logging.error(f"处理关闭按钮时出错: {e}")
             self.parent.close()
-=======
-
-    def handle_close_button(self):
-        """处理关闭按钮点击事件"""
-        import logging
-        logging.info("关闭按钮被点击")
-        
-        # 检查配置，看是否需要最小化到托盘
-        # 如果父窗口有配置管理器，查询最小化到托盘设置
-        close_to_tray = True  # 默认最小化到托盘
-        
-        if hasattr(self.parent, 'config_manager'):
-            try:
-                close_to_tray = self.parent.config_manager.get_setting("window", "close_to_tray", True)
-                logging.info(f"从配置中读取 close_to_tray: {close_to_tray}")
-            except Exception as e:
-                logging.error(f"读取 close_to_tray 设置失败: {e}")
-        
-        # 根据配置决定行为
-        if close_to_tray:
-            logging.info("根据配置，最小化到托盘而非关闭")
-            self.minimize_to_tray()
-        else:
-            logging.info("根据配置，直接关闭应用")
-            self.parent.close()
-
-
->>>>>>> 28724b36bd6128e814ac7cd634005f5e35da5122
