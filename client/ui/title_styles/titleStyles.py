@@ -5,6 +5,7 @@ from core.font.font_manager import FontManager
 from client.I18N.i18n import i18n
 import os
 import sys
+import logging
 
 class TitleBar(QWidget):
     # 添加信号用于托盘操作
@@ -419,7 +420,7 @@ class TitleBar(QWidget):
             }
         """)
         self.set_button_icon(self.close_btn, "dismiss", "关闭")
-        self.close_btn.clicked.connect(self.parent.close)
+        self.close_btn.clicked.connect(self.handle_close_button)
         right_layout.addWidget(self.close_btn)
         
         # 设置右侧部分宽度固定
@@ -454,5 +455,26 @@ class TitleBar(QWidget):
         # 退出应用程序
         import sys
         sys.exit(0)
-
-
+        
+    def handle_close_button(self):
+        """处理关闭按钮点击事件，根据设置决定行为"""
+        try:
+            # 获取配置管理器
+            from client.ui.client_interface.settings.config import ConfigManager
+            config = ConfigManager()
+            
+            # 检查是否设置了"关闭时最小化到系统托盘"
+            close_to_tray = config.get_setting("window", "close_to_tray", True)
+            
+            if close_to_tray:
+                # 如果设置了最小化到托盘，则不真正关闭窗口
+                logging.info("检测到'关闭时最小化到系统托盘'设置，执行最小化到托盘")
+                self.minimize_to_tray()
+            else:
+                # 否则正常关闭窗口
+                logging.info("正常关闭窗口")
+                self.parent.close()
+        except Exception as e:
+            # 出错时默认正常关闭
+            logging.error(f"处理关闭按钮时出错: {e}")
+            self.parent.close()
