@@ -13,9 +13,9 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                QLabel, QProgressBar, QFrame, QFileDialog, QLineEdit,
                                QGraphicsDropShadowEffect, QSpacerItem, QSizePolicy, QCheckBox,
                                QScrollArea, QApplication, QMessageBox, QTableWidget,
-                               QTableWidgetItem, QHeaderView)
-from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QThread, QObject
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QFont, QIcon, QPixmap
+                               QTableWidgetItem, QHeaderView, QWidget, QToolButton,QGridLayout)
+from PySide6.QtCore import Qt, Signal, Slot, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QThread, QObject, QEvent, QStandardPaths, QMargins, QRectF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QBrush, QPen, QFont, QIcon, QPixmap, QMouseEvent, QCursor, QFontMetrics, QRegion, QTransform
 
 from core.animations.window_auto_resize_animation import apply_resize_animation
 from client.ui.client_interface.utils.file_icons_get import FileIconGetter
@@ -116,6 +116,7 @@ class DownloadPopDialog(QDialog):
         # 记录弹窗创建的来源
         download_source = "未知来源"
         request_id = "无ID"
+        download_kernel = "未知核心"
         
         if download_data:
             download_source = download_data.get("download_source", "未知来源")
@@ -156,6 +157,9 @@ class DownloadPopDialog(QDialog):
             
             # 设置为非模态对话框
             dialog.setModal(False)
+            
+            # 最上层
+            dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowStaysOnTopHint)
         
         # 通用窗口设置
         dialog.setAttribute(Qt.WA_DeleteOnClose, True)  # 确保关闭时删除自身
@@ -260,11 +264,14 @@ class DownloadPopDialog(QDialog):
             # 窗口属性配置
             self.setAttribute(Qt.WA_TranslucentBackground)
             
-            # 使用对话框标志，但不添加Qt.Tool标志，它可能引起关闭问题
-            self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+            # 修改：添加WindowStaysOnTopHint标志确保窗口总是在最上层
+            self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
             
             # 即使是常规对话框，也确保关闭时不会影响应用程序
             self.setAttribute(Qt.WA_QuitOnClose, False)
+            
+            # 标记需要移除置顶标志的属性
+            self.remove_top_hint = True
         
         # 窗口大小 - 根据不同状态动态设置
         # 注意：不再设置固定的最小尺寸，而是在各个创建UI的方法中设置具体尺寸
@@ -328,6 +335,32 @@ class DownloadPopDialog(QDialog):
         
         # 安装事件过滤器以确保窗口可以正常关闭
         self.installEventFilter(self)
+        
+        # 下载引擎和任务相关属性
+        self.nct_kernel = None
+        self.as_kernel = None
+        self.kernel_type = "未知"  # 添加核心类型属性
+        self.kernel_fullname = ""  # 核心全名
+        self.task_id = ""
+        self.task_data = {}
+        self.pending_task_data = {}
+        self.nct_download_started = False
+        self.nct_download_progress = 0
+        self.nct_download_speed = 0
+        self.nct_file_size = 0
+        self.nct_downloaded = 0
+        self.nct_last_update_time = 0
+        
+        # 初始化状态平滑处理所需的属性
+        self._previous_block_statuses = {}  # 用于记录每个块的上一个状态
+        self._status_stable_counter = {}    # 状态稳定计数器
+        self._last_segments_update = 0      # 上次段信息更新时间
+        self._segment_status_history = {}   # 存储每个段的状态历史
+        self._status_transition_count = {}  # 存储状态转换计数
+        self._status_last_change_time = {}  # 存储状态最后变化时间
+        self._last_resize_time = 0          # 上次窗口大小调整时间
+        self.last_progress = 0              # 上次进度值
+        self.last_status_text = ""          # 上次状态文本
     
     def eventFilter(self, obj, event):
         """事件过滤器，确保窗口可以正常响应事件并支持从标题栏子控件拖动"""
@@ -417,78 +450,80 @@ class DownloadPopDialog(QDialog):
                     # 如果当前是NSF内核
                     if self.as_kernel.current_kernel_type == "NSF" and self.as_kernel.nsf_kernel:
                         # 先断开所有信号
-                        if hasattr(self, 'download_engine') and self.download_engine:
+                        if hasattr(self.download_engine, 'initialized'):
                             try:
-                                if hasattr(self.download_engine, 'initialized'):
-                                    try:
-                                        self.download_engine.initialized.disconnect()
-                                    except:
-                                        pass
-                                    
-                                if hasattr(self.download_engine, 'block_progress_updated'):
-                                    try:
-                                        self.download_engine.block_progress_updated.disconnect()
-                                    except:
-                                        pass
-                                    
-                                if hasattr(self.download_engine, 'speed_updated'):
-                                    try:
-                                        self.download_engine.speed_updated.disconnect()
-                                    except:
-                                        pass
-                                    
-                                if hasattr(self.download_engine, 'download_completed'):
-                                    try:
-                                        self.download_engine.download_completed.disconnect()
-                                    except:
-                                        pass
-                                    
-                                if hasattr(self.download_engine, 'error_occurred'):
-                                    try:
-                                        self.download_engine.error_occurred.disconnect()
-                                    except:
-                                        pass
-                                    
-                                if hasattr(self.download_engine, 'file_name_changed'):
-                                    try:
-                                        self.download_engine.file_name_changed.disconnect()
-                                    except:
-                                        pass
-                            except Exception as signal_error:
-                                logging.warning(f"断开下载引擎信号时出错: {signal_error}")
-                                
-                            # 安全停止NSF内核
+                                if hasattr(self.download_engine.initialized, 'receivers') and self.download_engine.initialized.receivers() > 0:
+                                    self.download_engine.initialized.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'block_progress_updated'):
                             try:
-                                self.as_kernel.nsf_kernel.stop()
-                                
-                                # === 修复：增加线程等待和终止逻辑 ===
-                                # 等待线程停止，增加超时时间
-                                if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
-                                    # 先等待3秒
-                                    if not self.as_kernel.nsf_kernel.wait(3000):
-                                        logging.warning("NSF内核线程停止等待超时(3秒)，尝试额外方法停止线程")
-                                        
-                                        # 尝试用quit
-                                        if hasattr(self.as_kernel.nsf_kernel, 'quit') and callable(self.as_kernel.nsf_kernel.quit):
-                                            try:
-                                                self.as_kernel.nsf_kernel.quit()
-                                                # 再等待2秒
-                                                if not self.as_kernel.nsf_kernel.wait(2000):
-                                                    logging.warning("NSF内核线程quit后等待超时(2秒)，尝试强制终止")
-                                                    
-                                                    # 如果还在运行，尝试terminate强制终止（最后手段）
-                                                    if hasattr(self.as_kernel.nsf_kernel, 'terminate') and callable(self.as_kernel.nsf_kernel.terminate):
-                                                        try:
-                                                            self.as_kernel.nsf_kernel.terminate()
-                                                            # 等待终止完成
-                                                            if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
-                                                                self.as_kernel.nsf_kernel.wait(1000)
-                                                        except Exception as term_error:
-                                                            logging.error(f"强制终止NSF内核线程出错: {term_error}")
-                                            except Exception as quit_error:
-                                                logging.error(f"退出NSF内核线程出错: {quit_error}")
-                            except Exception as e:
-                                logging.error(f"停止NSF内核出错: {e}")
+                                if hasattr(self.download_engine.block_progress_updated, 'receivers') and self.download_engine.block_progress_updated.receivers() > 0:
+                                    self.download_engine.block_progress_updated.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'speed_updated'):
+                            try:
+                                if hasattr(self.download_engine.speed_updated, 'receivers') and self.download_engine.speed_updated.receivers() > 0:
+                                    self.download_engine.speed_updated.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'download_completed'):
+                            try:
+                                if hasattr(self.download_engine.download_completed, 'receivers') and self.download_engine.download_completed.receivers() > 0:
+                                    self.download_engine.download_completed.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'error_occurred'):
+                            try:
+                                if hasattr(self.download_engine.error_occurred, 'receivers') and self.download_engine.error_occurred.receivers() > 0:
+                                    self.download_engine.error_occurred.disconnect()
+                            except:
+                                pass
+                            
+                        if hasattr(self.download_engine, 'file_name_changed'):
+                            try:
+                                if hasattr(self.download_engine.file_name_changed, 'receivers') and self.download_engine.file_name_changed.receivers() > 0:
+                                    self.download_engine.file_name_changed.disconnect()
+                            except:
+                                pass
+                            
+                        # 安全停止NSF内核
+                        try:
+                            self.as_kernel.nsf_kernel.stop()
+                            
+                            # === 修复：增加线程等待和终止逻辑 ===
+                            # 等待线程停止，增加超时时间
+                            if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
+                                # 先等待3秒
+                                if not self.as_kernel.nsf_kernel.wait(3000):
+                                    logging.warning("NSF内核线程停止等待超时(3秒)，尝试额外方法停止线程")
+                                    
+                                    # 尝试用quit
+                                    if hasattr(self.as_kernel.nsf_kernel, 'quit') and callable(self.as_kernel.nsf_kernel.quit):
+                                        try:
+                                            self.as_kernel.nsf_kernel.quit()
+                                            # 再等待2秒
+                                            if not self.as_kernel.nsf_kernel.wait(2000):
+                                                logging.warning("NSF内核线程quit后等待超时(2秒)，尝试强制终止")
+                                                
+                                                # 如果还在运行，尝试terminate强制终止（最后手段）
+                                                if hasattr(self.as_kernel.nsf_kernel, 'terminate') and callable(self.as_kernel.nsf_kernel.terminate):
+                                                    try:
+                                                        self.as_kernel.nsf_kernel.terminate()
+                                                        # 等待终止完成
+                                                        if hasattr(self.as_kernel.nsf_kernel, 'wait') and callable(self.as_kernel.nsf_kernel.wait):
+                                                            self.as_kernel.nsf_kernel.wait(1000)
+                                                    except Exception as term_error:
+                                                        logging.error(f"强制终止NSF内核线程出错: {term_error}")
+                                        except Exception as quit_error:
+                                            logging.error(f"退出NSF内核线程出错: {quit_error}")
+                        except Exception as e:
+                            logging.error(f"停止NSF内核出错: {e}")
                     
                     # 如果是NCT内核
                     elif self.as_kernel.current_kernel_type == "NCT" and self.as_kernel.nct_kernel:
@@ -567,37 +602,49 @@ class DownloadPopDialog(QDialog):
                     try:
                         if hasattr(self.download_engine, 'initialized'):
                             try:
-                                self.download_engine.initialized.disconnect()
+                                # 检查信号是否有接收者
+                                if hasattr(self.download_engine.initialized, 'receivers') and self.download_engine.initialized.receivers() > 0:
+                                    self.download_engine.initialized.disconnect()
                             except:
                                 pass
                             
                         if hasattr(self.download_engine, 'block_progress_updated'):
                             try:
-                                self.download_engine.block_progress_updated.disconnect()
+                                # 检查信号是否有接收者
+                                if hasattr(self.download_engine.block_progress_updated, 'receivers') and self.download_engine.block_progress_updated.receivers() > 0:
+                                    self.download_engine.block_progress_updated.disconnect()
                             except:
                                 pass
                             
                         if hasattr(self.download_engine, 'speed_updated'):
                             try:
-                                self.download_engine.speed_updated.disconnect()
+                                # 检查信号是否有接收者
+                                if hasattr(self.download_engine.speed_updated, 'receivers') and self.download_engine.speed_updated.receivers() > 0:
+                                    self.download_engine.speed_updated.disconnect()
                             except:
                                 pass
                             
                         if hasattr(self.download_engine, 'download_completed'):
                             try:
-                                self.download_engine.download_completed.disconnect()
+                                # 检查信号是否有接收者
+                                if hasattr(self.download_engine.download_completed, 'receivers') and self.download_engine.download_completed.receivers() > 0:
+                                    self.download_engine.download_completed.disconnect()
                             except:
                                 pass
                             
                         if hasattr(self.download_engine, 'error_occurred'):
                             try:
-                                self.download_engine.error_occurred.disconnect()
+                                # 检查信号是否有接收者
+                                if hasattr(self.download_engine.error_occurred, 'receivers') and self.download_engine.error_occurred.receivers() > 0:
+                                    self.download_engine.error_occurred.disconnect()
                             except:
                                 pass
                             
                         if hasattr(self.download_engine, 'file_name_changed'):
                             try:
-                                self.download_engine.file_name_changed.disconnect()
+                                # 检查信号是否有接收者
+                                if hasattr(self.download_engine.file_name_changed, 'receivers') and self.download_engine.file_name_changed.receivers() > 0:
+                                    self.download_engine.file_name_changed.disconnect()
                             except:
                                 pass
                     except Exception as signal_error:
@@ -1132,8 +1179,9 @@ class DownloadPopDialog(QDialog):
         # 直接为EXE文件使用Fluent Icons
         if file_ext.lower() == 'exe':
             if hasattr(self, 'font_manager'):
-                self.font_manager.apply_icon_font(file_icon, "ic_fluent_app_24_regular", size=24)
+                self.font_manager.apply_icon_font(file_icon, "ic_fluent_app_24_regular", size=28)
                 file_icon.setStyleSheet("color: #FF9800; background-color: transparent;")
+                logging.info("下载完成UI - 应用EXE图标")
             else:
                 # 使用emoji作为备用
                 emoji = "⚙️"
@@ -1142,35 +1190,53 @@ class DownloadPopDialog(QDialog):
                 if pixmap:
                     file_icon.setPixmap(pixmap)
                     file_icon.setScaledContents(True)
+                    logging.info("下载完成UI - 应用EXE备用图标")
                 else:
                     file_icon.setText(emoji)
                     file_icon.setAlignment(Qt.AlignCenter)
                     file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
+                    logging.info("下载完成UI - 应用EXE文本图标")
         else:
             # 对于非EXE文件，尝试获取系统图标或使用Fluent图标
             icon = None
             if hasattr(self, 'file_icon_getter'):
-                # 先清除可能的缓存
-                if hasattr(self.file_icon_getter, 'icon_cache') and file_path in self.file_icon_getter.icon_cache:
-                    del self.file_icon_getter.icon_cache[file_path]
-                
-                # 优先使用扩展名安全获取图标
-                icon = self.file_icon_getter.get_icon_by_ext_safe(file_ext)
-                
-                # 如果通过扩展名无法获取图标，再尝试从文件路径获取
-                if (not icon or icon.isNull()) and os.path.exists(file_path):
-                    try:
-                        icon = self.file_icon_getter.get_file_icon(file_path=file_path, file_ext=file_ext)
-                    except Exception as e:
-                        logging.warning(f"从文件路径获取图标失败: {e}")
+                try:
+                    # 先清除可能的缓存
+                    if hasattr(self.file_icon_getter, 'icon_cache') and file_path in self.file_icon_getter.icon_cache:
+                        del self.file_icon_getter.icon_cache[file_path]
+                    
+                    # 优先使用扩展名安全获取图标
+                    icon = self.file_icon_getter.get_icon_by_ext_safe(file_ext)
+                    logging.info(f"下载完成UI - 尝试通过扩展名获取图标: {file_ext}")
+                    
+                    # 如果通过扩展名无法获取图标，再尝试从文件路径获取
+                    if (not icon or icon.isNull()) and os.path.exists(file_path):
+                        try:
+                            icon = self.file_icon_getter.get_file_icon(file_path=file_path, file_ext=file_ext)
+                            logging.info(f"下载完成UI - 尝试通过文件路径获取图标: {file_path}")
+                        except Exception as e:
+                            logging.warning(f"从文件路径获取图标失败: {e}")
+                except Exception as e:
+                    logging.warning(f"获取图标过程出错: {e}")
             
             # 如果获取到了有效的图标，则使用它
             if icon and not icon.isNull():
-                pixmap = icon.pixmap(32, 32)
-                file_icon.setPixmap(pixmap)
-                file_icon.setScaledContents(True)
-            else:
-                # 如果没有获取到有效图标，使用字体图标作为备用
+                try:
+                    pixmap = icon.pixmap(32, 32)
+                    if not pixmap.isNull():
+                        file_icon.setPixmap(pixmap)
+                        file_icon.setScaledContents(True)
+                        logging.info("下载完成UI - 成功应用系统图标")
+                    else:
+                        logging.warning("下载完成UI - 系统图标pixmap为空")
+                        raise Exception("空pixmap")
+                except Exception as e:
+                    logging.warning(f"应用系统图标失败: {e}")
+                    icon = None
+            
+            # 如果没有获取到有效图标，使用Fluent图标
+            if not icon or icon.isNull():
+                logging.info("下载完成UI - 使用Fluent图标替代")
                 if hasattr(self, 'font_manager'):
                     # 根据文件类型选择合适的Fluent图标
                     icon_name = "document_24_regular"  # 默认文档图标
@@ -1195,20 +1261,43 @@ class DownloadPopDialog(QDialog):
                         icon_name = "document_24_regular"
                         icon_color = "#42A5F5"  # 蓝色
                     
-                    self.font_manager.apply_icon_font(file_icon, f"ic_fluent_{icon_name}", size=24)
-                    file_icon.setStyleSheet(f"color: {icon_color}; background-color: transparent;")
+                    try:
+                        self.font_manager.apply_icon_font(file_icon, f"ic_fluent_{icon_name}", size=28)
+                        file_icon.setStyleSheet(f"color: {icon_color}; background-color: transparent;")
+                        logging.info(f"下载完成UI - 应用Fluent图标: {icon_name}")
+                    except Exception as e:
+                        logging.error(f"应用Fluent图标失败: {e}")
+                        # 使用备用方案
+                        file_icon.setText("📄")
+                        file_icon.setAlignment(Qt.AlignCenter)
+                        file_icon.setStyleSheet(f"color: {icon_color}; background-color: transparent; font-size: 24px;")
+                        logging.info("下载完成UI - 应用文本图标作为备用")
                 else:
                     # 使用emoji作为备用
-                    emoji = self.file_icon_getter.get_file_emoji(file_name) if hasattr(self, 'file_icon_getter') else "📄"
-                    color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#B39DDB"
-                    pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
-                    if pixmap:
-                        file_icon.setPixmap(pixmap)
-                        file_icon.setScaledContents(True)
-                    else:
+                    emoji = "📄"
+                    color = "#B39DDB"  # 紫色
+                    try:
+                        if hasattr(self, 'file_icon_getter'):
+                            emoji = self.file_icon_getter.get_file_emoji(filename)
+                            color = self.file_icon_getter.get_file_color(filename)
+                            logging.info(f"下载完成UI - 获取到emoji: {emoji}, 颜色: {color}")
+                    except Exception as e:
+                        logging.warning(f"获取emoji或颜色失败: {e}")
+                    
+                    try:
+                        pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
+                        if pixmap and not pixmap.isNull():
+                            file_icon.setPixmap(pixmap)
+                            file_icon.setScaledContents(True)
+                            logging.info("下载完成UI - 应用emoji图标")
+                        else:
+                            raise Exception("创建emoji pixmap失败")
+                    except Exception as e:
+                        logging.warning(f"应用emoji图标失败: {e}")
                         file_icon.setText(emoji)
                         file_icon.setAlignment(Qt.AlignCenter)
                         file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
+                        logging.info("下载完成UI - 应用文本emoji")
         
         file_info_layout.addWidget(file_icon)
         
@@ -1354,6 +1443,54 @@ class DownloadPopDialog(QDialog):
         time_layout.addWidget(self.time_label)
         
         details_layout.addLayout(time_layout)
+        
+        # 分隔线2
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.VLine)
+        separator2.setFrameShadow(QFrame.Plain)
+        separator2.setStyleSheet("background-color: #505050;")
+        separator2.setFixedWidth(1)
+        details_layout.addWidget(separator2)
+        
+        # 核心类型信息
+        kernel_layout = QHBoxLayout()
+        kernel_layout.setSpacing(6)
+        
+        # 核心图标
+        kernel_icon = QLabel()
+        kernel_icon.setFixedSize(16, 16)
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_icon_font(kernel_icon, "ic_fluent_chip_24_regular", size=14)
+            kernel_icon.setStyleSheet("color: #B0B0B0;")
+        else:
+            kernel_icon.setText("⚙️")
+            kernel_icon.setStyleSheet("color: #B0B0B0; font-size: 14px;")
+        kernel_layout.addWidget(kernel_icon)
+        
+        # 核心类型标签
+        self.kernel_type_label = QLabel()
+        self.kernel_type_label.setStyleSheet("color: #757575; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(self.kernel_type_label)
+        
+        # 获取核心全名（如果可用）
+        kernel_display_name = self.kernel_type
+        if hasattr(self, 'kernel_fullname'):
+            # 只显示核心全名的前半部分，不包含"Kernel"字样
+            kernel_display_name = self.kernel_fullname.split(" Kernel")[0]
+        
+        self.kernel_type_label.setText(f"核心: {kernel_display_name}")
+        
+        # 设置提示信息
+        if hasattr(self, 'kernel_fullname'):
+            self.kernel_type_label.setToolTip(f"{self.kernel_fullname} ({self.kernel_type})")
+        else:
+            self.kernel_type_label.setToolTip(f"下载核心: {self.kernel_type}")
+            
+        kernel_layout.addWidget(self.kernel_type_label)
+        kernel_layout.addStretch()
+        
+        details_layout.addLayout(kernel_layout)
         details_layout.addStretch(1)
         
         progress_layout.addLayout(details_layout)
@@ -1891,6 +2028,19 @@ class DownloadPopDialog(QDialog):
                 
                 # 获取选择的内核类型
                 kernel_type = self.as_kernel.current_kernel_type
+                # 保存核心类型
+                self.kernel_type = kernel_type
+                
+                # 获取核心全名（如果存在）
+                if hasattr(self.as_kernel, 'current_kernel_fullname'):
+                    self.kernel_fullname = self.as_kernel.current_kernel_fullname
+                else:
+                    # 如果AS内核没有提供全名，则使用默认映射
+                    kernel_names = {
+                        "NSF": "Nextgen Speed Force Kernel",
+                        "NCT": "Nextgen Crystal Transfer Kernel"
+                    }
+                    self.kernel_fullname = kernel_names.get(kernel_type, kernel_type)
                 
                 # 如果是NSF内核，直接使用其实例
                 if kernel_type == "NSF":
@@ -2020,6 +2170,10 @@ class DownloadPopDialog(QDialog):
                 # 更新UI状态
                 self.status_label.setText("初始化中...")
                 
+                # 如果已经创建了核心类型标签，更新其内容
+                if hasattr(self, 'kernel_type_label'):
+                    self.kernel_type_label.setText(f"核心: {self.kernel_type}")
+                
                 logging.info(f"弹窗已启动下载任务: {url}, 内核类型: {kernel_type}, 智能线程管理: {smart_threading}, 默认分段数: {default_segments}")
                 
         except Exception as e:
@@ -2033,16 +2187,52 @@ class DownloadPopDialog(QDialog):
             multi_thread_support (bool): 是否支持多线程下载
         """
         with self.thread_lock:
-            if not self.download_engine:
+            if not self.download_engine and not hasattr(self, 'nct_download_started'):
                 return
                 
             # 更新UI
             self.status_label.setText("下载中...")
             
+            # 更新核心类型标签
+            if hasattr(self, 'kernel_type_label'):
+                # 获取核心全名
+                kernel_fullname = ""
+                if self.kernel_type == "NSF":
+                    kernel_fullname = "Nextgen Speed Force"
+                    self.kernel_type_label.setText(f"核心: {kernel_fullname}")
+                    self.kernel_type_label.setStyleSheet("color: #8A7CEC; font-size: 13px;")  # 紫色
+                elif self.kernel_type == "NCT":
+                    kernel_fullname = "Nextgen Crystal Transfer"
+                    self.kernel_type_label.setText(f"核心: {kernel_fullname}")
+                    self.kernel_type_label.setStyleSheet("color: #4CAF50; font-size: 13px;")  # 绿色
+                else:
+                    self.kernel_type_label.setText(f"核心: {self.kernel_type}")
+                    self.kernel_type_label.setStyleSheet("color: #757575; font-size: 13px;")  # 灰色
+                
+                # 添加提示工具提示
+                if kernel_fullname:
+                    self.kernel_type_label.setToolTip(f"{kernel_fullname} Kernel ({self.kernel_type})")
+            
             # 更新文件大小
             if hasattr(self.download_engine, 'file_size') and self.download_engine.file_size > 0:
                 size_str = self._get_readable_size(self.download_engine.file_size)
                 self.size_label.setText(f"大小: {size_str}")
+                
+            # 显示分段下载状态
+            if multi_thread_support:
+                # 启用分段显示切换按钮
+                if hasattr(self, 'toggle_segments_button'):
+                    self.toggle_segments_button.setEnabled(True)
+                    self.toggle_segments_button.setToolTip("点击显示/隐藏分段下载详情")
+            else:
+                # 禁用分段显示切换按钮
+                if hasattr(self, 'toggle_segments_button'):
+                    self.toggle_segments_button.setEnabled(False)
+                    self.toggle_segments_button.setToolTip("当前下载不支持分段")
+                    
+            # 更新进度条状态
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.setEnabled(True)
     
     def _on_progress_updated(self, progress_data):
         """进度更新回调
@@ -2051,6 +2241,9 @@ class DownloadPopDialog(QDialog):
             progress_data (list): 进度数据
         """
         try:
+            # 导入time模块
+            import time
+            
             # 检查是否是NCT内核下载
             if hasattr(self, 'nct_download_started') and self.nct_download_started:
                 # NCT内核的进度更新由progress_callback处理
@@ -2065,7 +2258,20 @@ class DownloadPopDialog(QDialog):
             # 添加更详细的字段兼容处理
             processed_blocks = []
             
-            for block in progress_data:
+            # 状态稳定性处理 - 跟踪各段之前的状态
+            if not hasattr(self, '_previous_block_statuses'):
+                self._previous_block_statuses = {}  # 用于记录每个块的上一个状态
+                self._status_stable_counter = {}   # 状态稳定计数器
+                self._last_segments_update = 0     # 上次段信息更新时间
+            
+            # 确保_last_segments_update已初始化
+            if not hasattr(self, '_last_segments_update'):
+                self._last_segments_update = 0
+                
+            current_time = time.time()
+            status_changed = False  # 跟踪是否有状态变更
+            
+            for i, block in enumerate(progress_data):
                 if isinstance(block, dict):
                     # 支持多种字段名格式
                     start_pos = block.get('start_pos', block.get('start_position', block.get('startPos', 0)))
@@ -2086,6 +2292,34 @@ class DownloadPopDialog(QDialog):
                 except (ValueError, TypeError):
                     # 如果转换失败，使用默认值
                     start_pos, current, end_pos = 0, 0, 0
+                
+                # 状态稳定性处理
+                block_id = f"{start_pos}:{end_pos}"
+                previous_status = self._previous_block_statuses.get(block_id, None)
+                
+                # 如果状态从"下载中"切换到"连接中"且短时间内发生，保持为"下载中"
+                if status == "连接中" and previous_status == "下载中":
+                    if block_id not in self._status_stable_counter:
+                        self._status_stable_counter[block_id] = 0
+                    
+                    self._status_stable_counter[block_id] += 1
+                    # 如果连续3次都想切换到"连接中"，才真正切换
+                    if self._status_stable_counter[block_id] < 3:
+                        status = "下载中"  # 保持为下载中
+                    else:
+                        # 确认切换到连接中
+                        status_changed = True
+                        self._status_stable_counter[block_id] = 0
+                else:
+                    # 其他状态变化立即接受
+                    if previous_status != status:
+                        status_changed = True
+                    
+                    # 重置计数器
+                    self._status_stable_counter[block_id] = 0
+                
+                # 记录当前状态为下一次比较的基础
+                self._previous_block_statuses[block_id] = status
                 
                 # 计算已下载量
                 block_downloaded = current - start_pos
@@ -2115,14 +2349,32 @@ class DownloadPopDialog(QDialog):
                 
                 # 修复：添加安全检查，确保progress_bar对象存在
                 if hasattr(self, 'progress_bar') and self.progress_bar is not None:
+                    # 平滑进度变化
+                    if not hasattr(self, 'last_progress'):
+                        self.last_progress = 0
+                        
+                    # 防止进度回退
+                    if self.last_progress > progress and self.last_progress < 99:
+                        progress = self.last_progress  # 保持原进度
+                    else:
+                        # 进度前进时平滑变化
+                        progress = min(100, self.last_progress * 0.7 + progress * 0.3)
+                    
+                    # 记录当前进度
+                    self.last_progress = progress
+                    
+                    # 设置进度条值
                     self.progress_bar.setValue(int(progress))
                 else:
                     logging.debug("进度条对象不存在，跳过进度更新")
                     return
             
             # 使用处理后的块信息更新分段信息
+            # 限制更新频率，有状态变化或超过1秒才更新
             if processed_blocks and hasattr(self, 'segments_scroll_layout'):
-                self._update_segments_info(processed_blocks)
+                if status_changed or (current_time - self._last_segments_update) > 1.0:
+                    self._update_segments_info(processed_blocks)
+                    self._last_segments_update = current_time
             
         except Exception as e:
             logging.error(f"处理进度更新失败: {e}")
@@ -2737,41 +2989,56 @@ class DownloadPopDialog(QDialog):
                 if has_download_engine:
                     # 断开所有信号连接
                     try:
-                        if hasattr(self.download_engine, 'initialized'):
-                            try:
+                        if (hasattr(self.download_engine, 'initialized') and 
+                            hasattr(self.download_engine.initialized, 'disconnect')):
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.initialized, 'receivers') and self.download_engine.initialized.receivers() > 0:
                                 self.download_engine.initialized.disconnect()
-                            except:
-                                pass
-                                
-                        if hasattr(self.download_engine, 'block_progress_updated'):
-                            try:
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'block_progress_updated') and 
+                            hasattr(self.download_engine.block_progress_updated, 'disconnect')):
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.block_progress_updated, 'receivers') and self.download_engine.block_progress_updated.receivers() > 0:
                                 self.download_engine.block_progress_updated.disconnect()
-                            except:
-                                pass
-                                
-                        if hasattr(self.download_engine, 'speed_updated'):
-                            try:
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'speed_updated') and 
+                            hasattr(self.download_engine.speed_updated, 'disconnect')):
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.speed_updated, 'receivers') and self.download_engine.speed_updated.receivers() > 0:
                                 self.download_engine.speed_updated.disconnect()
-                            except:
-                                pass
-                                
-                        if hasattr(self.download_engine, 'download_completed'):
-                            try:
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'download_completed') and 
+                            hasattr(self.download_engine.download_completed, 'disconnect')):
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.download_completed, 'receivers') and self.download_engine.download_completed.receivers() > 0:
                                 self.download_engine.download_completed.disconnect()
-                            except:
-                                pass
-                                
-                        if hasattr(self.download_engine, 'error_occurred'):
-                            try:
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'error_occurred') and 
+                            hasattr(self.download_engine.error_occurred, 'disconnect')):
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.error_occurred, 'receivers') and self.download_engine.error_occurred.receivers() > 0:
                                 self.download_engine.error_occurred.disconnect()
-                            except:
-                                pass
-                                
-                        if hasattr(self.download_engine, 'file_name_changed'):
-                            try:
+                    except:
+                        pass
+                        
+                    try:
+                        if (hasattr(self.download_engine, 'file_name_changed') and 
+                            hasattr(self.download_engine.file_name_changed, 'disconnect')):
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.file_name_changed, 'receivers') and self.download_engine.file_name_changed.receivers() > 0:
                                 self.download_engine.file_name_changed.disconnect()
-                            except:
-                                pass
                     except Exception as signal_error:
                         logging.error(f"断开下载引擎信号时出错: {signal_error}")
                 
@@ -3004,20 +3271,36 @@ class DownloadPopDialog(QDialog):
         参数:
             blocks_info (list): 下载块信息列表
         """
+        import time
+        
         if not hasattr(self, 'segments_scroll_layout'):
             return
+            
+        # 状态转换平滑处理
+        if not hasattr(self, '_segment_status_history'):
+            self._segment_status_history = {}  # 存储每个段的状态历史
+            self._status_transition_count = {}  # 存储状态转换计数
+            self._status_last_change_time = {}  # 存储状态最后变化时间
+            
+        # 确保所有需要的属性都已初始化
+        if not hasattr(self, '_status_last_change_time'):
+            self._status_last_change_time = {}
+            
+        if not hasattr(self, '_last_resize_time'):
+            self._last_resize_time = 0
         
-        # 清空现有段信息
-        for i in reversed(range(self.segments_scroll_layout.count())):
-            widget = self.segments_scroll_layout.itemAt(i).widget()
-            if widget:
-                widget.deleteLater()
-        
-        # 清空段行引用
-        self.segment_rows = []
-        
-        # 如果没有块信息，显示提示
+        # 如果没有块信息，清空现有段并显示提示
         if not blocks_info:
+            # 清空现有段信息
+            for i in reversed(range(self.segments_scroll_layout.count())):
+                widget = self.segments_scroll_layout.itemAt(i).widget()
+                if widget:
+                    widget.deleteLater()
+            
+            # 清空段行引用
+            self.segment_rows = []
+            
+            # 显示提示
             empty_label = QLabel("没有分段信息")
             empty_label.setStyleSheet("color: #B0B0B0; font-size: 13px; background-color: transparent;")
             empty_label.setAlignment(Qt.AlignCenter)
@@ -3026,98 +3309,246 @@ class DownloadPopDialog(QDialog):
             self.segments_scroll_layout.addWidget(empty_label)
             return
         
-        # 添加每个段的信息
-        for i, block in enumerate(blocks_info):
-            segment_frame = QFrame()
-            segment_frame.setStyleSheet("background-color: #323232; border-radius: 5px;")  # 减小圆角
-            segment_layout = QHBoxLayout(segment_frame)
-            segment_layout.setContentsMargins(8, 6, 8, 6)  # 减小内边距
-            segment_layout.setSpacing(10)  # 减少间距
-            
-            # 序号
-            index_label = QLabel(f"{i+1}")
-            index_label.setFixedWidth(25)  # 减少宽度
-            index_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")  # 减小字体
-            if hasattr(self, 'font_manager'):
-                self.font_manager.apply_font(index_label)
-            segment_layout.addWidget(index_label)
-            
-            # 状态 - 使用不同颜色表示不同状态
-            status_text = block.get("status", "未知")
-            
-            # 标准化状态文本，确保统一的状态文本格式
-            if status_text == "已完成" or status_text == "完成":
-                status_text = "已完成"
-                status_color = "#4CAF50"  # 完成 - 绿色
-            elif status_text == "下载失败" or status_text == "失败" or status_text == "错误":
-                status_text = "下载失败"
-                status_color = "#F44336"  # 错误 - 红色
-            elif status_text == "已暂停" or status_text == "暂停":
-                status_text = "已暂停"
-                status_color = "#FF9800"  # 暂停 - 橙色
-            elif status_text == "等待中" or status_text == "等待":
-                status_text = "等待中"
-                status_color = "#FFC107"  # 等待 - 黄色
-            elif status_text == "下载中":
-                status_color = "#2196F3"  # 活跃 - 蓝色
-            elif status_text == "连接中":
-                status_color = "#2196F3"  # 活跃 - 蓝色
-            else:
-                status_color = "#B39DDB"  # 默认紫色
-            
-            status_label = QLabel(status_text)
-            status_label.setFixedWidth(90)  # 减少宽度
-            status_label.setStyleSheet(f"color: {status_color}; font-size: 12px;")  # 减小字体
-            if hasattr(self, 'font_manager'):
-                self.font_manager.apply_font(status_label)
-            segment_layout.addWidget(status_label)
-            
-            # 已下载 - 从processed_blocks计算
-            downloaded = block.get("downloaded", 0)
-            if downloaded == 0:
-                # 尝试从进度和起始位置计算
-                start_pos = block.get("start_pos", 0)
-                progress = block.get("progress", start_pos)
-                downloaded = progress - start_pos if progress > start_pos else 0
-            
-            downloaded_str = self._get_readable_size(downloaded)
-            downloaded_label = QLabel(downloaded_str)
-            downloaded_label.setFixedWidth(90)  # 减少宽度
-            downloaded_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")  # 减小字体
-            if hasattr(self, 'font_manager'):
-                self.font_manager.apply_font(downloaded_label)
-            segment_layout.addWidget(downloaded_label)
-            
-            # 总大小 - 从processed_blocks计算
-            total_size = block.get("size", 0)
-            if total_size == 0:
-                # 尝试从起始位置和结束位置计算
-                start_pos = block.get("start_pos", 0) 
-                end_pos = block.get("end_pos", 0)
-                total_size = end_pos - start_pos + 1 if end_pos >= start_pos else 0
-            
-            total_str = self._get_readable_size(total_size)
-            total_label = QLabel(total_str)
-            total_label.setFixedWidth(90)  # 减少宽度
-            total_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")  # 减小字体
-            if hasattr(self, 'font_manager'):
-                self.font_manager.apply_font(total_label)
-            segment_layout.addWidget(total_label)
-            
-            self.segments_scroll_layout.addWidget(segment_frame)
-            
-            # 保存行引用，用于更新
-            self.segment_rows.append({
-                "frame": segment_frame,
-                "status": status_label,
-                "downloaded": downloaded_label,
-                "total": total_label
-            })
+        # 检查是否需要重建UI
+        need_rebuild = len(blocks_info) != len(self.segment_rows) if hasattr(self, 'segment_rows') else True
         
-        # 更新后自动调整窗口大小，适应内容
+        # 如果需要重建整个UI
+        if need_rebuild:
+            # 清空现有段信息
+            for i in reversed(range(self.segments_scroll_layout.count())):
+                widget = self.segments_scroll_layout.itemAt(i).widget()
+                if widget:
+                    widget.deleteLater()
+            
+            # 清空段行引用
+            self.segment_rows = []
+            
+            # 添加每个段的信息
+            for i, block in enumerate(blocks_info):
+                segment_frame = QFrame()
+                segment_frame.setStyleSheet("background-color: #323232; border-radius: 5px;")  # 减小圆角
+                segment_layout = QHBoxLayout(segment_frame)
+                segment_layout.setContentsMargins(8, 6, 8, 6)  # 减小内边距
+                segment_layout.setSpacing(10)  # 减少间距
+                
+                # 序号
+                index_label = QLabel(f"{i+1}")
+                index_label.setFixedWidth(25)  # 减少宽度
+                index_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")  # 减小字体
+                if hasattr(self, 'font_manager'):
+                    self.font_manager.apply_font(index_label)
+                segment_layout.addWidget(index_label)
+                
+                # 状态 - 获取状态
+                block_id = f"{block.get('start_pos', 0)}:{block.get('end_pos', 0)}"
+                raw_status = block.get("status", "未知")
+                
+                # 应用状态平滑处理
+                status_text = self._get_stable_status(block_id, raw_status)
+                
+                # 根据状态设置颜色
+                status_color = self._get_status_color(status_text)
+                
+                status_label = QLabel(status_text)
+                status_label.setFixedWidth(90)  # 减少宽度
+                status_label.setStyleSheet(f"color: {status_color}; font-size: 12px;")  # 减小字体
+                if hasattr(self, 'font_manager'):
+                    self.font_manager.apply_font(status_label)
+                segment_layout.addWidget(status_label)
+                
+                # 已下载 - 从processed_blocks计算
+                downloaded = block.get("downloaded", 0)
+                if downloaded == 0:
+                    # 尝试从进度和起始位置计算
+                    start_pos = block.get("start_pos", 0)
+                    progress = block.get("progress", start_pos)
+                    downloaded = progress - start_pos if progress > start_pos else 0
+                
+                downloaded_str = self._get_readable_size(downloaded)
+                downloaded_label = QLabel(downloaded_str)
+                downloaded_label.setFixedWidth(90)  # 减少宽度
+                downloaded_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")  # 减小字体
+                if hasattr(self, 'font_manager'):
+                    self.font_manager.apply_font(downloaded_label)
+                segment_layout.addWidget(downloaded_label)
+                
+                # 总大小 - 从processed_blocks计算
+                total_size = block.get("size", 0)
+                if total_size == 0:
+                    # 尝试从起始位置和结束位置计算
+                    start_pos = block.get("start_pos", 0) 
+                    end_pos = block.get("end_pos", 0)
+                    total_size = end_pos - start_pos + 1 if end_pos >= start_pos else 0
+                
+                total_str = self._get_readable_size(total_size)
+                total_label = QLabel(total_str)
+                total_label.setFixedWidth(90)  # 减少宽度
+                total_label.setStyleSheet("color: #E0E0E0; font-size: 12px;")  # 减小字体
+                if hasattr(self, 'font_manager'):
+                    self.font_manager.apply_font(total_label)
+                segment_layout.addWidget(total_label)
+                
+                self.segments_scroll_layout.addWidget(segment_frame)
+                
+                # 保存行引用，用于更新
+                self.segment_rows.append({
+                    "frame": segment_frame,
+                    "status": status_label,
+                    "downloaded": downloaded_label,
+                    "total": total_label,
+                    "block_id": block_id
+                })
+        else:
+            # 仅更新现有行的内容
+            for i, (block, row) in enumerate(zip(blocks_info, self.segment_rows)):
+                if i >= len(self.segment_rows):
+                    break
+                    
+                # 获取块ID
+                block_id = f"{block.get('start_pos', 0)}:{block.get('end_pos', 0)}"
+                if "block_id" in row:
+                    row["block_id"] = block_id
+                
+                # 更新状态
+                raw_status = block.get("status", "未知")
+                status_text = self._get_stable_status(block_id, raw_status)
+                status_color = self._get_status_color(status_text)
+                
+                if 'status' in row:
+                    row['status'].setText(status_text)
+                    row['status'].setStyleSheet(f"color: {status_color}; font-size: 12px;")
+                
+                # 更新已下载
+                downloaded = block.get("downloaded", 0)
+                if downloaded == 0:
+                    start_pos = block.get("start_pos", 0)
+                    progress = block.get("progress", start_pos)
+                    downloaded = progress - start_pos if progress > start_pos else 0
+                
+                if 'downloaded' in row:
+                    row['downloaded'].setText(self._get_readable_size(downloaded))
+                
+                # 更新总大小
+                total_size = block.get("size", 0)
+                if total_size == 0:
+                    start_pos = block.get("start_pos", 0) 
+                    end_pos = block.get("end_pos", 0)
+                    total_size = end_pos - start_pos + 1 if end_pos >= start_pos else 0
+                
+                if 'total' in row:
+                    row['total'].setText(self._get_readable_size(total_size))
+        
+        # 更新后延迟自动调整窗口大小，避免频繁调整
         if self.isVisible() and self.current_state == "downloading":
-            # 使用自动大小调整功能确保窗口适合内容
-            QTimer.singleShot(0, lambda: self._auto_resize())
+            # 限制窗口大小调整频率
+            if not hasattr(self, '_last_resize_time'):
+                self._last_resize_time = 0
+            
+            current_time = time.time()
+            if (current_time - self._last_resize_time) > 1.0:  # 至少1秒钟才调整一次
+                QTimer.singleShot(100, lambda: self._auto_resize())
+                self._last_resize_time = current_time
+    
+    def _get_stable_status(self, block_id, current_status):
+        """获取稳定的状态显示（防止状态频繁切换）
+        
+        参数:
+            block_id (str): 块ID
+            current_status (str): 当前状态
+            
+        返回:
+            str: 稳定处理后的状态
+        """
+        import time
+        
+        # 初始化状态历史和转换计数器
+        if not hasattr(self, '_segment_status_history'):
+            self._segment_status_history = {}
+            self._status_transition_count = {}
+            self._status_last_change_time = {}
+        
+        # 确保_status_last_change_time已初始化
+        if not hasattr(self, '_status_last_change_time'):
+            self._status_last_change_time = {}
+            
+        # 获取历史状态
+        if block_id not in self._segment_status_history:
+            self._segment_status_history[block_id] = current_status
+            self._status_transition_count[block_id] = 0
+            self._status_last_change_time[block_id] = time.time()
+            return current_status
+            
+        previous_status = self._segment_status_history[block_id]
+        
+        # 如果状态没变，直接返回并重置计数器
+        if current_status == previous_status:
+            self._status_transition_count[block_id] = 0
+            return current_status
+        
+        # 如果状态是从"连接中"变为"下载中"，立即接受变化
+        if previous_status == "连接中" and current_status == "下载中":
+            self._segment_status_history[block_id] = current_status
+            self._status_transition_count[block_id] = 0
+            self._status_last_change_time[block_id] = time.time()
+            return current_status
+            
+        # 如果状态是从"下载中"变为"连接中"，需要稳定性检查
+        if previous_status == "下载中" and current_status == "连接中":
+            # 增加过渡计数
+            if block_id not in self._status_transition_count:
+                self._status_transition_count[block_id] = 0
+            self._status_transition_count[block_id] += 1
+            
+            # 只有连续5次都是"连接中"才真正切换状态
+            if self._status_transition_count[block_id] >= 5:
+                self._segment_status_history[block_id] = current_status
+                self._status_transition_count[block_id] = 0
+                self._status_last_change_time[block_id] = time.time()
+                return current_status
+            else:
+                # 否则保持原状态
+                return previous_status
+                
+        # 获取上次状态变化的时间
+        last_change = self._status_last_change_time.get(block_id, 0)
+        current_time = time.time()
+        
+        # 如果距离上次变化不到0.5秒，且不是变为"已完成"状态，则保持原状态
+        if (current_time - last_change) < 0.5 and current_status != "已完成":
+            if block_id not in self._status_transition_count:
+                self._status_transition_count[block_id] = 0
+            self._status_transition_count[block_id] += 1
+            return previous_status
+            
+        # 其他状态变化，更新历史并接受
+        self._segment_status_history[block_id] = current_status
+        self._status_transition_count[block_id] = 0
+        self._status_last_change_time[block_id] = current_time
+        return current_status
+    
+    def _get_status_color(self, status):
+        """根据状态获取对应的颜色
+        
+        参数:
+            status (str): 状态文本
+            
+        返回:
+            str: 颜色代码
+        """
+        if status == "已完成" or status == "完成":
+            return "#4CAF50"  # 完成 - 绿色
+        elif status == "下载失败" or status == "失败" or status == "错误":
+            return "#F44336"  # 错误 - 红色
+        elif status == "已暂停" or status == "暂停":
+            return "#FF9800"  # 暂停 - 橙色
+        elif status == "等待中" or status == "等待":
+            return "#FFC107"  # 等待 - 黄色
+        elif status == "下载中":
+            return "#2196F3"  # 活跃 - 蓝色
+        elif status == "连接中":
+            return "#2196F3"  # 活跃 - 蓝色
+        else:
+            return "#B39DDB"  # 默认紫色
     
     def _clear_content(self):
         """清空内容区域"""
@@ -3370,7 +3801,14 @@ class DownloadPopDialog(QDialog):
         try:
             if self.is_paused:
                 # 恢复下载
-                self.download_button.setText("暂停")
+                self.download_button.setText("  暂停")
+                # 更新按钮图标为暂停图标（两条竖线）
+                if hasattr(self, 'font_manager'):
+                    icon = QIcon()
+                    self.font_manager.apply_icon_to_icon(icon, "ic_fluent_pause_24_regular")
+                    self.download_button.setIcon(icon)
+                    self.download_button.setIconSize(QSize(16, 16))
+                
                 self.download_button.setStyleSheet("""
                     QPushButton {
                         background-color: #8A7CEC;
@@ -3415,7 +3853,14 @@ class DownloadPopDialog(QDialog):
                 self.status_label.setText("下载中...")
             else:
                 # 暂停下载
-                self.download_button.setText("继续")
+                self.download_button.setText("  继续")
+                # 更新按钮图标为播放图标（三角形）
+                if hasattr(self, 'font_manager'):
+                    icon = QIcon()
+                    self.font_manager.apply_icon_to_icon(icon, "ic_fluent_play_24_regular")
+                    self.download_button.setIcon(icon)
+                    self.download_button.setIconSize(QSize(16, 16))
+                
                 self.download_button.setStyleSheet("""
                     QPushButton {
                         background-color: #8A7CEC;
@@ -3519,323 +3964,324 @@ class DownloadPopDialog(QDialog):
         # 设置标题
         self.title_label.setText("下载完成")
         
-        # 文件信息区域
-        file_info_frame = QFrame()
-        file_info_frame.setObjectName("file_info_frame")  # 设置对象名，方便以后查找
-        file_info_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 10px;")
-        file_info_layout = QHBoxLayout(file_info_frame)
-        file_info_layout.setContentsMargins(20, 15, 20, 15)  # 增加左右边距
-        file_info_layout.setSpacing(15)
-        
-        # 图标
-        file_icon = QLabel()
-        file_icon.setObjectName("file_icon")  # 设置对象名，方便以后查找
-        file_icon.setFixedSize(36, 36)
-        
-        # 获取文件名和路径
+        # 获取文件信息
         filename = task_data.get("file_name", "未知文件")
         save_path = task_data.get("save_path", "")
         file_path = os.path.join(save_path, filename) if save_path and filename else ""
-        
-        # 获取文件扩展名，如果没有扩展名则显示"No"
         file_ext_raw = os.path.splitext(filename)[1]
         file_ext = file_ext_raw.lstrip('.') if file_ext_raw else "No"
         
-        # 直接为EXE文件使用Fluent Icons
-        if file_ext.lower() == 'exe':
-            if hasattr(self, 'font_manager'):
-                self.font_manager.apply_icon_font(file_icon, "ic_fluent_app_24_regular", size=28)
-                file_icon.setStyleSheet("color: #FF9800; background-color: transparent;")
-            else:
-                # 使用emoji作为备用
-                emoji = "⚙️"
-                color = "#FF9800"  # 橙色
-                pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
-                if pixmap:
-                    file_icon.setPixmap(pixmap)
-                    file_icon.setScaledContents(True)
-                else:
-                    file_icon.setText(emoji)
-                    file_icon.setAlignment(Qt.AlignCenter)
-                    file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
-        else:
-            # 对于非EXE文件，尝试获取系统图标或使用Fluent图标
-            icon = None
-            if hasattr(self, 'file_icon_getter'):
-                # 先清除可能的缓存
-                if hasattr(self.file_icon_getter, 'icon_cache') and file_path in self.file_icon_getter.icon_cache:
-                    del self.file_icon_getter.icon_cache[file_path]
-                
-                # 优先使用扩展名安全获取图标
-                icon = self.file_icon_getter.get_icon_by_ext_safe(file_ext)
-                
-                # 如果通过扩展名无法获取图标，再尝试从文件路径获取
-                if (not icon or icon.isNull()) and os.path.exists(file_path):
-                    try:
-                        icon = self.file_icon_getter.get_file_icon(file_path=file_path, file_ext=file_ext)
-                    except Exception as e:
-                        logging.warning(f"从文件路径获取图标失败: {e}")
-            
-            # 如果获取到了有效的图标，则使用它
-            if icon and not icon.isNull():
-                pixmap = icon.pixmap(32, 32)
-                file_icon.setPixmap(pixmap)
-                file_icon.setScaledContents(True)
-            else:
-                # 如果没有获取到有效图标，使用完成图标或Fluent图标
-                if hasattr(self, 'font_manager'):
-                    # 根据文件类型选择合适的Fluent图标
-                    icon_name = "document_24_regular"  # 默认文档图标
-                    icon_color = "#B39DDB"  # 默认紫色
-                    
-                    if file_ext.lower() == 'msi':
-                        icon_name = "app_store_24_regular"
-                        icon_color = "#FF9800"  # 橙色
-                    elif file_ext.lower() in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2']:
-                        icon_name = "archive_24_regular"
-                        icon_color = "#FFCA28"  # 黄色
-                    elif file_ext.lower() in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
-                        icon_name = "image_24_regular"
-                        icon_color = "#B39DDB"  # 紫色
-                    elif file_ext.lower() in ['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac']:
-                        icon_name = "music_note_2_24_regular"
-                        icon_color = "#66BB6A"  # 绿色
-                    elif file_ext.lower() in ['mp4', 'avi', 'mov', 'mkv', 'webm']:
-                        icon_name = "video_24_regular"
-                        icon_color = "#FF7043"  # 红色
-                    elif file_ext.lower() in ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']:
-                        icon_name = "document_24_regular"
-                        icon_color = "#42A5F5"  # 蓝色
-                    
-                    self.font_manager.apply_icon_font(file_icon, f"ic_fluent_{icon_name}", size=28)
-                    file_icon.setStyleSheet(f"color: {icon_color}; background-color: transparent;")
-                else:
-                    # 使用emoji作为备用
-                    emoji = self.file_icon_getter.get_file_emoji(file_name) if hasattr(self, 'file_icon_getter') else "📄"
-                    color = self.file_icon_getter.get_file_color(file_name) if hasattr(self, 'file_icon_getter') else "#B39DDB"
-                    pixmap = self.file_icon_getter.create_pixmap_with_emoji(emoji, size=36, bg_color=color) if hasattr(self, 'file_icon_getter') else None
-                    if pixmap:
-                        file_icon.setPixmap(pixmap)
-                        file_icon.setScaledContents(True)
-                    else:
-                        file_icon.setText(emoji)
-                        file_icon.setAlignment(Qt.AlignCenter)
-                        file_icon.setStyleSheet(f"color: {color}; background-color: transparent; font-size: 24px;")
-        
-        file_info_layout.addWidget(file_icon)
-        
-        # 文件信息布局
-        file_text_layout = QVBoxLayout()
-        file_text_layout.setSpacing(5)
-        
-        # 文件名和扩展名布局
-        filename_layout = QHBoxLayout()
-        filename_layout.setSpacing(8)
-        
-        # 文件名
-        filename = task_data.get("file_name", "未知文件")
-        filename_label = QLabel(filename)
-        filename_label.setStyleSheet("color: #FFFFFF; font-size: 15px; font-weight: bold;")
-        filename_label.setWordWrap(True)
-        filename_label.setMaximumWidth(320)  # 减小最大宽度，为扩展名标签留出空间
-        if hasattr(self, 'font_manager'):
-            self.font_manager.apply_font(filename_label)
-        filename_layout.addWidget(filename_label, 1)
-        
-        # 文件扩展名标签
-        ext_label = QLabel(file_ext)
-        ext_bg_color = self.file_icon_getter.get_file_color(filename) if hasattr(self, 'file_icon_getter') else "#808080"
-        ext_label.setStyleSheet(f"""
-            background-color: {ext_bg_color};
-            color: white;
-            border-radius: 4px;
-            padding: 2px 6px;
-            font-size: 12px;
-            font-weight: bold;
-        """)
-        ext_label.setAlignment(Qt.AlignCenter)
-        if hasattr(self, 'font_manager'):
-            self.font_manager.apply_font(ext_label)
-        filename_layout.addWidget(ext_label)
-        
-        file_text_layout.addLayout(filename_layout)
-        
-        # 文件大小
+        # 获取文件大小
         file_size = task_data.get("file_size", 0)
         if file_size <= 0:
             # 如果文件大小仍未知，尝试再次从文件获取
             try:
-                save_path = task_data.get("save_path", "")
                 if save_path and filename:
-                    file_path = Path(save_path) / filename
-                    if file_path.exists():
-                        file_size = file_path.stat().st_size
+                    file_path_obj = Path(save_path) / filename
+                    if file_path_obj.exists():
+                        file_size = file_path_obj.stat().st_size
                         logging.info(f"完成UI - 从实际文件获取大小: {file_size} 字节")
             except Exception as e:
                 logging.error(f"完成UI - 获取实际文件大小失败: {e}")
-                
+        
         size_str = self._get_readable_size(file_size) if file_size > 0 else "未知大小"
-        size_label = QLabel(f"大小: {size_str}")
-        size_label.setStyleSheet("color: #B0B0B0; font-size: 13px;")
+        
+        # 获取下载耗时
+        download_duration = task_data.get("download_duration", 0)
+        duration_str = self._get_readable_time(download_duration) if download_duration > 0 else "未知时间"
+        
+        # 设置窗口最小大小
+        self.setMinimumSize(722, 337)
+        
+        # 主题颜色 - 微软Fluent设计风格
+        accent_color = "#B088FF"  # 微软蓝
+        text_color = "#323130"    # 深灰色文本
+        secondary_text = "#605E5C" # 次要文本颜色
+        background_color = "#F5F5F5" # 背景色
+        
+        # 设置窗口背景色
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {background_color};
+                border-radius: 8px;
+            }}
+        """)
+        
+        # 创建主容器
+        main_container = QWidget()
+        main_layout = QVBoxLayout(main_container)
+        main_layout.setContentsMargins(24, 10, 24, 24)
+        main_layout.setSpacing(20)
+        
+        # ===== 顶部文件信息区域 =====
+        info_container = QWidget()
+        info_layout = QVBoxLayout(info_container)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(18)
+        
+        # 文件名和图标区域
+        file_header = QHBoxLayout()
+        file_header.setSpacing(12)
+        
+        # 文件图标
+        file_icon_label = QLabel()
+        file_icon_label.setFixedSize(48, 48)
         if hasattr(self, 'font_manager'):
-            self.font_manager.apply_font(size_label)
-        file_text_layout.addWidget(size_label)
+            # 导入FileFluentIcon类
+            from client.ui.client_interface.utils.file_fluent_icon import FileFluentIcon
+            
+            # 创建FileFluentIcon实例
+            file_icon_getter = FileFluentIcon()
+            
+            # 获取文件图标
+            icon = file_icon_getter.get_large_icon_for_file(file_ext=file_ext)
+            
+            # 设置图标
+            pixmap = icon.pixmap(48, 48)
+            file_icon_label.setPixmap(pixmap)
+        file_header.addWidget(file_icon_label)
         
-        # 保存路径
-        save_path = task_data.get("save_path", "")
-        path_layout = QHBoxLayout()
-        path_layout.setSpacing(5)
+        # 文件名和大小
+        file_info = QVBoxLayout()
+        file_info.setSpacing(4)
         
-        path_icon = QLabel()
-        path_icon.setFixedSize(16, 16)
+        file_name_label = QLabel(filename)
+        file_name_label.setStyleSheet(f"color: {text_color}; font-size: 16px; font-weight: bold;")
         if hasattr(self, 'font_manager'):
-            self.font_manager.apply_icon_font(path_icon, "ic_fluent_folder_24_regular", size=14)
-            path_icon.setStyleSheet("color: #B0B0B0;")
-        path_layout.addWidget(path_icon)
+            self.font_manager.apply_font(file_name_label)
+        file_info.addWidget(file_name_label)
         
-        path_label = QLabel(save_path)
-        path_label.setStyleSheet("color: #B0B0B0; font-size: 13px;")
+        file_size_label = QLabel(size_str)
+        file_size_label.setStyleSheet(f"color: {secondary_text}; font-size: 13px;")
         if hasattr(self, 'font_manager'):
-            self.font_manager.apply_font(path_label)
-        # 对于过长的路径，显示省略号
-        path_label.setWordWrap(False)
-        path_label.setMaximumWidth(300)
-        path_layout.addWidget(path_label, 1)
+            self.font_manager.apply_font(file_size_label)
+        file_info.addWidget(file_size_label)
         
-        file_text_layout.addLayout(path_layout)
-        file_info_layout.addLayout(file_text_layout, 1)
+        file_header.addLayout(file_info, 1)
         
-        self.content_layout.addWidget(file_info_frame)
-        
-        # 消息区域
-        message_frame = QFrame()
-        message_frame.setStyleSheet("background-color: #2A2A2A; border-radius: 10px;")
-        message_layout = QVBoxLayout(message_frame)
-        message_layout.setContentsMargins(20, 15, 20, 15)  # 增加左右边距
-        
-        message_label = QLabel("您文件已经准备好啦,您可以操作下方按钮进行操作")
-        message_label.setStyleSheet("color: #FFFFFF; font-size: 14px;")
-        message_label.setWordWrap(True)
+        # FK标记
+        fk_container = QWidget()
+        fk_container.setFixedWidth(40)
+        fk_layout = QVBoxLayout(fk_container)
+        fk_layout.setContentsMargins(0, 0, 0, 0)
+        fk_layout.setSpacing(0)
+        # 不知道写什么
+        f_label = QLabel("")
+        f_label.setStyleSheet(f"color: {accent_color}; font-size: 20px; font-weight: bold;")
+        f_label.setAlignment(Qt.AlignRight)
         if hasattr(self, 'font_manager'):
-            self.font_manager.apply_font(message_label)
-        message_layout.addWidget(message_label)
-        
-        self.content_layout.addWidget(message_frame)
-        
-        # 添加空白空间
-        self.content_layout.addStretch(1)
-        
-        # 底部按钮
-        self.button_layout.addStretch(1)
-        
-        # 打开文件按钮
-        open_file_button = QPushButton("")
-        open_file_button.setFixedSize(140, 40)
+            self.font_manager.apply_font(f_label)
+        fk_layout.addWidget(f_label)
+        # 预留空位
+        k_label = QLabel("")
+        k_label.setStyleSheet(f"color: {accent_color}; font-size: 20px; font-weight: bold;")
+        k_label.setAlignment(Qt.AlignRight)
         if hasattr(self, 'font_manager'):
-            # 不使用布局，直接设置图标
+            self.font_manager.apply_font(k_label)
+        fk_layout.addWidget(k_label)
+        
+        file_header.addWidget(fk_container)
+        
+        info_layout.addLayout(file_header)
+        
+        # 分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setStyleSheet("background-color: #E1E1E1; border: none; height: 1px;")
+        info_layout.addWidget(separator)
+        
+        # 详细信息网格
+        details_grid = QGridLayout()
+        details_grid.setHorizontalSpacing(30)
+        details_grid.setVerticalSpacing(12)
+        
+        # 下载耗时
+        time_icon = QLabel()
+        if hasattr(self, 'font_manager'):
             icon = QIcon()
-            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_document_24_regular")
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_clock_16_regular")
+            pixmap = icon.pixmap(16, 16)
+            time_icon.setPixmap(pixmap)
+        details_grid.addWidget(time_icon, 0, 0)
+        
+        time_label = QLabel("下载耗时:")
+        time_label.setStyleSheet(f"color: {secondary_text}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(time_label)
+        details_grid.addWidget(time_label, 0, 1)
+        
+        time_value = QLabel(duration_str)
+        time_value.setStyleSheet(f"color: {text_color}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(time_value)
+        details_grid.addWidget(time_value, 0, 2)
+        
+        # 保存位置
+        location_icon = QLabel()
+        if hasattr(self, 'font_manager'):
+            icon = QIcon()
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_folder_16_regular")
+            pixmap = icon.pixmap(16, 16)
+            location_icon.setPixmap(pixmap)
+        details_grid.addWidget(location_icon, 1, 0)
+        
+        location_label = QLabel("保存位置:")
+        location_label.setStyleSheet(f"color: {secondary_text}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(location_label)
+        details_grid.addWidget(location_label, 1, 1)
+        
+        location_value = QLabel(save_path)
+        location_value.setStyleSheet(f"color: {text_color}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(location_value)
+        details_grid.addWidget(location_value, 1, 2)
+        
+        # 文件类型
+        type_icon = QLabel()
+        if hasattr(self, 'font_manager'):
+            icon = QIcon()
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_document_16_regular")
+            pixmap = icon.pixmap(16, 16)
+            type_icon.setPixmap(pixmap)
+        details_grid.addWidget(type_icon, 2, 0)
+        
+        type_label = QLabel("文件类型:")
+        type_label.setStyleSheet(f"color: {secondary_text}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(type_label)
+        details_grid.addWidget(type_label, 2, 1)
+        
+        file_type = f"Windows 可执行文件 (.{file_ext.lower()})" if file_ext.lower() == 'exe' else f"{file_ext.upper()} 文件"
+        type_value = QLabel(file_type)
+        type_value.setStyleSheet(f"color: {text_color}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(type_value)
+        details_grid.addWidget(type_value, 2, 2)
+        
+        # 设置列宽度
+        details_grid.setColumnStretch(0, 0)  # 图标列
+        details_grid.setColumnStretch(1, 1)  # 标签列
+        details_grid.setColumnStretch(2, 3)  # 值列
+        
+        info_layout.addLayout(details_grid)
+        
+        main_layout.addWidget(info_container)
+        
+        # ===== 内核信息 =====
+        kernel_container = QWidget()
+        kernel_layout = QHBoxLayout(kernel_container)
+        kernel_layout.setContentsMargins(0, 0, 0, 0)
+        
+        kernel_icon = QLabel()
+        if hasattr(self, 'font_manager'):
+            icon = QIcon()
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_rocket_16_regular")
+            pixmap = icon.pixmap(16, 16)
+            kernel_icon.setPixmap(pixmap)
+        kernel_layout.addWidget(kernel_icon)
+        
+        kernel_fullname = task_data.get("kernel_fullname", "Hanabi Nextgen Speed Force Kernel")
+        kernel_label = QLabel(kernel_fullname)
+        kernel_label.setStyleSheet(f"color: {accent_color}; font-size: 13px;")
+        if hasattr(self, 'font_manager'):
+            self.font_manager.apply_font(kernel_label)
+        kernel_layout.addWidget(kernel_label)
+        
+        kernel_layout.addStretch(1)
+        
+        main_layout.addWidget(kernel_container)
+        
+        # 添加弹性空间
+        main_layout.addStretch(1)
+        
+        # ===== 底部按钮区域 =====
+        buttons_container = QWidget()
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.setSpacing(12)
+        
+        # 按钮样式
+        primary_button_style = f"""
+            QPushButton {{
+                background-color: {accent_color};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: #F0BBFF;
+            }}
+            QPushButton:pressed {{
+                background-color: #FFB3FF;
+            }}
+        """
+        
+        secondary_button_style = f"""
+            QPushButton {{
+                background-color: #CCBBFF;
+                color: {text_color};
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: #D1BBFF;
+            }}
+            QPushButton:pressed {{
+                background-color: #D1BBFF;
+            }}
+        """
+        
+        # 打开文件按钮 (主要按钮)
+        open_file_button = QPushButton("打开文件")
+        open_file_button.setStyleSheet(primary_button_style)
+        open_file_button.setFixedHeight(36)
+        if hasattr(self, 'font_manager'):
+            icon = QIcon()
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_document_24_regular",color="#000000")
             open_file_button.setIcon(icon)
             open_file_button.setIconSize(QSize(16, 16))
-            
-            # 设置文本并添加前导空格以防止文本和图标重叠
-            open_file_button.setText("  打开文件")
             self.font_manager.apply_font(open_file_button)
-        
-        open_file_button.setStyleSheet("""
-            QPushButton {
-                background-color: #8A7CEC;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 8px;
-                padding: 5px 15px;
-                font-size: 14px;
-                font-weight: bold;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #9E8FEF;
-            }
-            QPushButton:pressed {
-                background-color: #7A6CD8;
-            }
-        """)
-        # 打开文件并关闭窗口
-        file_path = os.path.join(task_data.get("save_path", ""), task_data.get("file_name", ""))
         open_file_button.clicked.connect(lambda: self._on_open_file_and_close(file_path))
-        self.button_layout.addWidget(open_file_button)
+        buttons_layout.addWidget(open_file_button)
         
-        # 打开文件夹按钮
-        open_folder_button = QPushButton("")
-        open_folder_button.setFixedSize(140, 40)
+        # 打开文件夹按钮 (次要按钮)
+        open_folder_button = QPushButton("打开文件夹")
+        open_folder_button.setStyleSheet(secondary_button_style)
+        open_folder_button.setFixedHeight(36)
         if hasattr(self, 'font_manager'):
-            # 不使用布局，直接设置图标
             icon = QIcon()
-            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_folder_open_24_regular")
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_folder_open_24_regular",color="#000000")
             open_folder_button.setIcon(icon)
             open_folder_button.setIconSize(QSize(16, 16))
-            
-            # 设置文本并添加前导空格以防止文本和图标重叠
-            open_folder_button.setText("  打开文件夹")
             self.font_manager.apply_font(open_folder_button)
+        open_folder_button.clicked.connect(lambda: self._on_open_folder_and_close(save_path))
+        buttons_layout.addWidget(open_folder_button)
         
-        open_folder_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 8px;
-                padding: 5px 15px;
-                font-size: 14px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #3E3E42;
-                border: 1px solid #B39DDB;
-            }
-        """)
-        # 打开文件夹并关闭窗口
-        open_folder_button.clicked.connect(lambda: self._on_open_folder_and_close(task_data.get("save_path", "")))
-        self.button_layout.addWidget(open_folder_button)
-        
-        # 关闭按钮
-        close_button = QPushButton("")
-        close_button.setFixedSize(120, 40)
+        # 关闭按钮 (次要按钮)
+        close_button = QPushButton("关闭")
+        close_button.setStyleSheet(secondary_button_style)
+        close_button.setFixedHeight(36)
         if hasattr(self, 'font_manager'):
-            # 不使用布局，直接设置图标
             icon = QIcon()
-            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_dismiss_24_regular")
+            self.font_manager.apply_icon_to_icon(icon, "ic_fluent_dismiss_24_regular",color="#000000")
             close_button.setIcon(icon)
             close_button.setIconSize(QSize(16, 16))
-            
-            # 设置文本并添加前导空格以防止文本和图标重叠
-            close_button.setText("  关闭")
             self.font_manager.apply_font(close_button)
-        
-        close_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2D2D30;
-                color: #FFFFFF;
-                border: 1px solid #3C3C3C;
-                border-radius: 8px;
-                padding: 5px 15px;
-                font-size: 14px;
-                text-align: center;
-            }
-            QPushButton:hover {
-                background-color: #3E3E42;
-                border: 1px solid #B39DDB;
-            }
-        """)
         close_button.clicked.connect(self.close)
-        self.button_layout.addWidget(close_button)
+        buttons_layout.addWidget(close_button)
         
-        # 设置当前状态
-        self.current_state = "completed"
+        main_layout.addWidget(buttons_container)
         
-        # 已移除自动关闭定时器功能
+        # 添加到主布局
+        self.content_layout.addWidget(main_container)
         
-        # 设置下载完成页面的窗口自动调整大小
+        # 调整窗口大小
         QTimer.singleShot(0, lambda: self._auto_resize())
         
         # 强制更新UI
@@ -3952,44 +4398,56 @@ class DownloadPopDialog(QDialog):
                     try:
                         if (hasattr(self.download_engine, 'initialized') and 
                             hasattr(self.download_engine.initialized, 'disconnect')):
-                            self.download_engine.initialized.disconnect()
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.initialized, 'receivers') and self.download_engine.initialized.receivers() > 0:
+                                self.download_engine.initialized.disconnect()
                     except:
                         pass
                         
                     try:
                         if (hasattr(self.download_engine, 'block_progress_updated') and 
                             hasattr(self.download_engine.block_progress_updated, 'disconnect')):
-                            self.download_engine.block_progress_updated.disconnect()
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.block_progress_updated, 'receivers') and self.download_engine.block_progress_updated.receivers() > 0:
+                                self.download_engine.block_progress_updated.disconnect()
                     except:
                         pass
                         
                     try:
                         if (hasattr(self.download_engine, 'speed_updated') and 
                             hasattr(self.download_engine.speed_updated, 'disconnect')):
-                            self.download_engine.speed_updated.disconnect()
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.speed_updated, 'receivers') and self.download_engine.speed_updated.receivers() > 0:
+                                self.download_engine.speed_updated.disconnect()
                     except:
                         pass
                         
                     try:
                         if (hasattr(self.download_engine, 'download_completed') and 
                             hasattr(self.download_engine.download_completed, 'disconnect')):
-                            self.download_engine.download_completed.disconnect()
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.download_completed, 'receivers') and self.download_engine.download_completed.receivers() > 0:
+                                self.download_engine.download_completed.disconnect()
                     except:
                         pass
                         
                     try:
                         if (hasattr(self.download_engine, 'error_occurred') and 
                             hasattr(self.download_engine.error_occurred, 'disconnect')):
-                            self.download_engine.error_occurred.disconnect()
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.error_occurred, 'receivers') and self.download_engine.error_occurred.receivers() > 0:
+                                self.download_engine.error_occurred.disconnect()
                     except:
                         pass
                         
                     try:
                         if (hasattr(self.download_engine, 'file_name_changed') and 
                             hasattr(self.download_engine.file_name_changed, 'disconnect')):
-                            self.download_engine.file_name_changed.disconnect()
-                    except:
-                        pass
+                            # 检查信号是否有接收者
+                            if hasattr(self.download_engine.file_name_changed, 'receivers') and self.download_engine.file_name_changed.receivers() > 0:
+                                self.download_engine.file_name_changed.disconnect()
+                    except Exception as signal_error:
+                        logging.error(f"断开下载引擎信号时出错: {signal_error}")
                     
                     # 检查stop方法是否存在
                     if hasattr(self.download_engine, 'stop') and callable(self.download_engine.stop):
@@ -4041,84 +4499,67 @@ class DownloadPopDialog(QDialog):
             pass
     
     def showEvent(self, event):
-        """显示窗口时确保窗口处于正确的状态"""
+        """窗口显示事件处理"""
         super().showEvent(event)
         
-        try:
-            # 检查是否需要特殊处理主窗口最小化的情况
-            if self.parent_was_minimized:
-                # 对于最小化主窗口创建的对话框，确保它能正确独立显示
-                self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-                
-                # 确保窗口置顶和活跃
-                self.raise_()
-                self.activateWindow()
-                
-                # 单独定时器确保窗口可见
-                QTimer.singleShot(100, self._ensure_window_active)
-            
-            # 如果当前是自动启动下载，则确保进度更新定时器启动
-            if self.current_state == "downloading" and not self.progress_timer.isActive():
-                self.progress_timer.start(1000)  # 每秒更新一次下载信息
-            
-            # 确保窗口居中显示在屏幕上
-            screen_geometry = QApplication.primaryScreen().availableGeometry()
-            x = (screen_geometry.width() - self.width()) // 2
-            y = (screen_geometry.height() - self.height()) // 2
-            self.move(x, y)
-            
-            # 确保窗口在屏幕边界内可见
-            QTimer.singleShot(50, self._ensure_visible_on_screen)
-            
-        except Exception as e:
-            logging.warning(f"处理窗口显示事件时出错: {e}")
+        # 确保窗口显示时总是在最上层，但不要频繁调用raise和activate
+        # 这些方法可能导致窗口抽搐
+        self.raise_()
+        
+        # 只在首次显示时激活窗口，避免反复激活导致的抽搐
+        if not hasattr(self, '_first_show_done'):
+            self.activateWindow()
+            self._first_show_done = True
+        
+        # 如果设置了延迟移除置顶标志，则启动定时器
+        # 延长时间到10秒，减少状态变化频率
+        if hasattr(self, 'remove_top_hint') and self.remove_top_hint:
+            # 10秒后移除置顶标志，让窗口可以被其他窗口覆盖
+            QTimer.singleShot(10000, self._remove_always_on_top)
     
     def _ensure_window_active(self):
-        """确保窗口处于可见和活跃状态"""
-        try:
-            # 确保窗口可见
-            if not self.isVisible():
-                self.show()
+        """确保窗口处于活跃状态"""
+        if not self._is_destroyed(self):
+            try:
+                # 只提升窗口层级，不要频繁激活窗口
+                self.raise_()
                 
-            # 置于顶层
-            self.raise_()
-            self.activateWindow()
-            
-            # 检查是否需要移除置顶标志
-            if self.windowFlags() & Qt.WindowStaysOnTopHint:
-                # 10秒后移除置顶标志
-                QTimer.singleShot(10000, self._remove_always_on_top)
-        except Exception as e:
-            logging.debug(f"确保窗口活跃时出错: {e}")
+                # 避免使用会导致窗口状态频繁变化的方法
+                # 不再使用setWindowState方法，它可能导致窗口抽搐
+            except Exception as e:
+                logging.error(f"确保窗口活跃时出错: {str(e)}")
     
     def _remove_always_on_top(self):
-        """移除窗口置顶标志"""
-        try:
-            if self.isVisible() and (self.windowFlags() & Qt.WindowStaysOnTopHint):
-                # 保存当前位置
-                current_pos = self.pos()
+        """移除窗口的置顶标志，允许被其他窗口覆盖"""
+        if not self._is_destroyed(self) and hasattr(self, 'remove_top_hint') and self.remove_top_hint:
+            try:
+                # 获取当前窗口标志
+                flags = self.windowFlags()
                 
                 # 移除置顶标志
-                self.setWindowFlags(self.windowFlags() & ~Qt.WindowStaysOnTopHint)
-                
-                # 重新显示窗口在原来位置
-                self.move(current_pos)
-                self.show()
-        except Exception as e:
-            logging.debug(f"移除窗口置顶标志时出错: {e}")
+                if flags & Qt.WindowStaysOnTopHint:
+                    # 保存当前位置和大小
+                    current_geometry = self.geometry()
+                    
+                    # 移除置顶标志
+                    self.setWindowFlags(flags & ~Qt.WindowStaysOnTopHint)
+                    
+                    # 重新显示窗口（设置窗口标志后窗口会隐藏）
+                    # 恢复到原来的位置和大小
+                    self.setGeometry(current_geometry)
+                    self.show()
+                    
+                    # 标记已移除置顶标志
+                    self.remove_top_hint = False
+            except Exception as e:
+                logging.error(f"移除窗口置顶标志时出错: {str(e)}")
     
     def focusOutEvent(self, event):
         """窗口失去焦点事件处理"""
-        try:
-            super().focusOutEvent(event)
-            
-            # 当窗口失去焦点时，尝试移除置顶标志
-            if hasattr(self, 'remove_top_hint') and self.remove_top_hint:
-                # 使用静态方法创建单次触发的定时器
-                QTimer.singleShot(100, self._remove_always_on_top)
-        except Exception as e:
-            # 忽略焦点事件处理中的错误
-            pass
+        super().focusOutEvent(event)
+        
+        # 失去焦点时不要做任何可能导致窗口状态变化的操作
+        # 移除任何可能导致窗口重新获取焦点的代码
     
     def _on_open_file_and_close(self, file_path):
         """打开文件并关闭窗口
