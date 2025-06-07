@@ -1507,17 +1507,30 @@ class DownloadManagerWindow(QMainWindow):
                 # 清理旧的更新日志
                 self.update_log_manager.clean_old_logs()
         
-    def on_minimize_to_tray(self):
-        """处理最小化到托盘的逻辑"""
+    def on_minimize_to_tray(self, force_hide=False):
+        """处理最小化到托盘的逻辑
+        
+        Args:
+            force_hide: 是否强制隐藏窗口，不论下载状态
+        """
+        # 记录日志
+        import logging
+        logging.info(f"执行最小化到托盘操作，force_hide={force_hide}")
+        
         # 检查是否有活跃的下载任务
         active_downloads = False
         for task in self.download_tasks:
             if task['status'] == '下载中':
                 active_downloads = True
                 break
-                
-        # 显示通知
+        
+        # 确保托盘图标可见
         tray_icon = self.title_bar.tray_icon
+        if not tray_icon.isVisible():
+            tray_icon.show()
+            logging.info("托盘图标已显示")
+        
+        # 显示通知
         if tray_icon.isSystemTrayAvailable() and tray_icon.supportsMessages():
             # 获取图标实例
             notification_icon = self.app_icon
@@ -1529,6 +1542,9 @@ class DownloadManagerWindow(QMainWindow):
                     QSystemTrayIcon.Information,
                     3000  # 显示3秒
                 )
+            elif force_hide:
+                # 静默启动或强制隐藏模式，不显示通知
+                pass
             else:
                 tray_icon.showMessage(
                     "Hanabi Download Manager",
@@ -1537,12 +1553,23 @@ class DownloadManagerWindow(QMainWindow):
                     3000  # 显示3秒
                 )
                 
-        # 记录状态
-        self.is_minimized_to_tray = True
+        # 无论什么情况，都隐藏窗口
+        self.hide()
+        logging.info("窗口已隐藏")
+    
+    def _force_hide_window(self):
+        """强制隐藏窗口的辅助方法，确保窗口真正隐藏"""
+        import logging
+        logging.info("强制隐藏窗口")
         
-        # 检查是否有活跃下载任务，只有存在活跃任务时才保存状态
-        if active_downloads:
-            self.save_application_state()
+        # 确保窗口被隐藏
+        self.hide()
+        
+        # 确保托盘图标可见
+        if hasattr(self, 'title_bar') and hasattr(self.title_bar, 'tray_icon'):
+            if not self.title_bar.tray_icon.isVisible():
+                self.title_bar.tray_icon.show()
+                logging.info("确保托盘图标显示")
     
     def save_application_state(self):
         """保存应用状态"""

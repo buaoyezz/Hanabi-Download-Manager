@@ -2,7 +2,8 @@
 import os
 import sys
 import winreg
-# MD自启动我还不信了
+from .silent_mode import SILENT_ARG
+# 自启动功能实现
 executable_path = sys.argv[0]
 current_path = os.path.dirname(os.path.abspath(executable_path))
 
@@ -11,11 +12,13 @@ current_path = os.path.dirname(os.path.abspath(executable_path))
 
 def add_to_startup():
     exe_path = os.path.abspath(executable_path)
-    print("exe_path:", exe_path)
+    # 添加静默启动参数
+    startup_command = f'"{exe_path}" {SILENT_ARG}'
+    print("startup_command:", startup_command)
     key = winreg.HKEY_CURRENT_USER
     key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
     with winreg.OpenKey(key, key_path, 0, winreg.KEY_ALL_ACCESS) as reg_key:
-        winreg.SetValueEx(reg_key, "HanabiDownloadManager", 0, winreg.REG_SZ, exe_path)
+        winreg.SetValueEx(reg_key, "HanabiDownloadManager", 0, winreg.REG_SZ, startup_command)
     
 def remove_from_startup():
     key = winreg.HKEY_CURRENT_USER

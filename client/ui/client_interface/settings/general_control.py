@@ -13,7 +13,8 @@ from client.ui.components.customMessagebox import CustomMessageBox
 from client.ui.components.comboBox import CustomComboBox
 from client.ui.components.checkBox import CustomCheckBox
 from client.I18N.i18n import i18n
-from core.autoboot.auto_boot import add_to_startup
+from core.autoboot.auto_boot import add_to_startup, remove_from_startup
+from core.autoboot.silent_mode import SILENT_ARG, is_silent_mode
 
 class GeneralControlWidget(QWidget):
    
@@ -450,9 +451,9 @@ class GeneralControlWidget(QWidget):
             if self.config_manager.save_config():
                 # 处理自启动设置
                 if self.auto_start_checkbox.isChecked():
-                    self._setup_autostart()
+                    add_to_startup()  # 使用导入的函数，现在会带静默启动参数
                 else:
-                    self._remove_autostart()
+                    remove_from_startup()  # 使用导入的函数
                 
                 # 处理关闭到托盘设置
                 self._apply_close_to_tray_setting(self.close_to_tray_checkbox.isChecked())
@@ -489,26 +490,8 @@ class GeneralControlWidget(QWidget):
     def _remove_autostart(self):
         """移除开机自启动设置"""
         try:
-            if sys.platform == 'win32':  # Windows
-                import winreg
-                # 打开注册表项
-                try:
-                    key = winreg.OpenKey(
-                        winreg.HKEY_CURRENT_USER,
-                        r"Software\Microsoft\Windows\CurrentVersion\Run",
-                        0,
-                        winreg.KEY_SET_VALUE
-                    )
-                    # 删除注册表值
-                    winreg.DeleteValue(key, "HanabiDownloadManager")
-                    winreg.CloseKey(key)
-                    self.notify_manager.show_message(i18n.get_text("auto_start"), i18n.get_text("auto_start_disabled"))
-                except FileNotFoundError:
-                    # 注册表项不存在，忽略错误
-                    pass
-            else:
-                self.notify_manager.show_message(i18n.get_text("auto_start"), i18n.get_text("auto_start_unsupported"))
-            
+            remove_from_startup()
+            self.notify_manager.show_message(i18n.get_text("auto_start"), i18n.get_text("auto_start_disabled"))
         except Exception as e:
             self.notify_manager.show_message(i18n.get_text("auto_start"), f"{i18n.get_text('auto_start_disable_failed')}: {str(e)}")
             print(f"取消开机自启动失败: {str(e)}")

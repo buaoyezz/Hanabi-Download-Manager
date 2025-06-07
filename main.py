@@ -16,6 +16,7 @@ from core.font.font_manager import FontManager
 from core.log.log_manager import log
 from client.ui.extension_interface.pop_dialog import DownloadPopDialog
 from client.version.version_manager import VersionManager
+from core.autoboot.silent_mode import is_silent_mode
 
 # 初始化版本管理器
 version_manager = VersionManager.get_instance()
@@ -34,6 +35,8 @@ def parse_arguments():
                         help='禁用浏览器扩展连接')
     parser.add_argument('--config', type=str, metavar='FILE',
                         help='指定配置文件路径')
+    parser.add_argument('--silent', action='store_true',
+                        help='静默启动模式，启动时最小化到系统托盘')
     
     return parser.parse_args()
 
@@ -265,6 +268,12 @@ if __name__ == "__main__":
     config = ConfigManager()
     start_minimized = config.get_setting("window", "start_minimized", False)
     
+    # 检查是否指定了静默启动参数
+    silent_mode = is_silent_mode()
+    if silent_mode:
+        log.info("检测到静默启动参数，应用将在启动时最小化到托盘")
+        start_minimized = True
+    
     # 如果指定了--debug_windows参数，显示日志窗口
     if args.debug_windows:
         try:
@@ -299,11 +308,15 @@ if __name__ == "__main__":
             QTimer.singleShot(3000, lambda: window.init_browser_download_listener())
     
     if start_minimized:
-        log.info("根据设置，应用将在启动时最小化到托盘")
-        # 先显示窗口以确保正确初始化
-        window.show()
-        # 然后最小化到托盘
-        QTimer.singleShot(500, window.on_minimize_to_tray)
+        log.info("应用将在启动时最小化到托盘")
+        # 修改启动逻辑，避免窗口闪烁
+        # 1. 不先显示窗口，直接设置窗口为隐藏状态
+        window.hide()
+        # 2. 确保托盘图标可见
+        if hasattr(window.title_bar, 'tray_icon'):
+            window.title_bar.tray_icon.show()
+        # 3. 触发托盘最小化逻辑，确保系统托盘功能正常
+        QTimer.singleShot(100, lambda: window.title_bar.minimize_to_tray())
     else:
         # 正常显示窗口
         window.show()
