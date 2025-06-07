@@ -261,8 +261,257 @@ if __name__ == "__main__":
     log.info(f"Hanabi Download Manager v{version_manager.get_client_version()}")
     log.info(f"浏览器扩展版本: v{version_manager.get_extension_version()}")
     
+    # 启动HTTP状态服务器
+    try:
+        from connect.http_status_server import get_status_server
+        status_server = get_status_server()
+        status_server.start()
+        log.info("HTTP状态服务器已启动")
+    except Exception as e:
+        log.error(f"启动HTTP状态服务器失败: {e}")
+    
     # 创建主窗口
     window = DownloadManagerWindow()
+    
+    # 添加直接连接到浏览器扩展的方法
+    def force_connect_to_extension():
+        """强制连接到浏览器扩展，直接创建连接并发送信号"""
+        try:
+            # 尝试直接创建TCP客户端连接到浏览器扩展
+            import socket
+            import json
+            import time
+            
+            # 创建TCP连接
+            client = None
+            try:
+                client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                client.settimeout(3)  # 设置3秒超时
+                
+                # 连接到扩展监听的端口 (Chrome扩展监听20971端口)
+                client.connect(("localhost", 20971))
+                
+                # 构建alive消息
+                alive_message = {
+                    "type": "alive",
+                    "timestamp": int(time.time() * 1000),
+                    "ClientVersion": version_manager.get_client_version(),
+                    "message": "HDM客户端已连接",
+                    "status": "online"
+                }
+                
+                # 发送消息
+                message_data = json.dumps(alive_message) + "\n"
+                client.sendall(message_data.encode("utf-8"))
+                log.info("已直接发送alive信号到浏览器扩展端口")
+                
+                # 等待响应
+                try:
+                    response = client.recv(1024).decode("utf-8")
+                    log.info(f"收到扩展响应: {response}")
+                    return True
+                except (socket.timeout, ConnectionResetError) as e:
+                    log.warning(f"等待扩展响应时出错: {e}")
+                    return False
+            except (ConnectionRefusedError, socket.timeout, ConnectionResetError) as e:
+                log.warning(f"直接连接扩展失败: {e}")
+                return False
+            finally:
+                # 确保socket在任何情况下都能正确关闭
+                if client:
+                    try:
+                        client.shutdown(socket.SHUT_RDWR)
+                    except (OSError, socket.error, ConnectionResetError):
+                        # 忽略关闭时的错误
+                        pass
+                    finally:
+                        try:
+                            client.close()
+                        except (OSError, socket.error):
+                            pass
+        except Exception as e:
+            log.error(f"强制连接到扩展时出错: {e}")
+        
+        # 尝试通过已有连接器发送信号
+        try:
+            if hasattr(window, 'browser_connector') and window.browser_connector:
+                window.browser_connector._send_alive_signal_now()
+                log.info("通过连接器发送了alive信号")
+                return True
+        except Exception as e:
+            log.error(f"通过连接器发送信号失败: {e}")
+        
+        return False
+    
+    # 保存方法到窗口对象
+    window.force_connect_to_extension = force_connect_to_extension
+    
+    # 添加检查连接状态的方法
+    def check_extension_connection():
+        """检查浏览器扩展连接状态，返回是否已连接"""
+        try:
+            # 尝试通过HTTP状态服务器检查扩展连接状态
+            import requests
+            try:
+                # 使用更短的超时时间避免长时间等待
+                response = requests.get("http://localhost:20972/status", timeout=0.5)
+                if response.status_code == 200:
+                    data = response.json()
+                    # 如果状态服务器正常，还需进一步检查扩展是否连接
+                    # 尝试向扩展发送测试请求
+                    import socket
+                    test_socket = None
+                    try:
+                        test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        test_socket.settimeout(1)  # 快速测试，1秒超时
+                        test_socket.connect(("localhost", 20971))
+                        # 能够连接表示扩展处于正常状态
+                        return True
+                    except (ConnectionRefusedError, socket.timeout, ConnectionResetError) as e:
+                        # 连接失败，表示扩展未连接
+                        log.debug(f"扩展连接测试失败: {e}")
+                        return False
+                    finally:
+                        # 确保socket在任何情况下都能正确关闭
+                        if test_socket:
+                            try:
+                                test_socket.shutdown(socket.SHUT_RDWR)
+                            except (OSError, socket.error, ConnectionResetError):
+                                # 忽略关闭时的错误
+                                pass
+                            finally:
+                                try:
+                                    test_socket.close()
+                                except (OSError, socket.error):
+                                    pass
+            except requests.RequestException as e:
+                # HTTP请求失败，认为连接不可用
+                log.debug(f"HTTP状态检查失败: {e}")
+                # 尝试直接socket连接作为备用检测方式
+                import socket
+                test_socket = None
+                try:
+                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    test_socket.settimeout(0.5)  # 使用更短的超时时间
+                    test_socket.connect(("localhost", 20971))
+                    # 能够连接表示扩展处于正常状态
+                    log.debug("HTTP检查失败但直接socket连接成功")
+                    return True
+                except (ConnectionRefusedError, socket.timeout, ConnectionResetError) as e:
+                    # 连接失败，表示扩展未连接
+                    log.debug(f"备用socket连接检测也失败: {e}")
+                    return False
+                finally:
+                    # 确保socket在任何情况下都能正确关闭
+                    if test_socket:
+                        try:
+                            test_socket.shutdown(socket.SHUT_RDWR)
+                        except (OSError, socket.error, ConnectionResetError):
+                            # 忽略关闭时的错误
+                            pass
+                        finally:
+                            try:
+                                test_socket.close()
+                            except (OSError, socket.error):
+                                pass
+        except Exception as e:
+            log.debug(f"检查扩展连接状态时出错: {e}")
+        
+        # 默认假设连接丢失
+        return False
+    
+    # 保存方法到窗口对象
+    window.check_extension_connection = check_extension_connection
+    
+    # 启动后立即尝试强制连接
+    QTimer.singleShot(2000, force_connect_to_extension)
+    
+    # 创建一个定时器，定期检查浏览器扩展连接状态，只在丢失连接时发送alive信号
+    browser_connection_timer = QTimer()
+    browser_connection_timer.setInterval(15000)  # 每15秒检查一次
+    
+    def check_browser_connection():
+        """检查浏览器连接状态，只在连接丢失时发送alive信号"""
+        try:
+            # 首先检查连接状态
+            is_connected = window.check_extension_connection()
+            
+            if not is_connected:
+                # 只在连接丢失时才发送alive信号
+                log.info("Connect Status: Offline, Sending alive signal")
+                result = window.force_connect_to_extension()
+                if result:
+                    log.info("Alive信号发送成功，等待下次检查确认连接状态")
+                else:
+                    log.warning("Alive信号发送失败，将在下次检查时重试")
+            else:
+                log.debug("Connect Status: Online, No need to send alive signal")
+        except Exception as e:
+            log.error(f"检查连接状态时出错: {e}")
+            # 出错时默认发送alive信号，确保连接恢复
+            try:
+                window.force_connect_to_extension()
+            except Exception as e2:
+                log.error(f"尝试恢复连接时出错: {e2}")
+    
+    # 连接定时器信号
+    browser_connection_timer.timeout.connect(check_browser_connection)
+    # 启动定时器
+    browser_connection_timer.start()
+    
+    # 保存定时器到窗口，避免被垃圾回收
+    window.browser_connection_timer = browser_connection_timer
+    
+    # 如果窗口有"立即连接"按钮，添加点击事件处理
+    if hasattr(window, 'ui') and hasattr(window.ui, 'reconnectButton'):
+        def on_reconnect_button_clicked():
+            """处理立即连接按钮点击"""
+            log.info("用户点击了立即连接按钮")
+            
+            # 先检查当前连接状态
+            is_connected = window.check_extension_connection()
+            
+            if is_connected:
+                log.info("扩展已连接，无需重新连接")
+                # 显示提示
+                try:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.information(window, "连接状态", "浏览器扩展已连接，无需重新连接")
+                except Exception as e:
+                    log.error(f"显示连接状态提示时出错: {e}")
+            else:
+                log.info("扩展未连接，尝试强制连接")
+                # 使用强制连接方法
+                success = window.force_connect_to_extension()
+                
+                if success:
+                    log.info("已成功发送连接信号到浏览器扩展")
+                    # 显示连接成功提示
+                    try:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.information(window, "连接状态", "已成功连接到浏览器扩展")
+                    except Exception as e:
+                        log.error(f"显示连接成功提示时出错: {e}")
+                else:
+                    log.warning("未能成功连接到浏览器扩展")
+                    # 显示连接失败提示
+                    try:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.warning(window, "连接状态", "未能连接到浏览器扩展，请确保浏览器已启动")
+                    except Exception as e:
+                        log.error(f"显示连接失败提示时出错: {e}")
+                    
+                    # 再次尝试使用连接器发送信号
+                    if hasattr(window, 'browser_connector') and window.browser_connector:
+                        try:
+                            window.browser_connector._send_alive_signal_now()
+                            log.info("已通过连接器重试发送alive信号")
+                        except Exception as e:
+                            log.error(f"重试发送alive信号时出错: {e}")
+        
+        # 连接按钮点击信号
+        window.ui.reconnectButton.clicked.connect(on_reconnect_button_clicked)
+        log.info("已连接立即连接按钮点击事件")
     
     # 检查是否应该启动时最小化到托盘
     from client.ui.client_interface.settings.config import ConfigManager
@@ -280,12 +529,6 @@ if __name__ == "__main__":
         # 命令行指定了--silent参数，强制设为True
         start_minimized = True
         log.info("检测到静默启动参数，应用将在启动时最小化到托盘")
-    
-    # 检查是否指定了静默启动参数
-    silent_mode = is_silent_mode()
-    if silent_mode:
-        log.info("检测到静默启动参数，应用将在启动时最小化到托盘")
-        start_minimized = True
     
     # 如果指定了--debug_windows参数，显示日志窗口
     if args.debug_windows:
@@ -315,6 +558,15 @@ if __name__ == "__main__":
             
             connector.start()
             log.info("浏览器下载连接器已成功启动")
+            
+            # 启动后立即发送alive信号，确保浏览器扩展能够立即检测到连接
+            QTimer.singleShot(1000, lambda: connector._send_alive_signal_now())
+            
+            # 再设置一个延迟，确保信号能被接收
+            QTimer.singleShot(3000, lambda: connector._send_alive_signal_now())
+            
+            # 将连接器保存到全局变量，避免被垃圾回收
+            window.browser_connector = connector
         except Exception as e:
             log.error(f"启动浏览器下载连接器失败: {e}")
             from PySide6.QtCore import QTimer
