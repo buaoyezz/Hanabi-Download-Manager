@@ -69,6 +69,7 @@ software_update=Software Update
 startup_settings=Startup Settings
 auto_start=Start automatically at system startup
 start_minimized=Start minimized to tray
+start_minimized_combined=Automatically start minimized to system tray
 close_to_tray=Minimize to tray when closed
 auto_check_update=Automatically check for updates at startup
 check_update=Check for updates at startup

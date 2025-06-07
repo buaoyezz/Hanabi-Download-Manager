@@ -69,6 +69,7 @@ startup_settings=启动设置
 auto_start=开机时自动启动
 check_update=启动时自动检查更新
 start_minimized=启动时最小化到系统托盘
+start_minimized_combined=启动时自动最小化到系统托盘
 close_to_tray=关闭时最小化到系统托盘
 enable_browser_extension=启用浏览器扩展支持
 restore_download=恢复未完成的下载
