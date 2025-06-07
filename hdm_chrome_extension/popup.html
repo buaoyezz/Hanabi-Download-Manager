@@ -3,131 +3,448 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>花火下载管理器</title>
+    <title>Hanabi Download Manager</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
-        body {
-            font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
-            width: 320px;
-            padding: 15px;
+        * {
             margin: 0;
-            background-color: #1a1a2e;
-            color: #f0f0f0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            width: 320px;
+            min-height: 480px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .background-pattern {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                radial-gradient(circle at 25% 25%, rgba(255,255,255,0.1) 0%, transparent 50%),
+                radial-gradient(circle at 75% 75%, rgba(255,255,255,0.08) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        
+        .container {
+            position: relative;
+            z-index: 1;
+            padding: 20px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         
         .header {
-            text-align: center;
-            margin-bottom: 15px;
-            padding: 10px 0;
-            border-bottom: 2px solid #ff6e7f;
+            display: flex;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
         }
         
-        .header img {
-            width: 50px;
-            height: 50px;
-            margin-bottom: 10px;
-            filter: drop-shadow(0 0 5px rgba(255, 110, 127, 0.5));
+        .logo {
+            width: 40px;
+            height: 40px;
+            margin-right: 12px;
+            border-radius: 10px;
         }
         
-        h1 {
+        .title {
             font-size: 18px;
-            margin: 5px 0;
-            color: #ff6e7f;
-            text-shadow: 0 0 8px rgba(255, 110, 127, 0.4);
+            font-weight: 700;
+            color: #ffffff;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
         
-        .status-container {
-            margin-bottom: 20px;
-            padding: 12px;
-            border-radius: 8px;
-            background-color: #16213e;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            border-left: 3px solid #ff6e7f;
-            transition: transform 0.2s, box-shadow 0.2s;
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
         }
         
-        .status-container:hover {
+        .status-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .status-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(255, 110, 127, 0.2);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
         }
         
-        #status-text {
-            font-weight: bold;
-            margin-bottom: 5px;
+        .status-header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        
+        .status-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+        
+        .status-icon .material-icons {
+            font-size: 20px;
+            color: white;
+        }
+        
+        .client-icon {
+            background: #42a5f5;
+        }
+        
+        .extension-icon {
+            background: #66bb6a;
+        }
+        
+        .status-label {
+            font-size: 12px;
+            font-weight: 600;
+            opacity: 0.9;
+            margin-bottom: 4px;
+        }
+        
+        .status-value {
+            font-size: 14px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-left: 6px;
+        }
+        
+        .status-online {
+            background-color: #4caf50;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.6);
+        }
+        
+        .status-offline {
+            background-color: #f44336;
+            box-shadow: 0 0 10px rgba(244, 67, 54, 0.6);
+        }
+        
+        .status-checking {
+            background-color: #2196f3;
+            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px rgba(33, 150, 243, 0.6);
+        }
+        
+        @keyframes pulse {
+            0%, 100% { 
+                opacity: 1; 
+                transform: scale(1);
+            }
+            50% { 
+                opacity: 0.6; 
+                transform: scale(1.2);
+            }
+        }
+        
+        .queue-section {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .queue-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .queue-icon {
+            width: 48px;
+            height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+        
+        .queue-icon .material-icons {
+            font-size: 32px;
+            color: #ff9800;
+        }
+        
+        .queue-number {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .queue-label {
+            font-size: 14px;
+            opacity: 0.9;
+            font-weight: 600;
+        }
+        
+        .queue-actions {
+            display: flex;
+            justify-content: center;
+            margin-top: 12px;
+            gap: 8px;
+        }
+        
+        .queue-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-size: 12px;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: all 0.2s ease;
+        }
+        
+        .queue-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-1px);
+        }
+        
+        .queue-btn .material-icons {
+            font-size: 14px;
+            margin-right: 4px;
+        }
+        
+        .queue-list {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 12px;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, margin 0.3s ease;
+            width: 100%;
+            margin-top: 0;
+        }
+        
+        .queue-list.show {
+            max-height: 200px;
+            margin-top: 12px;
+            overflow-y: auto;
+        }
+        
+        .queue-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .queue-item:last-child {
+            border-bottom: none;
+        }
+        
+        .queue-item-name {
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 180px;
+        }
+        
+        .queue-item-remove {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            padding: 2px;
+        }
+        
+        .queue-item-remove:hover {
+            color: #f44336;
+        }
+        
+        .queue-item-remove .material-icons {
             font-size: 16px;
         }
         
-        .button-container {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
+        .queue-empty {
+            text-align: center;
+            padding: 10px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
         }
         
-        button {
-            padding: 10px 15px;
+        .controls {
+            margin-top: auto;
+            margin-bottom: 16px;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 14px 0;
             border: none;
-            border-radius: 25px;
-            background: linear-gradient(135deg, #ff6e7f, #c580ff);
-            color: white;
-            font-weight: bold;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(255, 110, 127, 0.3);
+            transition: all 0.3s ease;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #4caf50;
+            color: white;
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
         }
         
-        button:hover {
-            background: linear-gradient(135deg, #ff8393, #d396ff);
+        .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 18px rgba(255, 110, 127, 0.4);
+            box-shadow: 0 6px 16px rgba(76, 175, 80, 0.5);
         }
         
-        button:active {
-            transform: translateY(1px);
+        .btn .material-icons {
+            margin-right: 8px;
+            font-size: 18px;
         }
         
         #disable-button {
-            background: linear-gradient(135deg, #ff6e7f, #ff5252);
+            background: #f44336;
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
         }
         
         #disable-button:hover {
-            background: linear-gradient(135deg, #ff8393, #ff6b6b);
+            box-shadow: 0 6px 16px rgba(244, 67, 54, 0.5);
         }
         
         #enable-button {
-            background: linear-gradient(135deg, #6eff9e, #52ffc7);
-            color: #16213e;
+            background: #4caf50;
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
             display: none;
         }
         
         #enable-button:hover {
-            background: linear-gradient(135deg, #83ffac, #6bffd0);
+            box-shadow: 0 6px 16px rgba(76, 175, 80, 0.5);
         }
         
-        #version {
-            margin-top: 20px;
+        .footer {
             font-size: 12px;
-            color: #c0c0c0;
+            opacity: 0.7;
             text-align: center;
-            padding-top: 15px;
-            border-top: 1px solid rgba(255, 110, 127, 0.3);
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <img src="icon128.png" alt="花火下载管理器">
-        <h1>花火下载管理器</h1>
-    </div>
+    <div class="background-pattern"></div>
     
-    <div class="status-container">
-        <div id="status-text">正在连接...</div>
+    <div class="container">
+        <div class="header">
+            <img src="icon128.png" alt="Hanabi Download Manager" class="logo">
+            <h1 class="title">Hanabi Download Manager</h1>
+        </div>
+        
+        <div class="status-grid">
+            <div class="status-card">
+                <div class="status-header">
+                    <div class="status-icon client-icon">
+                        <i class="material-icons">computer</i>
+                    </div>
+                    <div class="status-label">客户端状态</div>
+                    <div class="status-value">
+                        <span id="client-status-text">检测中...</span>
+                        <div id="client-status-indicator" class="status-indicator status-checking"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="status-card">
+                <div class="status-header">
+                    <div class="status-icon extension-icon">
+                        <i class="material-icons">extension</i>
+                    </div>
+                    <div class="status-label">插件状态</div>
+                    <div class="status-value">
+                        <span id="extension-status-text">已启用</span>
+                        <div id="extension-status-indicator" class="status-indicator status-online"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="queue-section">
+            <div class="queue-content">
+                <div class="queue-icon">
+                    <i class="material-icons">download</i>
+                </div>
+                <div class="queue-number" id="queue-count">0</div>
+                <div class="queue-label">下载队列</div>
+                
+                <div class="queue-actions">
+                    <button id="view-queue-btn" class="queue-btn">
+                        <i class="material-icons">list</i>查看
+                    </button>
+                    <button id="clear-queue-btn" class="queue-btn">
+                        <i class="material-icons">delete_sweep</i>清空
+                    </button>
+                </div>
+                
+                <div id="queue-list" class="queue-list">
+                    <!-- 队列项会动态添加到这里 -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button id="disable-button" class="btn">
+                <i class="material-icons">power_settings_new</i>
+                禁用插件
+            </button>
+            <button id="enable-button" class="btn">
+                <i class="material-icons">power_settings_new</i>
+                启用插件
+            </button>
+        </div>
+        
+        <div class="footer" id="version">
+            加载版本信息...
+        </div>
     </div>
-    
-    <div class="button-container">
-        <button id="disable-button">禁用插件</button>
-        <button id="enable-button">启用插件</button>
-    </div>
-    
-    <div id="version">加载版本信息...</div>
 
     <script src="popup.js"></script>
 </body>

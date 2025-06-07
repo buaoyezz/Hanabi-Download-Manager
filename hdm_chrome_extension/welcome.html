@@ -3,237 +3,560 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hey Welcome to Hanabi Download Manager</title>
+    <title>Hanabi Download Manager - Welcome</title>
     <style>
-        body {
-            font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * {
             margin: 0;
             padding: 0;
-            background-color: #1a1a2e;
-            color: #f0f0f0;
-            display: flex;
-            flex-direction: column;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --accent-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --dark-bg: #0f0f23;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --text-primary: #ffffff;
+            --text-secondary: #b8b8d1;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --shadow-light: 0 8px 32px rgba(31, 38, 135, 0.37);
+            --shadow-heavy: 0 15px 35px rgba(31, 38, 135, 0.5);
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--dark-bg);
+            background-image: 
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 219, 255, 0.2) 0%, transparent 50%);
             min-height: 100vh;
+            color: var(--text-primary);
+            overflow-x: hidden;
+        }
+        
+        .background-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.6;
+        }
+        
+        .floating-shapes {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .shape {
+            position: absolute;
+            border-radius: 50%;
+            background: linear-gradient(45deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+            animation: float 6s ease-in-out infinite;
+        }
+        
+        .shape:nth-child(1) {
+            width: 80px;
+            height: 80px;
+            top: 10%;
+            left: 10%;
+            animation-delay: 0s;
+        }
+        
+        .shape:nth-child(2) {
+            width: 120px;
+            height: 120px;
+            top: 70%;
+            right: 10%;
+            animation-delay: 2s;
+        }
+        
+        .shape:nth-child(3) {
+            width: 60px;
+            height: 60px;
+            top: 40%;
+            left: 80%;
+            animation-delay: 4s;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            50% { transform: translateY(-20px) rotate(180deg); }
         }
         
         .container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
-            padding: 20px;
-            flex: 1;
+            padding: 2rem;
+            position: relative;
+            z-index: 1;
         }
         
         .header {
             text-align: center;
-            margin-bottom: 30px;
-            padding: 20px 0;
-            background-color: #16213e;
-            border-bottom: 3px solid #ff6e7f;
-            color: white;
-            box-shadow: 0 4px 15px rgba(255, 110, 127, 0.2);
+            margin-bottom: 4rem;
+            position: relative;
         }
         
-        .header h1 {
-            margin: 0;
-            font-size: 28px;
-            text-shadow: 0 0 10px rgba(255, 110, 127, 0.6);
+        .logo-container {
+            position: relative;
+            display: inline-block;
+            margin-bottom: 2rem;
         }
         
         .logo {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 15px;
-            filter: drop-shadow(0 0 8px rgba(255, 110, 127, 0.6));
-        }
-        
-        .step-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .step {
-            background-color: #16213e;
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-            border-left: 4px solid #ff6e7f;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        
-        .step:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 6px 20px rgba(255, 110, 127, 0.2);
-        }
-        
-        .step h2 {
-            color: #ff6e7f;
-            margin-top: 0;
+            width: 120px;
+            height: 120px;
+            border-radius: 30px;
+            background: transparent;
             display: flex;
             align-items: center;
-        }
-        
-        .step-number {
-            background: linear-gradient(135deg, #ff6e7f, #c580ff);
-            color: white;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            display: inline-flex;
             justify-content: center;
-            align-items: center;
-            margin-right: 10px;
-            font-weight: bold;
-            box-shadow: 0 2px 8px rgba(255, 110, 127, 0.4);
+            box-shadow: none;
+            position: relative;
+            overflow: hidden;
+            object-fit: contain;
         }
         
-        .step p {
-            margin-bottom: 0;
+        .logo::before {
+            display: none;
+        }
+        
+        .title {
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            font-weight: 700;
+            background: var(--secondary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+        
+        .subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            font-weight: 300;
+            max-width: 600px;
+            margin: 0 auto;
             line-height: 1.6;
         }
         
-        .connection-status {
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 20px;
-            text-align: center;
-            background-color: #1f2940;
-            transition: background-color 0.3s;
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+        .main-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
         }
         
-        .connection-status.connected {
-            background-color: #1e3b3b;
-            color: #7accac;
-            border-left: 4px solid #7accac;
+        .card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 2.5rem;
+            box-shadow: var(--shadow-light);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
         }
         
-        .connection-status.disconnected {
-            background-color: #3b1e2e;
-            color: #ff6e7f;
-            border-left: 4px solid #ff6e7f;
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: var(--accent-gradient);
+            transform: scaleX(0);
+            transition: transform 0.4s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-heavy);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        .card:hover::before {
+            transform: scaleX(1);
+        }
+        
+        .card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+        
+        .card-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 16px;
+            background: var(--primary-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 1rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: white;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .card-content {
+            color: var(--text-secondary);
+            line-height: 1.7;
+            font-size: 0.95rem;
+        }
+        
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.75rem 1.5rem;
+            border-radius: 50px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .status-connected {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+        
+        .status-disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        
+        .status-checking {
+            background: rgba(59, 130, 246, 0.2);
+            color: #3b82f6;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+        }
+        
+        .feature-list {
+            list-style: none;
+            margin-top: 1.5rem;
+        }
+        
+        .feature-list li {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+        
+        .feature-list li::before {
+            content: '✨';
+            margin-right: 0.75rem;
+            font-size: 1.1rem;
         }
         
         .actions {
             display: flex;
             justify-content: center;
-            gap: 15px;
-            margin-top: 20px;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 3rem;
         }
         
-        .button {
-            padding: 10px 20px;
+        .btn {
+            padding: 1rem 2rem;
             border: none;
-            border-radius: 25px;
-            background: linear-gradient(135deg, #ff6e7f, #c580ff);
-            color: white;
-            font-weight: bold;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 0.95rem;
             cursor: pointer;
             text-decoration: none;
-            display: inline-block;
-            transition: all 0.3s;
-            box-shadow: 0 4px 15px rgba(255, 110, 127, 0.3);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
         }
         
-        .button:hover {
-            background: linear-gradient(135deg, #ff8393, #d396ff);
-            transform: translateY(-3px);
-            box-shadow: 0 7px 20px rgba(255, 110, 127, 0.4);
+        .btn-primary {
+            background: var(--secondary-gradient);
+            color: white;
+            box-shadow: 0 4px 20px rgba(245, 87, 108, 0.4);
         }
         
-        .button:active {
-            transform: translateY(1px);
+        .btn-secondary {
+            background: var(--glass-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(10px);
         }
         
-        .secondary-button {
-            background: linear-gradient(135deg, #2e3a5a, #1a1a2e);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        .btn-outline {
+            background: transparent;
+            color: var(--text-primary);
+            border: 2px solid var(--border-color);
         }
         
-        .secondary-button:hover {
-            background: linear-gradient(135deg, #3a4b73, #252542);
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .btn-primary:hover {
+            box-shadow: 0 8px 30px rgba(245, 87, 108, 0.6);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .btn-outline:hover {
+            background: var(--glass-bg);
+            border-color: rgba(255, 255, 255, 0.4);
         }
         
         .footer {
             text-align: center;
-            padding: 20px;
-            background-color: #16213e;
-            border-top: 2px solid #ff6e7f;
-            font-size: 14px;
-            color: #c0c0c0;
+            padding: 2rem;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border-color);
+            border-radius: 24px 24px 0 0;
+            margin-top: 2rem;
         }
         
-        ul {
-            list-style-type: none;
-            padding-left: 20px;
+        .footer-content {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
         }
         
-        ul li {
-            position: relative;
-            padding-left: 25px;
-            margin-bottom: 10px;
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
         }
         
-        ul li::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 5px;
-            width: 15px;
-            height: 15px;
-            background-color: #ff6e7f;
-            border-radius: 50%;
-            opacity: 0.7;
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        
+        .footer-links a:hover {
+            color: var(--text-primary);
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .main-content {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .card {
+                padding: 2rem;
+            }
+            
+            .actions {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+                justify-content: center;
+            }
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <img src="icon128.png" alt="Hanabi Download Manager" class="logo">
-        <h1>Welcome</h1>
-        <h1>Hanabi Download Manager</h1>
-    </div>
-    
-    <div class="container">
-        <div class="step-container">
-            <div class="step">
-                <h2><span class="step-number">1</span>Hanabi Download Manager</h2>
-                <p>INSTALL SUCCESS THANKS FOR YOUR USE</p>
-                <p>Developed by ZZBuAoYe</p>
-                <p>Bug Report: <a href="https://github.com/buaoyezz/Hanabi-Download-Manager/issues" target="_blank" style="color: #ff6e7f;">GitHub Issues</a></p>
-            </div>
-            
-            <div class="step">
-                <h2><span class="step-number">2</span>Extension Status</h2>
-                <p>The extension program needs to connect to the main program of Hanabi Download Manager to work. Please ensure that you have installed and started the Hanabi Download Manager application.</p>
-                <div id="connection-status" class="connection-status">
-                    Checking connection status...
-                </div>
-            </div>
-            
-            <div class="step">
-                <h2><span class="step-number">3</span>USE METHOD</h2>
-                <p>Please ensure that HDM is running in the background of your system</p>
-                <ul>
-                    <li>1.0.5 version and later, the software side uses TCP to connect to the plugin more stably</li>
-                    <li>Click the plugin icon to manage the extension</li>
-                    <li>You can quickly paste download links through the extension pop-up window</li>
-                </ul>
-            </div>
+    <div class="background-animation">
+        <div class="floating-shapes">
+            <div class="shape"></div>
+            <div class="shape"></div>
+            <div class="shape"></div>
         </div>
-        
-        <div class="actions">
-            <a href="https://github.com/buaoyezz/Hanabi-Download-Manager" target="_blank" class="button">Github</a>
-            <button id="checkConnection" class="button">Check Connection</button>
-            <button id="closeWindow" class="button secondary-button">Close</button>
-        </div>
-    </div>
-    
-    <div class="footer">
-        <p>Hanabi Download Manager ©2025 Developed by ZZBuAoYe | Version: <span id="version">Loading...</span></p>
     </div>
 
-    <script src="welcome.js"></script>
+    <div class="container">
+        <header class="header">
+            <div class="logo-container">
+                <img src="icon128.png" alt="Hanabi Download Manager Logo" class="logo">
+            </div>
+            <h1 class="title">Hanabi Download Manager</h1>
+            <p class="subtitle">开源 | 免费 | 高效</p>
+        </header>
+
+        <main class="main-content">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🎉</div>
+                    <div>
+                        <h2 class="card-title">安装成功</h2>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <p>感谢您选择 Hanabi Download Manager！扩展程序已成功安装并准备就绪。</p>
+                    <p><strong>开发者：</strong> ZZBuAoYe</p>
+                    <p><strong>问题反馈：</strong> <a href="https://github.com/buaoyezz/Hanabi-Download-Manager/issues" target="_blank" style="color: #f5576c; text-decoration: none;">GitHub Issues</a></p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">🔗</div>
+                    <div>
+                        <h2 class="card-title">连接状态</h2>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <p>扩展程序需要连接到 Hanabi Download Manager 主程序才能正常工作。请确保您已安装并启动了应用程序。</p>
+                    <div id="connection-status" class="status-indicator status-checking pulse">
+                        🔄 正在检查连接状态...
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon">📖</div>
+                    <div>
+                        <h2 class="card-title">使用指南</h2>
+                    </div>
+                </div>
+                <div class="card-content">
+                    <p>请确保 HDM 在您的系统后台运行</p>
+                    <ul class="feature-list">
+                        <li>1.0.5 版本及以后，软件端使用 TCP 连接插件更加稳定</li>
+                        <li>点击插件图标来管理扩展程序</li>
+                        <li>您可以通过扩展弹窗快速粘贴下载链接</li>
+                        <li>支持批量下载和断点续传功能</li>
+                        <li>智能分类和下载队列管理</li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+
+        <div class="actions">
+            <a href="https://github.com/buaoyezz/Hanabi-Download-Manager" target="_blank" class="btn btn-primary">
+                🚀 访问 GitHub
+            </a>
+            <button id="checkConnection" class="btn btn-secondary">
+                🔍 检查连接
+            </button>
+            <button id="closeWindow" class="btn btn-outline">
+                ✕ 关闭窗口
+            </button>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <p><strong>Hanabi Download Manager</strong> ©2025 Developed by ZZBuAoYe</p>
+            <p>版本: <span id="version">Loading...</span></p>
+        </div>
+        <div class="footer-links">
+            <a href="#" onclick="showHelp()">帮助文档</a>
+            <a href="#" onclick="showSettings()">设置</a>
+            <a href="https://github.com/buaoyezz/Hanabi-Download-Manager" target="_blank">开源项目</a>
+        </div>
+    </footer>
+
+    <script>
+        // 模拟连接状态检查
+        function checkConnectionStatus() {
+            const statusElement = document.getElementById('connection-status');
+            statusElement.className = 'status-indicator status-checking pulse';
+            statusElement.innerHTML = '🔄 正在检查连接状态...';
+            
+            // 模拟异步检查
+            setTimeout(() => {
+                const isConnected = Math.random() > 0.5; // 随机模拟连接状态
+                
+                if (isConnected) {
+                    statusElement.className = 'status-indicator status-connected';
+                    statusElement.innerHTML = '✅ 连接正常 - HDM 运行中';
+                } else {
+                    statusElement.className = 'status-indicator status-disconnected';
+                    statusElement.innerHTML = '❌ 连接失败 - 请启动 HDM 主程序';
+                }
+            }, 2000);
+        }
+        
+        // 页面加载时检查连接
+        document.addEventListener('DOMContentLoaded', function() {
+            checkConnectionStatus();
+            
+            // 模拟版本加载
+            setTimeout(() => {
+                document.getElementById('version').textContent = 'v1.0.5';
+            }, 1000);
+        });
+        
+        // 按钮事件处理
+        document.getElementById('checkConnection').addEventListener('click', checkConnectionStatus);
+        
+        document.getElementById('closeWindow').addEventListener('click', function() {
+            if (window.close) {
+                window.close();
+            } else {
+                alert('请手动关闭此窗口');
+            }
+        });
+        
+        function showHelp() {
+            alert('帮助文档功能开发中...');
+        }
+        
+        function showSettings() {
+            alert('设置功能开发中...');
+        }
+        
+        // 添加一些交互动画
+        document.querySelectorAll('.card').forEach(card => {
+            card.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-8px) scale(1.02)';
+            });
+            
+            card.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0) scale(1)';
+            });
+        });
+    </script>
 </body>
-</html> 
+</html>

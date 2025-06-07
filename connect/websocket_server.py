@@ -26,7 +26,7 @@ except ImportError:
         def get_client_version(self):
             return "1.0.7"  # 默认版本
         def get_extension_version(self):
-            return "1.0.1"  # 默认扩展版本
+            return "1.0.2"  # 默认扩展版本
     version_manager = VersionManagerFallback()
     logging.warning("无法导入版本管理器，使用默认版本")
 
@@ -53,6 +53,7 @@ class WebSocketServer:
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
         self.server_lock = threading.Lock()  # 服务器实例锁，防止多线程同时访问服务器
+        self.alive_signal_task = None  # 存储活着信号任务
         
         # 设置日志
         logging.basicConfig(
@@ -194,6 +195,41 @@ class WebSocketServer:
         # 如果找不到可用端口，返回一个随机端口
         return random.randint(30000, 60000)
     
+    # 向所有连接的客户端发送"alive"信号
+    async def send_alive_signal(self):
+        """定期向所有连接的客户端发送alive信号"""
+        self.logger.info("启动alive信号发送任务")
+        
+        while self.is_running:
+            try:
+                if self.clients:
+                    # 准备alive信号
+                    alive_signal = {
+                        "type": "alive",
+                        "timestamp": int(time.time() * 1000),
+                        "status": "active",
+                        "client_count": len(self.clients)
+                    }
+                    
+                    # 创建所有客户端的发送任务
+                    send_tasks = []
+                    for client in list(self.clients):
+                        try:
+                            send_tasks.append(client.send(json.dumps(alive_signal)))
+                        except Exception as e:
+                            self.logger.error(f"准备发送alive信号时出错: {e}")
+                    
+                    # 执行所有发送任务
+                    if send_tasks:
+                        results = await asyncio.gather(*send_tasks, return_exceptions=True)
+                        success_count = sum(1 for r in results if not isinstance(r, Exception))
+                        self.logger.debug(f"已发送alive信号到 {success_count}/{len(send_tasks)} 个客户端")
+            except Exception as e:
+                self.logger.error(f"发送alive信号时出错: {e}")
+            
+            # 等待5秒后再次发送
+            await asyncio.sleep(5)
+    
     # 服务器运行函数
     def run_server(self):
         """启动服务器，支持端口自动切换"""
@@ -237,6 +273,9 @@ class WebSocketServer:
                         
                         self.reconnect_attempts = 0
                         self.logger.info(f"WebSocket服务器已启动，监听于 {self.host}:{current_port}")
+                        
+                        # 启动alive信号发送任务
+                        self.alive_signal_task = asyncio.create_task(self.send_alive_signal())
                         
                         # 保持服务器运行
                         await asyncio.Future()
@@ -297,6 +336,11 @@ class WebSocketServer:
     def stop(self):
         with self.server_lock:
             try:
+                # 取消alive信号任务
+                if self.alive_signal_task and not self.alive_signal_task.done():
+                    self.alive_signal_task.cancel()
+                    self.alive_signal_task = None
+                
                 if self.server:
                     self.server.close()
                 self.is_running = False
@@ -327,6 +371,11 @@ class WebSocketServer:
         try:
             # 标记服务器为非运行状态
             self.is_running = False
+            
+            # 取消alive信号任务
+            if self.alive_signal_task and not self.alive_signal_task.done():
+                self.alive_signal_task.cancel()
+                self.alive_signal_task = None
             
             if self.server:
                 loop = asyncio.new_event_loop()
