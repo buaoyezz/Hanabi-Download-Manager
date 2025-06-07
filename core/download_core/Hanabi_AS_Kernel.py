@@ -2,7 +2,7 @@
 # Hanabi Automatic Scheduling Kernel
 # Code Name: H-AS Main
 # Developed By ZZBuAoYe
-# Version: 1.0.0 Stable
+# Version: 1.0.1 Stable
 # Tips: This Kernel is Central Control Core
 #================================================
 
@@ -26,6 +26,13 @@ logging.basicConfig(
 class HanabiASKernel:
     # Main Kernel
     
+    # 核心全名定义
+    KERNEL_NAMES = {
+        "NSF": "Nextgen Speed Force Kernel",
+        "NCT": "Nextgen Crystal Transfer Kernel",
+        "AS": "Automatic Scheduling Kernel"
+    }
+    
     def __init__(self):
         """
         初始化自动调度内核
@@ -36,6 +43,7 @@ class HanabiASKernel:
         self.nct_kernel = None  # NCT内核实例
         self.current_kernel = None  # 当前使用的内核
         self.current_kernel_type = None  # 当前内核类型
+        self.current_kernel_fullname = None  # 当前内核全名
         
     def analyze_url(self, url: str) -> str:
         """
@@ -53,7 +61,7 @@ class HanabiASKernel:
             
             # 检查是否是FTP/SFTP链接
             if scheme in ["ftp", "sftp"]:
-                self.logger.info(f"检测到FTP/SFTP链接: {url}, 将使用NCT内核")
+                self.logger.info(f"检测到FTP/SFTP链接: {url}, 将使用{self.KERNEL_NAMES['NCT']}(NCT)")
                 return "NCT"
             
             # 检查是否是HTTP/HTTPS链接
@@ -61,25 +69,25 @@ class HanabiASKernel:
                 # 检查是否是已知的FTP网关服务
                 ftp_gateways = ["ftpproxy", "ftpgate", "ftpbridge", "ftpweb"]
                 if any(gateway in netloc for gateway in ftp_gateways):
-                    self.logger.info(f"检测到FTP网关链接: {url}, 将使用NCT内核")
+                    self.logger.info(f"检测到FTP网关链接: {url}, 将使用{self.KERNEL_NAMES['NCT']}(NCT)")
                     return "NCT"
                 
                 # 检查文件扩展名，某些大文件类型更适合NSF内核
                 large_file_extensions = [".iso", ".zip", ".rar", ".7z", ".tar", ".gz", ".mp4", ".mkv", ".avi", ".mov"]
                 if any(path.endswith(ext) for ext in large_file_extensions):
-                    self.logger.info(f"检测到大文件类型: {path}, 将使用NSF内核")
+                    self.logger.info(f"检测到大文件类型: {path}, 将使用{self.KERNEL_NAMES['NSF']}(NSF)")
                     return "NSF"
                 
                 # 默认使用NSF内核处理HTTP/HTTPS链接
-                self.logger.info(f"检测到HTTP/HTTPS链接: {url}, 将使用NSF内核")
+                self.logger.info(f"检测到HTTP/HTTPS链接: {url}, 将使用{self.KERNEL_NAMES['NSF']}(NSF)")
                 return "NSF"
             
             # 未知协议，默认使用NSF内核
-            self.logger.warning(f"未知协议链接: {url}, 默认使用NSF内核")
+            self.logger.warning(f"未知协议链接: {url}, 默认使用{self.KERNEL_NAMES['NSF']}(NSF)")
             return "NSF"
             
         except Exception as e:
-            self.logger.error(f"分析URL时出错: {str(e)}, 默认使用NSF内核")
+            self.logger.error(f"分析URL时出错: {str(e)}, 默认使用{self.KERNEL_NAMES['NSF']}(NSF)")
             return "NSF"
     
     async def initialize_download(self, url: str, headers: Dict[str, str] = None, 
@@ -103,6 +111,7 @@ class HanabiASKernel:
             # 分析URL，确定使用哪个内核
             kernel_type = self.analyze_url(url)
             self.current_kernel_type = kernel_type
+            self.current_kernel_fullname = self.KERNEL_NAMES.get(kernel_type, "未知内核")
             
             # 根据内核类型初始化相应内核
             if kernel_type == "NSF":
@@ -116,7 +125,7 @@ class HanabiASKernel:
                     **kwargs
                 )
                 self.current_kernel = self.nsf_kernel
-                self.logger.info(f"已初始化NSF内核用于下载: {url}")
+                self.logger.info(f"已初始化{self.current_kernel_fullname}(NSF)用于下载: {url}")
                 return True, ""
                 
             elif kernel_type == "NCT":
@@ -154,7 +163,7 @@ class HanabiASKernel:
                 if not connected:
                     return False, f"无法连接到FTP服务器: {host}:{port}"
                 
-                self.logger.info(f"已初始化NCT内核用于下载: {url}")
+                self.logger.info(f"已初始化{self.current_kernel_fullname}(NCT)用于下载: {url}")
                 return True, ""
             
             else:
@@ -207,7 +216,7 @@ class HanabiASKernel:
             下载是否成功
         """
         if not self.current_kernel or self.current_kernel_type != "NCT":
-            self.logger.error("当前内核不是NCT或未初始化，无法使用此方法下载文件")
+            self.logger.error(f"当前内核不是{self.KERNEL_NAMES['NCT']}或未初始化，无法使用此方法下载文件")
             return False
         
         try:
@@ -237,7 +246,7 @@ class HanabiASKernel:
                 
             elif self.current_kernel_type == "NCT":
                 # NCT内核目前不支持暂停，只能取消
-                self.logger.warning("NCT内核不支持暂停功能，请使用stop_download()")
+                self.logger.warning(f"{self.KERNEL_NAMES['NCT']}不支持暂停功能，请使用stop_download()")
                 return False
                 
             return False
@@ -263,7 +272,7 @@ class HanabiASKernel:
                 
             elif self.current_kernel_type == "NCT":
                 # NCT内核目前不支持恢复，需要重新开始
-                self.logger.warning("NCT内核不支持恢复功能，请重新初始化下载")
+                self.logger.warning(f"{self.KERNEL_NAMES['NCT']}不支持恢复功能，请重新初始化下载")
                 return False
                 
             return False
@@ -317,7 +326,8 @@ class HanabiASKernel:
                     "file_size": self.nsf_kernel.file_size,
                     "downloaded": self.nsf_kernel.downloaded_size,
                     "remaining": self.nsf_kernel.file_size - self.nsf_kernel.downloaded_size if self.nsf_kernel.file_size > 0 else 0,
-                    "kernel_type": "NSF"
+                    "kernel_type": "NSF",
+                    "kernel_fullname": self.KERNEL_NAMES["NSF"]
                 }
                 
             elif self.current_kernel_type == "NCT":
@@ -327,7 +337,8 @@ class HanabiASKernel:
                     "status": "运行中" if self.nct_kernel.is_connected else "已停止",
                     "progress": 0,  # 需要在实际使用时通过回调更新
                     "speed": 0,     # 需要在实际使用时通过回调更新
-                    "kernel_type": "NCT"
+                    "kernel_type": "NCT",
+                    "kernel_fullname": self.KERNEL_NAMES["NCT"]
                 }
                 
             return {"status": "未知", "progress": 0, "speed": 0}
