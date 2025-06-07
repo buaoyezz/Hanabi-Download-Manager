@@ -16,6 +16,7 @@ from core.font.font_manager import FontManager
 from core.log.log_manager import log
 from client.ui.extension_interface.pop_dialog import DownloadPopDialog
 from client.version.version_manager import VersionManager
+from core.autoboot.silent_mode import is_silent_mode
 
 # 初始化版本管理器
 version_manager = VersionManager.get_instance()
@@ -34,6 +35,8 @@ def parse_arguments():
                         help='禁用浏览器扩展连接')
     parser.add_argument('--config', type=str, metavar='FILE',
                         help='指定配置文件路径')
+    parser.add_argument('--silent', action='store_true',
+                        help='静默启动模式，启动时最小化到系统托盘')
     
     return parser.parse_args()
 
@@ -138,6 +141,7 @@ class BrowserDownloadHandler(QObject):
                 )
                 
                 log.info(f"已为下载请求 [ID: {request_id}] 创建下载弹窗")
+                log.info(f"AS_Kernel: 已为下载请求 [ID: {request_id}] 选择下载核心 [Kernel: {task_data.get('kernel', 'Unknown')}]")
                 return True
             else:
                 log.error(f"创建下载弹窗失败 [ID: {request_id}]")
@@ -201,7 +205,7 @@ if __name__ == "__main__":
     
     # 处理版本信息参数
     if args.version:
-        print(f"花火下载管理器 v{version_manager.get_client_version()}")
+        print(f"Hanabi Download Manager v{version_manager.get_client_version()}")
         print(f"浏览器扩展版本: v{version_manager.get_extension_version()}")
         sys.exit(0)
     
@@ -254,7 +258,7 @@ if __name__ == "__main__":
     download_handler = BrowserDownloadHandler()
     
     # 记录版本信息
-    log.info(f"花火下载管理器 v{version_manager.get_client_version()}")
+    log.info(f"Hanabi Download Manager v{version_manager.get_client_version()}")
     log.info(f"浏览器扩展版本: v{version_manager.get_extension_version()}")
     
     # 创建主窗口
@@ -263,7 +267,19 @@ if __name__ == "__main__":
     # 检查是否应该启动时最小化到托盘
     from client.ui.client_interface.settings.config import ConfigManager
     config = ConfigManager()
-    start_minimized = config.get_setting("window", "start_minimized", False)
+    
+    # 检查是否指定了静默启动参数 - 优先级最高
+    silent_mode = is_silent_mode()
+    
+    # 从配置中获取启动设置 - 仅当没有静默模式参数时才检查
+    start_minimized = False
+    if not silent_mode:
+        # 只有当命令行没有指定--silent参数时，才检查配置
+        start_minimized = config.get_setting("window", "start_minimized", False)
+    else:
+        # 命令行指定了--silent参数，强制设为True
+        start_minimized = True
+        log.info("检测到静默启动参数，应用将在启动时最小化到托盘")
     
     # 如果指定了--debug_windows参数，显示日志窗口
     if args.debug_windows:
@@ -299,11 +315,15 @@ if __name__ == "__main__":
             QTimer.singleShot(3000, lambda: window.init_browser_download_listener())
     
     if start_minimized:
-        log.info("根据设置，应用将在启动时最小化到托盘")
-        # 先显示窗口以确保正确初始化
-        window.show()
-        # 然后最小化到托盘
-        QTimer.singleShot(500, window.on_minimize_to_tray)
+        log.info("应用将在启动时最小化到托盘")
+        # 修改启动逻辑，避免窗口闪烁
+        # 1. 不先显示窗口，直接设置窗口为隐藏状态
+        window.hide()
+        # 2. 确保托盘图标可见
+        if hasattr(window.title_bar, 'tray_icon'):
+            window.title_bar.tray_icon.show()
+        # 3. 触发托盘最小化逻辑，确保系统托盘功能正常
+        QTimer.singleShot(100, lambda: window.title_bar.minimize_to_tray())
     else:
         # 正常显示窗口
         window.show()
