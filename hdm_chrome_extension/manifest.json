@@ -1,6 +1,6 @@
 {
   "name": "Hanabi Download Manager Extension",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "manifest_version": 3,
   "description": "Hanabi Download Manager - HDM Browser Extension",
   "background": {

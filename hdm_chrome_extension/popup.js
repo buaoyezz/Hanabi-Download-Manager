@@ -205,25 +205,28 @@ function clearQueue() {
 
 // 重试连接
 function retryConnection() {
-    // 清除连接错误
-    chrome.storage.local.remove("connectionError");
-    
-    // 发送消息给后台脚本，要求重置连接
-    chrome.runtime.sendMessage({ action: "resetConnection" }, (response) => {
-        console.log("重置连接请求已发送:", response);
+    // 使用新的手动重连方法
+    chrome.runtime.sendMessage({ action: "manualReconnect" }, function(response) {
+        console.log("手动重连响应:", response);
         
-        // 更新客户端状态为检测中
+        // 显示重连中的状态
         clientStatusIndicator.className = "status-indicator status-checking";
-        clientStatusText.textContent = "检测中...";
+        clientStatusText.textContent = "正在连接...";
         
-        // 移除重试按钮
+        // 设置连接中的动画效果
         if (document.getElementById("retry-button")) {
-            document.getElementById("retry-button").remove();
-        }
-        
-        // 移除错误消息
-        if (document.getElementById("error-message")) {
-            document.getElementById("error-message").remove();
+            const retryButton = document.getElementById("retry-button");
+            retryButton.innerHTML = '<i class="material-icons">sync</i>连接中...';
+            retryButton.disabled = true;
+            
+            // 3秒后恢复按钮状态
+            setTimeout(() => {
+                retryButton.innerHTML = '<i class="material-icons">refresh</i>重试连接';
+                retryButton.disabled = false;
+                
+                // 更新状态
+                updateStatus();
+            }, 3000);
         }
     });
 }
@@ -351,3 +354,6 @@ if (isDevelopment) {
 
 // 更新状态
 updateStatus();
+
+// 定期更新状态，确保UI反映最新的连接状态
+setInterval(updateStatus, 1000);  // 每秒更新一次状态

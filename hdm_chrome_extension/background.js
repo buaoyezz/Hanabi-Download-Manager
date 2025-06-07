@@ -5,8 +5,8 @@ let isConnected = false;
 let shouldDisableExtension = false;
 let heartbeatInterval = null;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 999999; // 实际上不限制重连次数
-const RECONNECT_INTERVAL = 3000; // 3秒
+const MAX_RECONNECT_ATTEMPTS = 1; // 只尝试连接一次，不重连
+const RECONNECT_INTERVAL = 3000; // 3秒，仅用于初始化连接
 
 // 创建一个队列来存储离线时的下载请求
 let pendingDownloads = [];
@@ -26,6 +26,13 @@ let queueBatchTimer = null; // 队列批处理定时器
 let queueBatchItems = []; // 队列批处理项目
 let isProcessingQueueBatch = false; // 是否正在处理队列批次
 
+// 连接控制变量
+let lastActiveTime = 0; // 上次活动时间
+let hasTasksToProcess = false; // 是否有任务需要处理
+let isWaitingForSignal = false; // 是否正在等待alive信号
+let isManualReconnect = false; // 是否手动重连
+let clientStatus = "offline"; // 添加客户端状态变量
+
 // 导出变量和函数供其他脚本使用
 self.reconnectAttempts = reconnectAttempts;
 self.connectWebSocket = connectWebSocket;
@@ -42,12 +49,70 @@ chrome.runtime.onInstalled.addListener(function(details) {
         // 更新时也可以打开欢迎页面，或者打开更新日志页面
         // chrome.tabs.create({ url: "welcome.html" });
     }
+    
+    // 安装或更新时检查是否有任务需要处理
+    checkForTasks();
 });
+
+// 只在有任务时检查是否需要连接
+function checkForTasks() {
+    // 如果已经连接，或者已禁用，则不执行
+    if (isConnected || shouldDisableExtension) {
+        return;
+    }
+    
+    // 如果有待处理的任务，尝试连接
+    if (pendingDownloads.length > 0 || hasTasksToProcess) {
+        console.log("检测到有待处理任务，尝试连接");
+        connectIfNeeded();
+    }
+}
+
+// 检查是否需要连接，只在有下载任务时连接
+function connectIfNeeded() {
+    // 禁用模式下不连接
+    isExtensionDisabled(function(disabled) {
+        if (disabled) {
+            console.log("扩展已禁用，不连接到客户端");
+            return;
+        }
+        
+        // 设置标志，表示正在等待alive信号
+        isWaitingForSignal = true;
+        
+        // 只有当有新的下载任务或手动触发时才尝试连接
+        if (pendingDownloads.length > 0 || isManualReconnect) {
+            // 重置手动重连标志
+            isManualReconnect = false;
+            
+            // 如果当前已连接，无需再次连接
+            if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
+                console.log("已经连接到客户端，尝试发送待处理的下载任务");
+                sendPendingDownloads();
+                return;
+            }
+            
+            // 否则，连接并发送任务
+            connectWebSocket();
+        } else {
+            console.log("没有待处理的下载任务，不尝试连接");
+        }
+    });
+}
 
 // 创建 WebSocket 连接
 function connectWebSocket() {
+    // 如果已经连接，则不重复连接
+    if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
+        console.log("WebSocket已连接，不再重复连接");
+        return;
+    }
+    
     try {
-        console.log(`尝试连接到WebSocket，第${reconnectAttempts + 1}次尝试...`);
+        console.log("尝试连接到WebSocket...");
+        
+        // 标记正在等待信号
+        isWaitingForSignal = true;
         
         // 使用原来的端口20971
         let url = "ws://localhost:20971";
@@ -59,18 +124,26 @@ function connectWebSocket() {
             updateConnectionStatus(true);
             startHeartbeat();
             reconnectAttempts = 0; // 重置重连计数
+            lastActiveTime = Date.now(); // 更新活动时间
+            isWaitingForSignal = false; // 连接成功，不再等待信号
             
             // 更新导出的变量
             self.reconnectAttempts = reconnectAttempts;
             
             // 清除连接错误
             chrome.storage.local.remove("connectionError");
+            
+            // 发送所有待处理的下载
+            if (pendingDownloads.length > 0) {
+                sendPendingDownloads();
+            }
         };
 
         socket.onmessage = function(event) {
             try {
                 const message = JSON.parse(event.data);
                 console.log("收到消息:", message);
+                lastActiveTime = Date.now(); // 更新活动时间
                 
                 if (message.type === "version") {
                     // 保存版本信息到 chrome.storage.local
@@ -84,8 +157,37 @@ function connectWebSocket() {
                     console.log("收到心跳响应");
                 } else if (message.type === "alive") {
                     // 处理客户端发送的活着信号
-                    console.log("收到客户端Online信号");
+                    console.log("收到客户端Online信号:", message);
                     updateConnectionStatus(true);
+                    isWaitingForSignal = false; // 收到alive信号，不再等待
+                    clientStatus = "online"; // 更新客户端状态变量
+                    
+                    // 更新存储中的状态
+                    chrome.storage.local.set({ 
+                        isConnected: true,
+                        clientStatus: "online",
+                        connectionError: null // 清除连接错误
+                    });
+                    
+                    // 响应alive信号
+                    try {
+                        if (socket && socket.readyState === WebSocket.OPEN) {
+                            const response = {
+                                type: "alive",
+                                timestamp: Date.now(),
+                                response: "扩展已接收alive信号"
+                            };
+                            socket.send(JSON.stringify(response));
+                            console.log("已响应alive信号");
+                        }
+                    } catch (error) {
+                        console.error("响应alive信号时出错:", error);
+                    }
+                    
+                    // 如果有积压的下载任务，尝试发送
+                    if (pendingDownloads.length > 0) {
+                        sendPendingDownloads();
+                    }
                 } else {
                     console.log("收到其他消息:", message);
                 }
@@ -99,13 +201,18 @@ function connectWebSocket() {
             updateConnectionStatus(false);
             stopHeartbeat();
             
+            // 设置等待信号状态
+            isWaitingForSignal = true;
+            
             // 尝试记录更多错误信息
             chrome.storage.local.set({ 
-                connectionError: "WebSocket连接错误，等待客户端连接..." 
+                connectionError: "WebSocket连接错误，等待客户端启动..." 
             });
             
-            // 即使出错也继续尝试重连
-            scheduleReconnect();
+            // 连接失败，不再自动重连，只在收到alive信号时重连
+            console.log("连接失败，等待alive信号来触发重连");
+            
+            // 不再调用connectIfNeeded函数，而是直接返回
         };
 
         socket.onclose = (event) => {
@@ -113,42 +220,32 @@ function connectWebSocket() {
             updateConnectionStatus(false);
             stopHeartbeat();
             
+            // 设置等待信号状态
+            isWaitingForSignal = true;
+            
             // 存储当前状态
             chrome.storage.local.set({ 
-                connectionError: "等待客户端连接...",
+                connectionError: "等待客户端启动...",
                 clientStatus: "offline"
             });
             
-            // 始终尝试重连，不管重试次数
-            scheduleReconnect();
+            // 连接关闭，不再自动重连，只在收到alive信号时重连
+            console.log("连接关闭，等待alive信号来触发重连");
         };
     } catch (e) {
         console.error("WebSocket连接过程中发生异常:", e);
         updateConnectionStatus(false);
         
+        // 设置等待信号状态
+        isWaitingForSignal = true;
+        
         // 尝试记录更多错误信息
         chrome.storage.local.set({ 
-            connectionError: `等待客户端连接...` 
+            connectionError: `等待客户端启动...` 
         });
         
-        // 即使发生异常也继续尝试重连
-        scheduleReconnect();
-    }
-}
-
-// 安排重新连接
-function scheduleReconnect() {
-    if (!shouldDisableExtension) {
-        reconnectAttempts++;
-        // 更新导出的变量
-        self.reconnectAttempts = reconnectAttempts;
-        
-        // 每10次重连后增加日志，避免日志过多
-        if (reconnectAttempts % 10 === 1) {
-            console.log(`将在${RECONNECT_INTERVAL/1000}秒后重新连接，重连次数: ${reconnectAttempts}`);
-        }
-        
-        setTimeout(connectWebSocket, RECONNECT_INTERVAL);
+        // 连接失败，不再自动重连，只在收到alive信号时重连
+        console.log("连接出错，等待alive信号来触发重连");
     }
 }
 
@@ -157,19 +254,26 @@ function updateConnectionStatus(connected) {
     isConnected = connected;
     updateBadge(connected ? "connected" : "disconnected");
     updateStatus(connected);
+    lastActiveTime = Date.now(); // 更新活动时间
     
     // 更新客户端状态
-    chrome.storage.local.set({ clientStatus: connected ? "online" : "offline" });
+    clientStatus = connected ? "online" : "offline";
+    chrome.storage.local.set({ 
+        clientStatus: clientStatus,
+        isConnected: connected,
+        connectionError: connected ? null : "等待客户端连接..."
+    });
     
     // 如果连接恢复，尝试发送排队的下载
-    if (connected) {
+    if (connected && pendingDownloads.length > 0) {
         sendPendingDownloads();
     }
     
     // 通知所有打开的页面连接状态发生变化
     chrome.runtime.sendMessage({
         action: "connectionChanged",
-        isConnected: connected
+        isConnected: connected,
+        clientStatus: clientStatus
     }).catch(error => {
         // 忽略没有页面监听的错误
         console.debug("发送连接状态变化消息时出错:", error);
@@ -206,7 +310,7 @@ function startHeartbeat() {
                     console.log("已发送心跳包:", heartbeatData);
                 } catch (error) {
                     console.error("发送心跳包时出错:", error);
-                    // 如果发送心跳出错，尝试重新连接
+                    // 如果发送心跳出错，关闭连接
                     stopHeartbeat();
                     if (socket) {
                         try {
@@ -405,20 +509,33 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem) => {
         chrome.storage.local.get(["shouldDisableExtension"], (result) => {
             if (!result.shouldDisableExtension) {
                 console.log("Download started: ", downloadItem);
-                if (downloadItem.finalUrl.startsWith("http")) {
-                    // 发送下载信息到本地客户端，即使连接不成功也要尝试发送
-                    sendDownloadInfo({
+                
+                // 检查URL是否有效
+                if (downloadItem.finalUrl && downloadItem.finalUrl.startsWith("http")) {
+                    // 创建一个下载请求ID作为唯一标识
+                    const requestId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    
+                    // 发送下载信息到本地客户端
+                    const result = sendDownloadInfo({
                         url: downloadItem.finalUrl,
                         filename: downloadItem.filename,
                         size: downloadItem.totalBytes,
                         mimeType: downloadItem.mime,
-                        referrer: downloadItem.referrer
+                        referrer: downloadItem.referrer,
+                        requestId: requestId // 添加请求ID用于跟踪
                     });
                     
-                    // 取消原始下载，让客户端接管
-                    chrome.downloads.cancel(downloadItem.id, () => {
-                        console.log(`已取消原下载 ${downloadItem.id} 并转发至下载器`);
-                    });
+                    // 仅当成功发送到客户端时才取消原始下载
+                    if (result) {
+                        // 取消原始下载，让客户端接管
+                        chrome.downloads.cancel(downloadItem.id, () => {
+                            console.log(`已取消原下载 ${downloadItem.id} 并转发至下载器`);
+                        });
+                    } else {
+                        console.warn(`未能成功发送下载请求，保留原始下载 ${downloadItem.id}`);
+                    }
+                } else {
+                    console.log(`跳过非HTTP下载: ${downloadItem.id}`);
                 }
             }
         });
@@ -447,48 +564,6 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     ["requestHeaders", "extraHeaders"] // 需要访问请求头
 );
 
-// 修改 sendDownloadInfo 函数，将请求信息发送到 WebSocket
-function sendDownloadInfo(requestInfo) {
-    try {
-        // 准备发送的数据
-        const downloadData = {
-            type: 'download', // 确保始终包含type字段
-            url: requestInfo.url,
-            filename: requestInfo.filename,
-            size: requestInfo.size || -1,
-            mimeType: requestInfo.mimeType,
-            timestamp: Date.now(),
-            referrer: requestInfo.referrer,
-            headers: {
-                'User-Agent': navigator.userAgent,
-                'Referer': requestInfo.referrer
-            }
-        };
-        
-        // 如果WebSocket连接可用，直接发送数据
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify(downloadData));
-            console.log("已发送下载信息到本地客户端:", downloadData);
-            
-            // 使用批处理添加到队列（虽然已直接发送，但仍记录到批处理中用于通知）
-            addToDownloadQueue(downloadData);
-            
-            return true;
-        } else {
-            // 如果WebSocket未连接，将数据添加到待发送队列
-            console.warn("WebSocket未连接，将下载任务加入队列:", downloadData.filename);
-            
-            // 使用批处理添加到队列
-            addToDownloadQueue(downloadData);
-            
-            return false;
-        }
-    } catch (error) {
-        console.error("发送下载信息时出错:", error);
-        return false;
-    }
-}
-
 // 在连接成功后发送所有排队的下载
 function sendPendingDownloads() {
     if (pendingDownloads.length > 0 && socket && socket.readyState === WebSocket.OPEN) {
@@ -498,7 +573,10 @@ function sendPendingDownloads() {
         const downloads = [...pendingDownloads];
         pendingDownloads = [];
         
-        // 使用新的通知系统
+        // 清空存储
+        chrome.storage.local.set({ pendingDownloads: [] });
+        
+        // 使用新的通知系统 - 只发送一次通知
         showNotification({
             type: 'basic',
             iconUrl: 'icon128.png',
@@ -515,6 +593,8 @@ function sendPendingDownloads() {
             setTimeout(() => {
                 try {
                     if (socket && socket.readyState === WebSocket.OPEN) {
+                        // 添加一个发送时间戳，避免重复处理
+                        download.sendTime = Date.now();
                         socket.send(JSON.stringify(download));
                         successCount++;
                         console.log(`成功发送排队的下载任务 ${index+1}/${downloads.length}: ${download.filename}`);
@@ -562,90 +642,179 @@ function clearDownloadQueue() {
     return queueSize;
 }
 
-// 启动 WebSocket 连接
-connectWebSocket();
-
-// 在扩展启动时检查禁用状态和加载等待队列
-chrome.storage.local.get(["shouldDisableExtension", "pendingDownloads"], (result) => {
-    shouldDisableExtension = result.shouldDisableExtension || false;
-    console.log("插件禁用状态:", shouldDisableExtension);
+// 修改 sendDownloadInfo 函数，将请求信息发送到 WebSocket
+function sendDownloadInfo(requestInfo) {
+    hasTasksToProcess = true; // 标记有任务需要处理
     
-    // 加载之前保存的下载队列
-    if (result.pendingDownloads && Array.isArray(result.pendingDownloads)) {
-        pendingDownloads = result.pendingDownloads;
-        console.log(`已加载${pendingDownloads.length}个待处理的下载任务`);
-    }
-});
-
-// 监听来自popup或content script的消息
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "resetConnection") {
-        // 重新连接
-        if (socket) {
-            try {
-                socket.close();
-            } catch (e) {
-                console.error("关闭WebSocket时出错:", e);
+    try {
+        // 准备发送的数据
+        const downloadData = {
+            type: 'download', // 确保始终包含type字段
+            url: requestInfo.url,
+            filename: requestInfo.filename,
+            size: requestInfo.size || -1,
+            mimeType: requestInfo.mimeType,
+            timestamp: Date.now(),
+            referrer: requestInfo.referrer,
+            headers: {
+                'User-Agent': navigator.userAgent,
+                'Referer': requestInfo.referrer
             }
-        }
-        reconnectAttempts = 0;
-        connectWebSocket();
-        sendResponse({ success: true });
-        return true;
-    } 
-    else if (message.action === "reconnect") {
-        // 重新连接
+        };
+        
+        // 在有新任务时，尝试连接
         if (!isConnected) {
-            reconnectAttempts = 0;
-            connectWebSocket();
+            console.log("有新的下载任务，尝试连接");
+            connectWebSocket(); // 直接尝试连接
         }
-        sendResponse({ success: true });
-        return true;
-    }
-    else if (message.action === "manualDownload") {
-        // 处理手动下载请求
-        if (isConnected && socket && socket.readyState === WebSocket.OPEN) {
-            try {
-                const success = sendDownloadInfo(message.downloadInfo);
-                sendResponse({ success });
-            } catch (error) {
-                console.error("处理下载请求时出错:", error);
-                sendResponse({ success: false, error: error.message });
-            }
-        } else {
-            sendResponse({ 
-                success: false, 
-                error: "未连接到下载管理器，请确保应用程序正在运行" 
+        
+        // 如果WebSocket连接可用，直接发送数据
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(downloadData));
+            console.log("已发送下载信息到本地客户端:", downloadData);
+            
+            // 不再将已发送的下载加入队列，避免重复处理
+            // 只添加通知提示用户下载已成功发送
+            showNotification({
+                type: 'basic',
+                iconUrl: 'icon128.png',
+                title: '下载已发送',
+                message: `文件 "${downloadData.filename}" 已发送至下载器`
             });
+            
+            return true;
+        } else {
+            // 如果WebSocket未连接，将数据添加到待发送队列
+            console.warn("WebSocket未连接，将下载任务加入队列:", downloadData.filename);
+            
+            // 使用批处理添加到队列
+            addToDownloadQueue(downloadData);
+            
+            return false;
+        }
+    } catch (error) {
+        console.error("发送下载信息时出错:", error);
+        return false;
+    } finally {
+        // 处理完成后，在短时间内重置任务标记
+        setTimeout(() => {
+            hasTasksToProcess = false;
+        }, 5000);
+    }
+}
+
+// 在扩展启动时初始化
+function initialize() {
+    // 在扩展启动时检查禁用状态和加载等待队列
+    chrome.storage.local.get(["shouldDisableExtension", "pendingDownloads"], (result) => {
+        shouldDisableExtension = result.shouldDisableExtension || false;
+        console.log("插件禁用状态:", shouldDisableExtension);
+        
+        // 加载之前保存的下载队列
+        if (result.pendingDownloads && Array.isArray(result.pendingDownloads)) {
+            pendingDownloads = result.pendingDownloads;
+            console.log(`已加载${pendingDownloads.length}个待处理的下载任务`);
+        }
+        
+        // 如果扩展未禁用，尝试立即连接一次
+        if (!shouldDisableExtension) {
+            console.log("扩展启动时尝试连接一次");
+            // 不使用connectIfNeeded，直接调用connectWebSocket
+            setTimeout(connectWebSocket, 1000);
+        }
+    });
+    
+    // 设置一个特殊监听器，监听来自客户端的HTTP请求
+    setupGlobalTcpListener();
+    
+    // 设置一个监听扩展消息的处理器，用于处理通过其他渠道收到的alive信号
+    chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+        if (request && request.action === "receivedAliveSignal") {
+            console.log("通过消息通道收到alive信号，尝试重新连接");
+            connectWebSocket();
+            sendResponse({result: "attempting_connection"});
+            return true;
         }
         return true;
-    }
-    else if (message.action === "getConnectionStatus") {
-        // 返回当前连接状态
+    });
+}
+
+// 启动初始化
+initialize();
+
+// 手动触发重连
+function manualReconnect() {
+    isManualReconnect = true;
+    console.log("用户手动触发重连");
+    connectIfNeeded();
+}
+
+// 处理来自popup或其他页面的消息
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+    console.log("收到内部消息:", request);
+    
+    if (request.action === "getConnectionStatus") {
         sendResponse({
             isConnected: isConnected,
-            reconnectAttempts: reconnectAttempts
+            pendingDownloads: pendingDownloads.length,
+            clientStatus: clientStatus
         });
-        return true;
-    }
-    else if (message.action === "clearQueue") {
+    } else if (request.action === "manualReconnect") {
+        // 手动触发重连
+        manualReconnect();
+        sendResponse({ result: "reconnecting" });
+    } else if (request.action === "clearQueue") {
         // 清空下载队列
-        const clearedCount = clearDownloadQueue();
-        sendResponse({ 
-            success: true, 
-            clearedCount: clearedCount 
-        });
-        return true;
+        clearDownloadQueue();
+        sendResponse({ result: "queue_cleared" });
     }
-    else if (message.action === "queueUpdated") {
-        // 队列已通过popup更新
-        if (message.pendingDownloads !== undefined) {
-            pendingDownloads = message.pendingDownloads;
-            chrome.storage.local.set({ pendingDownloads: pendingDownloads });
-            sendResponse({ success: true });
-        } else {
-            sendResponse({ success: false, error: "未提供更新的队列" });
-        }
-        return true;
-    }
+    
+    return true; // 保持消息通道开放以支持异步响应
 });
+
+// 设置一个全局的TCP监听端口，用于接收来自客户端的alive信号
+function setupGlobalTcpListener() {
+    // 这个函数在浏览器环境中无法直接实现TCP监听
+    // 我们需要使用其他方式让客户端触发连接
+    console.log("设置全局TCP监听器");
+    
+    // 创建一个特殊的HTTP请求监听，用于检测alive信号
+    // 这只是一个模拟方案，实际上需要通过其他方式
+    
+    // 设置一个定期检查本地文件或HTTP请求的功能
+    setInterval(checkAliveSignal, 5000); // 每5秒检查一次
+}
+
+// 检查是否有新的alive信号
+function checkAliveSignal() {
+    // 在浏览器环境中，我们可以尝试通过HTTP请求检查客户端状态
+    
+    try {
+        // 创建一个特殊的HTTP请求到本地客户端
+        const checkUrl = "http://localhost:20972/status";
+        
+        fetch(checkUrl, { 
+            method: 'GET',
+            mode: 'no-cors', // 非CORS模式
+            cache: 'no-cache',
+            headers: {
+                'X-Extension-Check': 'true'
+            },
+            timeout: 1000 // 1秒超时
+        })
+        .then(response => {
+            console.log("收到客户端状态响应");
+            // 如果能收到响应，说明客户端在线
+            if (!isConnected) {
+                console.log("检测到客户端在线，尝试重新连接");
+                connectWebSocket();
+            }
+        })
+        .catch(error => {
+            // 忽略错误，客户端可能未启动
+            console.debug("检查客户端状态失败，可能未启动:", error);
+        });
+    } catch (error) {
+        console.debug("尝试检查客户端状态时出错:", error);
+    }
+}
