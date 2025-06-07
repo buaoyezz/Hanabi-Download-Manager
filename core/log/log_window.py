@@ -632,7 +632,7 @@ class LogWindow(QMainWindow):
             with open(file_path, 'w', encoding='utf-8') as f:
                 # 写入头部信息
                 f.write("="*80 + "\n")
-                f.write(f"花火下载管理器日志导出\n")
+                f.write(f"Hanabi Download Manager日志导出\n")
                 f.write(f"导出时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"日志条数: {len(self.log_buffer)}\n")
                 f.write("="*80 + "\n\n")
