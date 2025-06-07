@@ -281,6 +281,12 @@ if __name__ == "__main__":
         start_minimized = True
         log.info("检测到静默启动参数，应用将在启动时最小化到托盘")
     
+    # 检查是否指定了静默启动参数
+    silent_mode = is_silent_mode()
+    if silent_mode:
+        log.info("检测到静默启动参数，应用将在启动时最小化到托盘")
+        start_minimized = True
+    
     # 如果指定了--debug_windows参数，显示日志窗口
     if args.debug_windows:
         try:
