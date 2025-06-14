@@ -66,6 +66,9 @@ class ConfigManager:
                 "auto_start": False,           # 开机自启动
                 "check_update": True,          # 启动时检查更新
                 "restore_tasks": True          # 启动时恢复未完成的任务
+            },
+            "window": {
+                "start_minimized": False      # 是否启动时最小化到托盘
             }
         }
         
@@ -268,6 +271,30 @@ class ConfigManager:
         network_config["user_agent"] = user_agent
         self.set("network", network_config)
         return True
+
+    def get_auto_start(self):
+        """获取是否开机自启动设置"""
+        return self.get_setting("startup", "auto_start", False)
+    
+    def set_auto_start(self, enabled):
+        """设置是否开机自启动
+        
+        Args:
+            enabled: 是否启用开机自启动
+        """
+        return self.set_setting("startup", "auto_start", bool(enabled))
+    
+    def get_start_minimized(self):
+        """获取是否启动时最小化到托盘"""
+        return self.get_setting("window", "start_minimized", False)
+    
+    def set_start_minimized(self, enabled):
+        """设置是否启动时最小化到托盘
+        
+        Args:
+            enabled: 是否启动时最小化到托盘
+        """
+        return self.set_setting("window", "start_minimized", bool(enabled))
 
 # 全局访问点
 config = ConfigManager()

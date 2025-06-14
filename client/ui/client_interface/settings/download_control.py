@@ -45,6 +45,8 @@ class DownloadControlWidget(QWidget):
             chunk_size = download_config.get("chunk_size", 1024 * 1024) # 从 thread_control 移入
             # 添加默认分段数
             default_segments = download_config.get("default_segments", 8)
+            # 疯狂模式设置
+            crazy_mode = download_config.get("crazy_mode", False)
             
             # 下载路径设置
             save_path = download_config.get("save_path", 
@@ -58,6 +60,7 @@ class DownloadControlWidget(QWidget):
             # 打印调试信息
             print(f"[DEBUG] {i18n.get_text('load_config')} - {i18n.get_text('thread_count')}: {thread_count}, {i18n.get_text('dynamic_threads')}: {dynamic_threads}")
             print(f"[DEBUG] {i18n.get_text('load_config')} - {i18n.get_text('max_thread_count')}: {max_threads}, {i18n.get_text('default_segments')}: {default_segments}")
+            print(f"[DEBUG] {i18n.get_text('load_config')} - Crazy Mode: {crazy_mode}")
             
             # 设置控件值
             self.max_tasks_spinbox.setValue(max_tasks)
@@ -67,6 +70,7 @@ class DownloadControlWidget(QWidget):
             self.default_segments_spinbox.setValue(default_segments)
             self.buffer_spinbox.setValue(buffer_size // 1024) # KB
             self.chunk_spinbox.setValue(chunk_size // (1024 * 1024)) # MB
+            self.crazy_mode_checkbox.setChecked(crazy_mode)
             
             self.path_edit.setText(save_path)
             self.auto_organize_checkbox.setChecked(auto_organize)
@@ -76,6 +80,9 @@ class DownloadControlWidget(QWidget):
             
             # 更新UI状态
             self.update_ui_state()
+            
+            # 更新线程范围
+            self.update_thread_range()
             
         except Exception as e:
             self.settings_applied.emit(False, f"{i18n.get_text('download_settings_load_failed')}: {str(e)}")
@@ -167,19 +174,58 @@ class DownloadControlWidget(QWidget):
         thread_count_layout.addWidget(self.thread_count_label)
         
         self.thread_count_spinbox = CustomSpinBox()
-        self.thread_count_spinbox.setRange(1, 64)
+        self.thread_count_spinbox.setRange(1, 32)
         self.thread_count_spinbox.setValue(8)
         self.font_manager.apply_font(self.thread_count_spinbox)
         thread_count_layout.addWidget(self.thread_count_spinbox)
         
         thread_slider = CustomSlider(Qt.Horizontal)
-        thread_slider.setRange(1, 64)
+        thread_slider.setRange(1, 32)
         thread_slider.setValue(8)
         thread_slider.valueChanged.connect(self.thread_count_spinbox.setValue)
         self.thread_count_spinbox.valueChanged.connect(thread_slider.setValue)
+        thread_slider.setObjectName("thread_slider")  # 添加对象名称
         thread_count_layout.addWidget(thread_slider, 1)
         
         thread_layout.addLayout(thread_count_layout)
+        
+        # 疯狂模式 (Crazy Mode)
+        crazy_mode_layout = QVBoxLayout()
+        crazy_mode_layout.setSpacing(5)
+        self.crazy_mode_checkbox = CustomCheckBox(i18n.get_text("enable_crazy_mode") or "启用疯狂模式 (64-128线程)")
+        self.crazy_mode_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #FF5252;
+                font-weight: bold;
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 1px solid #3C3C3C;
+                background: #2D2D30;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                border: 1px solid #FF5252;
+                background-color: #FF5252;
+                border-radius: 3px;
+            }
+        """)
+        self.font_manager.apply_font(self.crazy_mode_checkbox)
+        self.crazy_mode_checkbox.stateChanged.connect(self.update_thread_range)
+        crazy_mode_layout.addWidget(self.crazy_mode_checkbox)
+        
+        # 疯狂模式警告
+        self.crazy_mode_warning = QLabel(i18n.get_text("crazy_mode_warning") or "警告：疯狂模式可能导致下载文件损坏、服务器拒绝连接或系统资源耗尽！")
+        self.crazy_mode_warning.setWordWrap(True)
+        self.crazy_mode_warning.setStyleSheet("color: #FF5252; margin-left: 23px;")
+        self.font_manager.apply_font(self.crazy_mode_warning)
+        crazy_mode_layout.addWidget(self.crazy_mode_warning)
+        
+        thread_layout.addLayout(crazy_mode_layout)
         
         # 动态线程
         dynamic_thread_layout = QVBoxLayout()
@@ -236,6 +282,7 @@ class DownloadControlWidget(QWidget):
         max_thread_slider.setValue(32)
         max_thread_slider.valueChanged.connect(self.max_threads_spinbox.setValue)
         self.max_threads_spinbox.valueChanged.connect(max_thread_slider.setValue)
+        max_thread_slider.setObjectName("max_thread_slider")  # 添加对象名称
         max_thread_layout.addWidget(max_thread_slider, 1)
         
         thread_layout.addLayout(max_thread_layout)
@@ -259,6 +306,7 @@ class DownloadControlWidget(QWidget):
         segment_slider.setValue(8)
         segment_slider.valueChanged.connect(self.default_segments_spinbox.setValue)
         self.default_segments_spinbox.valueChanged.connect(segment_slider.setValue)
+        segment_slider.setObjectName("segment_slider")  # 添加对象名称，便于后续查找
         segment_layout.addWidget(segment_slider, 1)
         
         thread_layout.addLayout(segment_layout)
@@ -389,6 +437,38 @@ class DownloadControlWidget(QWidget):
         self.organize_desc.setStyleSheet("color: #9E9E9E; margin-left: 23px;")
         self.font_manager.apply_font(self.organize_desc)
         path_layout.addWidget(self.organize_desc)
+        
+        # 添加分类路径设置按钮
+        category_btn_layout = QHBoxLayout()
+        category_btn_layout.setContentsMargins(0, 5, 0, 0)
+        
+        category_label = QLabel(i18n.get_text("category_paths_settings") or "分类路径设置:")
+        category_label.setStyleSheet("color: #FFFFFF; margin-left: 23px;")
+        self.font_manager.apply_font(category_label)
+        category_btn_layout.addWidget(category_label)
+        
+        self.category_settings_button = QPushButton(i18n.get_text("configure") or "配置")
+        self.category_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3C3C3C;
+                border: none;
+                border-radius: 4px;
+                color: #FFFFFF;
+                padding: 5px 15px;
+            }
+            QPushButton:hover {
+                background-color: #4C4C4C;
+            }
+            QPushButton:pressed {
+                background-color: #2C2C2C;
+            }
+        """)
+        self.font_manager.apply_font(self.category_settings_button)
+        self.category_settings_button.clicked.connect(self.show_category_settings)
+        category_btn_layout.addWidget(self.category_settings_button)
+        category_btn_layout.addStretch()
+        
+        path_layout.addLayout(category_btn_layout)
         
         # 清理恢复文件按钮
         cleanup_layout = QHBoxLayout()
@@ -620,9 +700,8 @@ class DownloadControlWidget(QWidget):
         self.settings_applied.emit(True, i18n.get_text("settings_reset"))
         
     def apply_settings(self):
-        """应用设置"""
         try:
-            # 获取设置值
+            # 获取当前设置值
             max_tasks = self.max_tasks_spinbox.value()
             thread_count = self.thread_count_spinbox.value()
             dynamic_threads = self.dynamic_threads_checkbox.isChecked()
@@ -630,6 +709,7 @@ class DownloadControlWidget(QWidget):
             default_segments = self.default_segments_spinbox.value()
             buffer_size = self.buffer_spinbox.value() * 1024  # 转换为字节
             chunk_size = self.chunk_spinbox.value() * 1024 * 1024  # 转换为字节
+            crazy_mode = self.crazy_mode_checkbox.isChecked()
             
             save_path = self.path_edit.text()
             auto_organize = self.auto_organize_checkbox.isChecked()
@@ -637,48 +717,40 @@ class DownloadControlWidget(QWidget):
             auto_start = self.auto_start_checkbox.isChecked()
             max_retries = self.max_retries_spinbox.value()
             
-            # 验证下载路径
-            if not save_path or not os.path.isdir(save_path):
-                if not save_path:
-                    save_path = str(Path.home() / "Downloads")
-                    try:
-                        os.makedirs(save_path, exist_ok=True)
-                    except Exception as e:
-                        self.settings_applied.emit(False, f"{i18n.get_text('create_download_dir_failed')}: {str(e)}")
-                        return
-                else:
-                    self.settings_applied.emit(False, i18n.get_text("invalid_download_path"))
-                    return
+            # 保存设置
+            self.config_manager.set_setting("download", "max_tasks", max_tasks)
+            self.config_manager.set_setting("download", "thread_count", thread_count)
+            self.config_manager.set_setting("download", "dynamic_threads", dynamic_threads)
+            self.config_manager.set_setting("download", "max_thread_count", max_threads)
+            self.config_manager.set_setting("download", "default_segments", default_segments)
+            self.config_manager.set_setting("download", "buffer_size", buffer_size)
+            self.config_manager.set_setting("download", "chunk_size", chunk_size)
+            self.config_manager.set_setting("download", "crazy_mode", crazy_mode)
             
-            # 更新配置
-            download_config = {
-                "thread_count": thread_count,
-                "dynamic_threads": dynamic_threads,
-                "max_thread_count": max_threads,
-                "max_tasks": max_tasks,
-                "buffer_size": buffer_size,
-                "chunk_size": chunk_size,
-                "default_segments": default_segments,
-                "save_path": save_path,
-                "auto_organize": auto_organize,
-                "auto_start": auto_start,
-                "max_retries": max_retries
-            }
+            self.config_manager.set_setting("download", "save_path", save_path)
+            self.config_manager.set_setting("download", "auto_organize", auto_organize)
+            
+            self.config_manager.set_setting("download", "auto_start", auto_start)
+            self.config_manager.set_setting("download", "max_retries", max_retries)
             
             # 保存配置
-            self.config_manager.set("download", download_config)
-            self.config_manager.save_config()
-            
-            # 应用动态线程设置
-            if not dynamic_threads:
-                self.disable_dynamic_threads()
-            
-            # 通知成功
-            self.settings_applied.emit(True, i18n.get_text("download_settings_saved"))
-            
+            if self.config_manager.save_config():
+                # 显示成功通知
+                self.notify_manager.show_message(i18n.get_text("settings_saved"), i18n.get_text("download_settings_updated"))
+                self.settings_applied.emit(True, i18n.get_text("download_settings_updated"))
+                
+                # 如果启用了疯狂模式，显示警告
+                if crazy_mode:
+                    CustomMessageBox.warning(
+                        self, 
+                        i18n.get_text("warning") or "警告", 
+                        i18n.get_text("crazy_mode_enabled_warning") or "您已启用疯狂模式！使用过高的线程数可能导致下载文件损坏、服务器拒绝连接或系统资源耗尽。请谨慎使用。"
+                    )
+            else:
+                raise Exception(i18n.get_text("settings_save_failed"))
         except Exception as e:
-            # 通知失败
-            self.settings_applied.emit(False, f"{i18n.get_text('save_settings_failed')}: {str(e)}")
+            self.settings_applied.emit(False, f"{i18n.get_text('error')}: {str(e)}")
+            CustomMessageBox.error(self, i18n.get_text("error"), str(e))
 
     def disable_dynamic_threads(self):
         """禁用动态线程"""
@@ -743,3 +815,355 @@ class DownloadControlWidget(QWidget):
         except Exception as e:
             NotifyManager.error(f"清理失败，清理断点续传文件失败: {e}")
             logging.error(f"清理断点续传文件失败: {e}")
+
+    def update_thread_range(self):
+        """更新线程范围"""
+        dynamic_enabled = self.dynamic_threads_checkbox.isChecked()
+        crazy_mode = self.crazy_mode_checkbox.isChecked()
+        
+        # 更新线程数范围
+        if crazy_mode:
+            # 疯狂模式：允许64-128线程
+            self.thread_count_spinbox.setRange(1, 128)
+            thread_slider = self.findChild(CustomSlider, "thread_slider")
+            if thread_slider:
+                thread_slider.setRange(1, 128)
+            
+            # 更新最大线程数范围
+            self.max_threads_spinbox.setRange(1, 128)
+            max_thread_slider = self.findChild(CustomSlider, "max_thread_slider")
+            if max_thread_slider:
+                max_thread_slider.setRange(1, 128)
+            
+            # 更新默认分段数范围，在疯狂模式下也允许更高的分段数
+            self.default_segments_spinbox.setRange(1, 64)  # 在疯狂模式下允许最多64个分段
+            segment_slider = self.findChild(CustomSlider, "segment_slider")
+            if segment_slider:
+                segment_slider.setRange(1, 64)
+            
+            # 显示警告
+            self.crazy_mode_warning.setVisible(True)
+        else:
+            # 普通模式：最多32线程
+            self.thread_count_spinbox.setRange(1, 32)
+            thread_slider = self.findChild(CustomSlider, "thread_slider")
+            if thread_slider:
+                thread_slider.setRange(1, 32)
+            
+            # 更新最大线程数范围
+            self.max_threads_spinbox.setRange(1, 32)
+            max_thread_slider = self.findChild(CustomSlider, "max_thread_slider")
+            if max_thread_slider:
+                max_thread_slider.setRange(1, 32)
+            
+            # 更新默认分段数范围，确保与最大线程数一致
+            self.default_segments_spinbox.setRange(1, 32)
+            segment_slider = self.findChild(CustomSlider, "segment_slider")
+            if segment_slider:
+                segment_slider.setRange(1, 32)
+            
+            # 隐藏警告
+            self.crazy_mode_warning.setVisible(False)
+        
+        # 控制是否启用线程数控件
+        self.thread_count_spinbox.setEnabled(not dynamic_enabled)
+        self.max_threads_spinbox.setEnabled(dynamic_enabled)
+
+    def show_category_settings(self):
+        """显示分类路径设置对话框"""
+        try:
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QScrollArea, QWidget
+            from core.download_core.file_organizer import get_file_organizer
+            
+            # 获取文件整理器实例
+            organizer = get_file_organizer()
+            
+            # 创建对话框
+            dialog = QDialog(self)
+            dialog.setWindowTitle(i18n.get_text("category_paths_settings") or "分类路径设置")
+            dialog.setMinimumWidth(500)
+            dialog.setMinimumHeight(400)
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #1E1E1E;
+                    color: #FFFFFF;
+                }
+                QLabel {
+                    color: #FFFFFF;
+                }
+                QPushButton {
+                    background-color: #3C3C3C;
+                    border: none;
+                    border-radius: 4px;
+                    color: #FFFFFF;
+                    padding: 5px 15px;
+                    min-width: 80px;
+                }
+                QPushButton:hover {
+                    background-color: #4C4C4C;
+                }
+                QPushButton:pressed {
+                    background-color: #2C2C2C;
+                }
+                QLineEdit {
+                    background-color: #2D2D30;
+                    border: 1px solid #3C3C3C;
+                    border-radius: 4px;
+                    color: #FFFFFF;
+                    padding: 5px;
+                }
+            """)
+            
+            # 主布局
+            main_layout = QVBoxLayout(dialog)
+            main_layout.setContentsMargins(20, 20, 20, 20)
+            main_layout.setSpacing(15)
+            
+            # 说明文本
+            description = QLabel(i18n.get_text("category_paths_description") or "为不同类型的文件设置自定义保存路径。如果不设置，将使用默认下载路径下的分类文件夹。")
+            description.setWordWrap(True)
+            self.font_manager.apply_font(description)
+            main_layout.addWidget(description)
+            
+            # 创建滚动区域
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setStyleSheet("""
+                QScrollArea {
+                    border: 1px solid #3C3C3C;
+                    border-radius: 4px;
+                    background-color: #1E1E1E;
+                }
+                QScrollBar:vertical {
+                    border: none;
+                    background: #2D2D30;
+                    width: 10px;
+                    margin: 0px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #3C3C3C;
+                    min-height: 20px;
+                    border-radius: 5px;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    height: 0px;
+                }
+            """)
+            
+            # 创建滚动区域内容
+            scroll_content = QWidget()
+            scroll_layout = QVBoxLayout(scroll_content)
+            scroll_layout.setContentsMargins(10, 10, 10, 10)
+            scroll_layout.setSpacing(10)
+            
+            # 获取所有分类
+            categories = organizer.DEFAULT_CATEGORIES
+            
+            # 获取当前配置的分类路径
+            category_paths = self.config_manager.get_setting("download", "category_paths", {})
+            
+            # 创建路径设置控件
+            path_widgets = {}
+            
+            for category in categories:
+                # 创建水平布局
+                row_layout = QHBoxLayout()
+                
+                # 分类标签
+                label = QLabel(f"{category}:")
+                label.setMinimumWidth(80)
+                self.font_manager.apply_font(label)
+                row_layout.addWidget(label)
+                
+                # 路径显示标签
+                path_label = QLabel(category_paths.get(category, ""))
+                path_label.setStyleSheet("color: #9E9E9E;")
+                self.font_manager.apply_font(path_label)
+                row_layout.addWidget(path_label, 1)
+                
+                # 浏览按钮
+                browse_button = QPushButton(i18n.get_text("browse") or "浏览")
+                self.font_manager.apply_font(browse_button)
+                row_layout.addWidget(browse_button)
+                
+                # 清除按钮
+                clear_button = QPushButton(i18n.get_text("clear") or "清除")
+                clear_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #455A64;
+                    }
+                    QPushButton:hover {
+                        background-color: #546E7A;
+                    }
+                    QPushButton:pressed {
+                        background-color: #37474F;
+                    }
+                """)
+                self.font_manager.apply_font(clear_button)
+                row_layout.addWidget(clear_button)
+                
+                # 保存控件引用
+                path_widgets[category] = {
+                    'label': path_label,
+                    'browse_button': browse_button,
+                    'clear_button': clear_button
+                }
+                
+                # 添加到布局
+                scroll_layout.addLayout(row_layout)
+                
+                # 连接按钮信号
+                def make_browse_handler(cat):
+                    return lambda: self.browse_category_path(cat, path_widgets[cat]['label'])
+                
+                def make_clear_handler(cat):
+                    return lambda: self.clear_category_path(cat, path_widgets[cat]['label'])
+                
+                browse_button.clicked.connect(make_browse_handler(category))
+                clear_button.clicked.connect(make_clear_handler(category))
+            
+            # 添加弹性空间
+            scroll_layout.addStretch(1)
+            
+            # 设置滚动区域的内容
+            scroll_area.setWidget(scroll_content)
+            main_layout.addWidget(scroll_area)
+            
+            # 底部按钮
+            button_layout = QHBoxLayout()
+            button_layout.setContentsMargins(0, 10, 0, 0)
+            button_layout.setSpacing(10)
+            
+            # 重置按钮
+            reset_button = QPushButton(i18n.get_text("reset") or "重置")
+            reset_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #455A64;
+                }
+                QPushButton:hover {
+                    background-color: #546E7A;
+                }
+                QPushButton:pressed {
+                    background-color: #37474F;
+                }
+            """)
+            self.font_manager.apply_font(reset_button)
+            button_layout.addWidget(reset_button)
+            
+            button_layout.addStretch()
+            
+            # 关闭按钮
+            close_button = QPushButton(i18n.get_text("close") or "关闭")
+            close_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #7E57C2;
+                }
+                QPushButton:hover {
+                    background-color: #9575CD;
+                }
+                QPushButton:pressed {
+                    background-color: #673AB7;
+                }
+            """)
+            self.font_manager.apply_font(close_button)
+            button_layout.addWidget(close_button)
+            
+            main_layout.addLayout(button_layout)
+            
+            # 连接按钮信号
+            reset_button.clicked.connect(lambda: self.reset_category_paths(path_widgets))
+            close_button.clicked.connect(dialog.accept)
+            
+            # 显示对话框
+            dialog.exec()
+            
+        except Exception as e:
+            logging.error(f"显示分类路径设置对话框失败: {e}")
+            NotifyManager.error(f"显示分类路径设置对话框失败: {e}")
+    
+    def browse_category_path(self, category, path_label):
+        """浏览分类路径"""
+        try:
+            # 获取当前路径
+            current_path = path_label.text() or self.path_edit.text() or str(Path.home())
+            
+            # 打开文件夹选择对话框
+            folder = QFileDialog.getExistingDirectory(
+                self, 
+                i18n.get_text("select_category_folder").format(category=category) or f"选择{category}分类文件夹",
+                current_path
+            )
+            
+            if folder:
+                # 更新标签
+                path_label.setText(folder)
+                
+                # 更新配置
+                category_paths = self.config_manager.get_setting("download", "category_paths", {})
+                category_paths[category] = folder
+                self.config_manager.set_setting("download", "category_paths", category_paths)
+                self.config_manager.save_config()
+                
+                # 更新文件整理器
+                try:
+                    from core.download_core.file_organizer import get_file_organizer
+                    organizer = get_file_organizer()
+                    organizer.set_category_path(category, folder)
+                except Exception as e:
+                    logging.error(f"更新文件整理器分类路径失败: {e}")
+                
+                NotifyManager.info(f"{category}分类路径已设置")
+        except Exception as e:
+            logging.error(f"浏览分类路径失败: {e}")
+            NotifyManager.error(f"浏览分类路径失败: {e}")
+    
+    def clear_category_path(self, category, path_label):
+        """清除分类路径"""
+        try:
+            # 清除标签
+            path_label.setText("")
+            
+            # 更新配置
+            category_paths = self.config_manager.get_setting("download", "category_paths", {})
+            if category in category_paths:
+                del category_paths[category]
+                self.config_manager.set_setting("download", "category_paths", category_paths)
+                self.config_manager.save_config()
+                
+                # 更新文件整理器
+                try:
+                    from core.download_core.file_organizer import get_file_organizer
+                    organizer = get_file_organizer()
+                    # 重置为默认路径
+                    organizer.category_paths.pop(category, None)
+                except Exception as e:
+                    logging.error(f"重置文件整理器分类路径失败: {e}")
+                
+                NotifyManager.info(f"{category}分类路径已清除")
+        except Exception as e:
+            logging.error(f"清除分类路径失败: {e}")
+            NotifyManager.error(f"清除分类路径失败: {e}")
+    
+    def reset_category_paths(self, path_widgets):
+        """重置所有分类路径"""
+        try:
+            # 清除所有标签
+            for category, widgets in path_widgets.items():
+                widgets['label'].setText("")
+            
+            # 更新配置
+            self.config_manager.set_setting("download", "category_paths", {})
+            self.config_manager.save_config()
+            
+            # 更新文件整理器
+            try:
+                from core.download_core.file_organizer import get_file_organizer
+                organizer = get_file_organizer()
+                organizer.category_paths = {}
+            except Exception as e:
+                logging.error(f"重置文件整理器所有分类路径失败: {e}")
+            
+            NotifyManager.info("所有分类路径已重置")
+        except Exception as e:
+            logging.error(f"重置所有分类路径失败: {e}")
+            NotifyManager.error(f"重置所有分类路径失败: {e}")
