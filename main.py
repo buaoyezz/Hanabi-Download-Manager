@@ -16,7 +16,10 @@ from core.font.font_manager import FontManager
 from core.log.log_manager import log
 from client.ui.extension_interface.pop_dialog import DownloadPopDialog
 from client.version.version_manager import VersionManager
-from core.autoboot.silent_mode import is_silent_mode
+from core.autoboot.silent_mode import is_silent_mode, SILENT_ARG
+from core.autoboot.auto_boot import add_to_startup, remove_from_startup
+# 导入崩溃处理程序
+from crash_report import install_crash_handler, configure_crash_handler
 
 # 初始化版本管理器
 version_manager = VersionManager.get_instance()
@@ -37,6 +40,12 @@ def parse_arguments():
                         help='指定配置文件路径')
     parser.add_argument('--silent', action='store_true',
                         help='静默启动模式，启动时最小化到系统托盘')
+    parser.add_argument('--no_crash_report', action='store_true',
+                        help='禁用崩溃报告')
+    parser.add_argument('--autostart', action='store_true',
+                        help='添加到Windows启动项')
+    parser.add_argument('--no-autostart', action='store_true',
+                        help='从Windows启动项移除')
     
     return parser.parse_args()
 
@@ -183,6 +192,14 @@ class BrowserDownloadHandler(QObject):
     def _remove_dialog(self, dialog, request_id=None):
         """从活跃列表中移除弹窗 - 优化引用管理"""
         try:
+            # 检查对话框对象是否已被删除
+            from client.ui.extension_interface.pop_dialog import DownloadPopDialog
+            if dialog and hasattr(DownloadPopDialog, '_is_destroyed'):
+                if not DownloadPopDialog._is_destroyed(dialog):
+                    log.debug(f"弹窗对象 [ID: {request_id}] 仍然有效")
+                else:
+                    log.debug(f"弹窗对象 [ID: {request_id}] 已被删除")
+            
             # 清理弱引用 - 使用更安全的列表复制方法
             self.active_dialogs = [ref for ref in self.active_dialogs if ref() is not None and ref() != dialog]
                 
@@ -198,6 +215,8 @@ class BrowserDownloadHandler(QObject):
         except Exception as e:
             # 确保即使出错也不会影响主程序
             log.error(f"清理弹窗引用时出错: {e}")
+            import traceback
+            log.debug(traceback.format_exc())
 
 if __name__ == "__main__":
     # 解析命令行参数
@@ -209,8 +228,84 @@ if __name__ == "__main__":
         print(f"浏览器扩展版本: v{version_manager.get_extension_version()}")
         sys.exit(0)
     
+    # 处理自启动参数
+    if args.autostart:
+        from core.autoboot.auto_boot import add_to_startup
+        success = add_to_startup(True)  # 默认使用静默模式
+        print(f"添加到启动项{'成功' if success else '失败'}")
+        sys.exit(0 if success else 1)
+        
+    if getattr(args, 'no_autostart', False):  # 使用getattr避免属性不存在的错误
+        from core.autoboot.auto_boot import remove_from_startup
+        success = remove_from_startup()
+        print(f"从启动项移除{'成功' if success else '失败'}")
+        sys.exit(0 if success else 1)
+    
     app = QApplication(sys.argv)
     # app.setStyle("Fusion")
+    
+    # Disable button focus
+    app.setStyleSheet("""
+        QPushButton:focus {
+            outline: none;
+            border: none;
+        }
+        QToolButton:focus {
+            outline: none;
+            border: none;
+        }
+    """)
+    # 记录禁用按钮焦点效果
+    log.info("已禁用按钮焦点效果")
+    
+    # 检查是否处于静默模式
+    silent_mode = is_silent_mode()  # 不传递参数，让函数自己从sys.argv获取
+    
+    # 安装崩溃处理程序 - 除非显式禁用
+    if not args.no_crash_report:
+        # 确保崩溃处理程序在日志初始化后启动
+        try:
+            # 先导入必要的模块
+            from crash_report import install_crash_handler, configure_crash_handler
+            
+            # 设置崩溃处理程序配置
+            configure_crash_handler(
+                app_name="花火下载管理器",
+                github_url="https://github.com/buaoyezz/Hanabi-Download-Manager/issues",
+                silent_mode=silent_mode,
+                # 指定日志文件路径，确保崩溃报告能包含日志内容
+                log_file=log.get_log_file_path()
+            )
+            
+            # 安装崩溃处理钩子
+            installed = install_crash_handler(app, silent_mode)
+            if installed:
+                log.info("已安装崩溃报告程序")
+                
+                # 根据需要设置自定义崩溃处理函数
+                def custom_crash_handler(crash_info):
+                    """自定义崩溃处理函数，在崩溃时执行额外操作"""
+                    try:
+                        log.critical(f"程序崩溃: {crash_info['exception_type']}: {crash_info['exception_message']}")
+                        
+                        # 尝试保存系统状态信息
+                        if hasattr(window, 'save_current_state') and callable(window.save_current_state):
+                            log.info("尝试保存当前程序状态...")
+                            window.save_current_state()
+                    except Exception:
+                        pass  # 安全处理自定义处理器异常
+                    
+                # 添加自定义处理器
+                from crash_report import add_crash_handler
+                add_crash_handler(custom_crash_handler)
+            else:
+                log.warning("无法安装崩溃报告程序")
+        except ImportError as e:
+            log.error(f"导入崩溃处理模块失败: {e}")
+        except Exception as e:
+            log.error(f"安装崩溃处理程序失败: {e}")
+            import traceback
+            log.debug(traceback.format_exc())
     
     # 设置应用图标
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "logo.png")
@@ -321,7 +416,7 @@ if __name__ == "__main__":
                 if client:
                     try:
                         client.shutdown(socket.SHUT_RDWR)
-                    except (OSError, socket.error, ConnectionResetError):
+                    except (OSError, socket.error, ConnectionResetError) as e:
                         # 忽略关闭时的错误
                         pass
                     finally:
@@ -376,7 +471,7 @@ if __name__ == "__main__":
                         if test_socket:
                             try:
                                 test_socket.shutdown(socket.SHUT_RDWR)
-                            except (OSError, socket.error, ConnectionResetError):
+                            except (OSError, socket.error, ConnectionResetError) as e:
                                 # 忽略关闭时的错误
                                 pass
                             finally:
@@ -406,7 +501,7 @@ if __name__ == "__main__":
                     if test_socket:
                         try:
                             test_socket.shutdown(socket.SHUT_RDWR)
-                        except (OSError, socket.error, ConnectionResetError):
+                        except (OSError, socket.error, ConnectionResetError) as e:
                             # 忽略关闭时的错误
                             pass
                         finally:
