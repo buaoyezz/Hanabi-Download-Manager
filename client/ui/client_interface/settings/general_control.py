@@ -13,7 +13,7 @@ from client.ui.components.customMessagebox import CustomMessageBox
 from client.ui.components.comboBox import CustomComboBox
 from client.ui.components.checkBox import CustomCheckBox
 from client.I18N.i18n import i18n
-from core.autoboot.auto_boot import add_to_startup, remove_from_startup
+from core.autoboot.auto_boot import add_to_startup, remove_from_startup, get_current_startup_command
 from core.autoboot.silent_mode import SILENT_ARG, is_silent_mode
 
 class GeneralControlWidget(QWidget):
@@ -453,10 +453,10 @@ class GeneralControlWidget(QWidget):
             if self.config_manager.save_config():
                 # 处理自启动设置 - 如果启用了最小化启动，则自启动时也添加静默参数
                 if self.auto_start_checkbox.isChecked():
-                    # 根据是否启用最小化启动决定是否添加静默参数
-                    add_to_startup(use_silent_mode=start_minimized)
+                    # 确保传递正确的静默模式参数
+                    self._setup_autostart()
                 else:
-                    remove_from_startup()
+                    self._remove_autostart()
                 
                 # 处理关闭到托盘设置
                 self._apply_close_to_tray_setting(self.close_to_tray_checkbox.isChecked())
@@ -483,36 +483,131 @@ class GeneralControlWidget(QWidget):
     def _setup_autostart(self):
         """设置开机自启动"""
         try:
-            # 获取是否启用最小化启动
-            start_minimized = self.start_minimized_checkbox.isChecked()
-            # core/autoboot/auto_boot.py
-            add_to_startup(use_silent_mode=start_minimized)
-            self.notify_manager.show_message(i18n.get_text("auto_start"), i18n.get_text("auto_start_enabled"))
+            # 获取是否使用静默模式启动
+            use_silent_mode = self.start_minimized_checkbox.isChecked()
+            
+            # 检查当前启动命令
+            current_command = get_current_startup_command()
+            is_already_configured = False
+            
+            # 如果已有启动命令，先检查是否符合我们的要求
+            if current_command:
+                # 检查启动命令是否包含静默参数
+                has_silent = SILENT_ARG in current_command
+                
+                # 如果静默模式设置一致，则无需修改
+                if (has_silent and use_silent_mode) or (not has_silent and not use_silent_mode):
+                    is_already_configured = True
+                    self.notify_manager.show_message(
+                        i18n.get_text("success"),
+                        i18n.get_text("auto_start_already_configured"),
+                        "success"
+                    )
+            
+            # 如果未配置或配置不一致，则重新设置
+            if not is_already_configured:
+                # 使用自启动模块添加到启动项
+                success = add_to_startup(use_silent_mode)
+                
+                if success:
+                    self.notify_manager.show_message(
+                        i18n.get_text("success"),
+                        i18n.get_text("auto_start_enabled"),
+                        "success"
+                    )
+                    return True
+                else:
+                    # 尝试使用备用方法 - 快捷方式
+                    try:
+                        from core.autoboot.auto_boot import create_startup_shortcut
+                        shortcut_success = create_startup_shortcut(use_silent_mode)
+                        
+                        if shortcut_success:
+                            self.notify_manager.show_message(
+                                i18n.get_text("success"),
+                                i18n.get_text("auto_start_enabled_shortcut"),
+                                "success"
+                            )
+                            return True
+                    except Exception as e:
+                        print(f"创建快捷方式失败: {e}")
+                    
+                    # 所有方法都失败
+                    self.notify_manager.show_message(
+                        i18n.get_text("error"),
+                        i18n.get_text("auto_start_failed"),
+                        "error"
+                    )
+                    return False
+            
+            return True
+                
         except Exception as e:
-            self.notify_manager.show_message(i18n.get_text("auto_start"), f"{i18n.get_text('auto_start_failed')}: {str(e)}")
-            print(f"设置开机自启动失败: {str(e)}")
-    
-    def _remove_autostart(self):
-        """移除开机自启动设置"""
-        try:
-            remove_from_startup()
-            self.notify_manager.show_message(i18n.get_text("auto_start"), i18n.get_text("auto_start_disabled"))
-        except Exception as e:
-            self.notify_manager.show_message(i18n.get_text("auto_start"), f"{i18n.get_text('auto_start_disable_failed')}: {str(e)}")
-            print(f"取消开机自启动失败: {str(e)}")
-    
-    def _get_app_path(self):
-        """获取应用程序可执行文件路径"""
-        # 此方法不再直接使用，由 _get_app_path_args() 替代以提供更灵活的参数列表
-        # 保留此方法以防其他地方意外调用，但其逻辑已合并到 _get_app_path_args
-        if getattr(sys, 'frozen', False):
-            return f'"{sys.executable}"'
-        else:
-            python_path = sys.executable
-            main_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../main.py'))
-            # 使用引号包裹路径，避免空格和特殊字符问题
-            return f'"{python_path}" "{main_script}"'
+            import traceback
+            print(f"设置自启动失败: {e}")
+            print(traceback.format_exc())
+            
+            self.notify_manager.show_message(
+                i18n.get_text("error"),
+                f"{i18n.get_text('auto_start_failed')}: {str(e)}",
+                "error"
+            )
+            return False
 
+    def _remove_autostart(self):
+        """移除开机自启动"""
+        try:
+            # 先检查是否已存在启动项
+            current_command = get_current_startup_command()
+            if not current_command:
+                # 无需移除，已经不存在
+                self.notify_manager.show_message(
+                    i18n.get_text("info"),
+                    i18n.get_text("auto_start_not_found"),
+                    "info"
+                )
+                return True
+                
+            # 使用自启动模块移除启动项
+            success = remove_from_startup()
+            
+            if success:
+                self.notify_manager.show_message(
+                    i18n.get_text("success"),
+                    i18n.get_text("auto_start_disabled"),
+                    "success"
+                )
+                return True
+            else:
+                # 检查移除后的状态
+                after_command = get_current_startup_command()
+                if not after_command:
+                    # 实际上成功移除了
+                    self.notify_manager.show_message(
+                        i18n.get_text("success"),
+                        i18n.get_text("auto_start_disabled"),
+                        "success"
+                    )
+                    return True
+                else:
+                    self.notify_manager.show_message(
+                        i18n.get_text("error"),
+                        i18n.get_text("auto_start_remove_failed"),
+                        "error"
+                    )
+                    return False
+        except Exception as e:
+            import traceback
+            print(f"移除自启动失败: {e}")
+            print(traceback.format_exc())
+            
+            self.notify_manager.show_message(
+                i18n.get_text("error"),
+                f"{i18n.get_text('auto_start_remove_failed')}: {str(e)}",
+                "error"
+            )
+            return False
+    
     def _apply_close_to_tray_setting(self, enabled):
         """应用关闭到托盘设置"""
         # 保存到配置中
@@ -527,4 +622,13 @@ class GeneralControlWidget(QWidget):
         if "window" not in self.config_manager._config:
             self.config_manager._config["window"] = {}
         self.config_manager._config["window"]["start_minimized"] = enabled
-        self.config_manager.save_config() 
+        self.config_manager.save_config()
+        
+        # 如果启用了自启动，且静默模式发生变化，需要更新自启动设置
+        if self.auto_start_checkbox.isChecked():
+            current_command = get_current_startup_command()
+            if current_command:
+                has_silent = SILENT_ARG in current_command
+                if (has_silent and not enabled) or (not has_silent and enabled):
+                    # 静默模式设置变更，需要更新自启动设置
+                    self._setup_autostart() 
