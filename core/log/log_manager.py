@@ -248,6 +248,14 @@ class LogManager:
     def get_logger(self) -> logging.Logger:
         return self.logger
     
+    def get_log_file_path(self) -> str:
+        """获取当前日志文件路径
+        
+        Returns:
+            str: 日志文件的完整路径
+        """
+        return self.log_file
+    
     def set_level_filter(self, level: str) -> None:
         """设置日志等级过滤器
         
