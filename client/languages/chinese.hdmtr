@@ -376,3 +376,26 @@ manual_download=手动下载
 version_string=版本 {version}
 client_version={version}
 extension_version=扩展版本 {version}
+
+# 疯狂模式相关
+enable_crazy_mode=启用Crazy模式 (64-128线程)(测试|暂时无效)
+crazy_mode_warning=警告：Crazy模式可能导致下载文件损坏、服务器拒绝连接或系统资源耗尽！
+crazy_mode_enabled_warning=您已启用Crazy模式！使用过高的线程数可能导致下载文件损坏、服务器拒绝连接或系统资源耗尽。请谨慎使用。
+
+# 自启动相关
+auto_start_enabled=已成功设置开机自启动
+auto_start_disabled=已成功取消开机自启动
+auto_start_failed=设置开机自启动失败
+auto_start_remove_failed=取消开机自启动失败
+
+# 自动整理文件相关
+category_paths_settings=分类路径设置
+category_paths_description=为不同类型的文件设置自定义保存路径。如果不设置，将使用默认下载路径下的分类文件夹。
+configure=配置
+select_category_folder=选择{category}分类文件夹
+
+# 按钮焦点相关
+global_button_focus=全局按钮焦点
+button_focus_off=按钮焦点关闭
+button_focus_on=按钮焦点开启
+button_focus_desc=关闭后按钮将不会显示焦点状态，界面看起来更加简洁

@@ -378,3 +378,26 @@ manual_download=Manual download
 version_string=Version {version}
 client_version={version}
 extension_version=Extension Version {version}
+
+# Crazy Mode Related
+enable_crazy_mode=Enable Crazy Mode (64-128 threads)(Beta|Temporarily Invalid)
+crazy_mode_warning=Warning: Crazy Mode may cause file corruption, server connection rejections, or system resource exhaustion!
+crazy_mode_enabled_warning=You have enabled Crazy Mode! Using too many threads may cause file corruption, server connection rejections, or system resource exhaustion. Please use with caution.
+
+# Auto Start Related
+auto_start_enabled=Auto start successfully enabled
+auto_start_disabled=Auto start successfully disabled
+auto_start_failed=Failed to enable auto start
+auto_start_remove_failed=Failed to disable auto start
+
+# Auto Organize Files Related
+category_paths_settings=Category Paths Settings
+category_paths_description=Set custom save paths for different types of files. If not set, category folders under the default download path will be used.
+configure=Configure
+select_category_folder=Select {category} category folder
+
+# Button Focus Related
+global_button_focus=Global Button Focus
+button_focus_off=Button Focus Off
+button_focus_on=Button Focus On
+button_focus_desc=When turned off, buttons will not show focus state, making the interface look cleaner

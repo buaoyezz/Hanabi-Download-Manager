@@ -507,6 +507,31 @@ class I18N(QObject):
         """获取当前语言"""
         return self.current_language
 
+    def _load_default_translations(self):
+        """加载默认翻译"""
+        # 确保翻译字典已初始化
+        if "zh_CN" not in self.translations:
+            self.translations["zh_CN"] = {}
+        if "en" not in self.translations:
+            self.translations["en"] = {}
+        
+        # 添加疯狂模式相关翻译 - 英文
+        self.translations["en"].update({
+            "enable_crazy_mode": "Enable Crazy Mode (64-128 threads)",
+            "crazy_mode_warning": "Warning: Crazy Mode may cause file corruption, server connection rejections, or system resource exhaustion!",
+            "crazy_mode_enabled_warning": "You have enabled Crazy Mode! Using too many threads may cause file corruption, server connection rejections, or system resource exhaustion. Please use with caution.",
+            "warning": "Warning",
+            # 自动整理文件相关翻译
+            "auto_organize_downloads": "Auto-organize downloaded files",
+            "auto_organize_description": "Automatically categorize downloaded files into different folders based on file type",
+            "category_paths_settings": "Category Paths Settings",
+            "category_paths_description": "Set custom save paths for different types of files. If not set, category folders under the default download path will be used.",
+            "configure": "Configure",
+            "browse": "Browse",
+            "clear": "Clear",
+            "close": "Close",
+            "select_category_folder": "Select {category} category folder",
+        })
 
 # 创建单例实例
 i18n = I18N()
