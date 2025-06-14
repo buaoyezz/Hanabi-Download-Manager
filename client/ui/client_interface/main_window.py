@@ -1282,10 +1282,36 @@ class DownloadManagerWindow(QMainWindow):
             
             # 获取文件名用于通知
             file_name = ""
+            file_path = ""
             if hasattr(task.get("manager", None), "file_name"):
                 file_name = task["manager"].file_name
+                file_path = os.path.join(task.get('save_path', ''), file_name)
             else:
                 file_name = task.get("file_name", "未知文件")
+                file_path = os.path.join(task.get('save_path', ''), file_name)
+            
+            # 检查是否需要自动整理文件
+            auto_organize = self.config_manager.get_setting("download", "auto_organize", False)
+            if auto_organize and os.path.exists(file_path):
+                try:
+                    # 导入文件整理器
+                    from core.download_core.file_organizer import get_file_organizer
+                    
+                    # 获取文件整理器实例
+                    organizer = get_file_organizer()
+                    
+                    # 设置基础路径为当前下载路径
+                    organizer.set_base_path(task.get('save_path', ''))
+                    
+                    # 整理文件
+                    new_path = organizer.organize_download(file_path)
+                    
+                    if new_path:
+                        logging.info(f"文件已自动整理: {file_path} -> {new_path}")
+                        # 更新通知中的文件名
+                        file_name = os.path.basename(new_path)
+                except Exception as e:
+                    logging.error(f"自动整理文件失败: {e}")
                 
             # 显示通知
             NotifyManager.success(f"下载完成: {file_name}")
