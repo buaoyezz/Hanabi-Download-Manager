@@ -4,6 +4,7 @@ from client.ui.client_interface.settings.general_control import GeneralControlWi
 from client.ui.client_interface.settings.download_control import DownloadControlWidget
 from client.ui.client_interface.settings.network_control import NetworkControlWidget
 from client.ui.client_interface.settings.update_page import UpdatePage
+from client.ui.client_interface.settings.debug_pages import DebugPagesWidget
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.components.customMessagebox import CustomMessageBox
 from core.font.font_manager import FontManager
@@ -146,7 +147,8 @@ class SettingsContainer(QWidget):
             "download": "ic_fluent_arrow_download_24_regular",
             "network": "ic_fluent_globe_24_regular",
             "advanced": "ic_fluent_diagram_24_regular",
-            "update": "ic_fluent_arrow_sync_24_regular"
+            "update": "ic_fluent_arrow_sync_24_regular",
+            "debug": "ic_fluent_bug_24_regular"  # 添加调试图标
         }
         
         # 常规设置页 - 添加滚动区域和图标
@@ -185,6 +187,13 @@ class SettingsContainer(QWidget):
         update_tab_index = self.tab_widget.addTab(update_scroll, i18n.get_text("software_update"))
         self._set_tab_icon(update_tab_index, icons["update"])
         
+        # 添加调试页
+        debug_scroll = self._create_tab_scroll_area()
+        self.debug_tab = DebugPagesWidget()
+        debug_scroll.setWidget(self.debug_tab)
+        debug_tab_index = self.tab_widget.addTab(debug_scroll, "调试工具")
+        self._set_tab_icon(debug_tab_index, icons["debug"])
+        
         tab_layout.addWidget(self.tab_widget)
         main_layout.addWidget(tab_container, 1)
         
@@ -216,6 +225,9 @@ class SettingsContainer(QWidget):
                 self.tab_widget.setTabText(i, i18n.get_text("advanced_settings"))
             elif tab_text == "软件更新" or tab_text == "Software Update":
                 self.tab_widget.setTabText(i, i18n.get_text("software_update"))
+            # 保留调试工具标签不变
+            elif tab_text == "调试工具" or tab_text == "Debug Tools":
+                self.tab_widget.setTabText(i, "调试工具")
     
     def _create_tab_scroll_area(self):
         """创建标准化的滚动区域"""

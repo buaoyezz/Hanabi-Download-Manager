@@ -4,6 +4,7 @@ from client.ui.client_interface.settings.general_control import GeneralControlWi
 from client.ui.client_interface.settings.download_control import DownloadControlWidget
 from client.ui.client_interface.settings.network_control import NetworkControlWidget
 from client.ui.client_interface.settings.update_page import UpdatePage
+from client.ui.client_interface.settings.debug_pages import DebugPagesWidget
 from client.ui.components.scrollStyle import ScrollStyle
 from client.ui.components.customMessagebox import CustomMessageBox
 from core.font.font_manager import FontManager
@@ -125,7 +126,8 @@ class SettingsPage(QWidget):
             "download": "ic_fluent_arrow_download_24_regular",
             "network": "ic_fluent_globe_24_regular",
             "advanced": "ic_fluent_diagram_24_regular",
-            "update": "ic_fluent_arrow_sync_24_regular"
+            "update": "ic_fluent_arrow_sync_24_regular",
+            "debug": "ic_fluent_bug_24_regular"  # 添加调试图标
         }
         
         # 常规设置页 - 添加滚动区域和图标
@@ -164,6 +166,14 @@ class SettingsPage(QWidget):
         update_tab_index = self.tab_widget.addTab(update_scroll, i18n.get_text("software_update"))
         self._set_tab_icon(update_tab_index, icons["update"])
         
+        # 添加调试页 (只在开发环境中显示)
+        debug_scroll = self._create_tab_scroll_area()
+        self.debug_tab = DebugPagesWidget()
+        debug_scroll.setWidget(self.debug_tab)
+        debug_tab_index = self.tab_widget.addTab(debug_scroll, "调试工具")
+        self._set_tab_icon(debug_tab_index, icons["debug"])
+        
+        # 注册所有标签页到布局
         tab_layout.addWidget(self.tab_widget)
         main_layout.addWidget(tab_container, 1)
         
@@ -185,6 +195,7 @@ class SettingsPage(QWidget):
         self.tab_widget.setTabText(2, i18n.get_text("network_settings"))
         self.tab_widget.setTabText(3, i18n.get_text("advanced_settings"))
         self.tab_widget.setTabText(4, i18n.get_text("software_update"))
+        self.tab_widget.setTabText(5, "调试工具")  # 调试页不国际化
 
     def _create_tab_scroll_area(self):
         """创建标准化的滚动区域"""
