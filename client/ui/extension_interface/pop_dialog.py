@@ -737,14 +737,20 @@ class DownloadPopDialog(QDialog):
                     # 6. 安排延迟销毁，确保完全脱离事件循环
                     def delayed_destroy():
                         try:
-                            # === 修复：最后再次检查线程并强制GC ===
-                            import gc
-                            gc.collect()
-                            
-                            # 使用Qt的deleteLater方法彻底销毁窗口
-                            self.deleteLater()
-                        except:
-                            pass
+                            # 检查对象是否已被删除
+                            if not DownloadPopDialog._is_destroyed(self):
+                                # === 修复：最后再次检查线程并强制GC ===
+                                import gc
+                                gc.collect()
+                                
+                                # 使用Qt的deleteLater方法彻底销毁窗口
+                                self.deleteLater()
+                            else:
+                                logging.info("窗口对象已被删除，跳过deleteLater调用")
+                        except Exception as e:
+                            logging.error(f"延迟销毁对话框时出错: {e}")
+                            import traceback
+                            traceback.print_exc()
                     
                     # 延迟500毫秒执行销毁，给线程更多时间完成
                     QTimer.singleShot(500, delayed_destroy)
@@ -756,11 +762,20 @@ class DownloadPopDialog(QDialog):
                     
                     # === 修复：延迟调用deleteLater，给线程更多时间结束 ===
                     def delayed_delete():
-                        # 最后再次执行垃圾回收
-                        import gc
-                        gc.collect()
-                        # 删除窗口
-                        self.deleteLater()
+                        try:
+                            # 检查对象是否已被删除
+                            if not DownloadPopDialog._is_destroyed(self):
+                                # 最后再次执行垃圾回收
+                                import gc
+                                gc.collect()
+                                # 删除窗口
+                                self.deleteLater()
+                            else:
+                                logging.info("窗口对象已被删除，跳过deleteLater调用")
+                        except Exception as e:
+                            logging.error(f"延迟删除对话框时出错: {e}")
+                            import traceback
+                            traceback.print_exc()
                     
                     # 延迟300毫秒再删除
                     QTimer.singleShot(300, delayed_delete)
@@ -2422,22 +2437,72 @@ class DownloadPopDialog(QDialog):
         file_name = ""
         file_size = 0
         save_path = ""
+        file_path = ""
         
         with self.thread_lock:
             if self.download_engine:
                 file_name = self.download_engine.file_name
-                file_size = self.download_engine.file_size
+                # 兼容性处理：检查是否有file_size属性（NSF内核有，NCT内核没有）
+                if hasattr(self.download_engine, 'file_size'):
+                    file_size = self.download_engine.file_size
+                elif hasattr(self, 'nct_file_size'):  # NCT内核使用nct_file_size
+                    file_size = self.nct_file_size
                 save_path = self.download_engine.save_path
+                file_path = os.path.join(save_path, file_name)
                 
                 # 如果文件大小未知或为0，尝试从实际文件获取
                 if file_size <= 0:
                     try:
-                        file_path = Path(save_path) / file_name
-                        if file_path.exists():
-                            file_size = file_path.stat().st_size
+                        file_path_obj = Path(save_path) / file_name
+                        if file_path_obj.exists():
+                            file_size = file_path_obj.stat().st_size
                             logging.info(f"从实际文件获取大小: {file_size} 字节")
                     except Exception as e:
                         logging.error(f"获取实际文件大小失败: {e}")
+                
+                # 检查是否需要自动整理文件
+                try:
+                    from client.ui.client_interface.settings.config import ConfigManager
+                    config_manager = ConfigManager()
+                    auto_organize = config_manager.get_setting("download", "auto_organize", False)
+                    
+                    if auto_organize and os.path.exists(file_path):
+                        # 导入文件整理器
+                        from core.download_core.file_organizer import get_file_organizer
+                        
+                        # 获取文件整理器实例
+                        organizer = get_file_organizer()
+                        
+                        # 设置基础路径为当前下载路径
+                        organizer.set_base_path(save_path)
+                        
+                        # 整理文件
+                        new_path = organizer.organize_download(file_path)
+                        
+                        if new_path:
+                            logging.info(f"文件已自动整理: {file_path} -> {new_path}")
+                            # 更新文件名和路径
+                            file_name = os.path.basename(new_path)
+                            save_path = os.path.dirname(new_path)
+                except Exception as e:
+                    logging.error(f"自动整理文件失败: {e}")
+            # 处理NCT内核的情况（没有download_engine）
+            elif hasattr(self, 'nct_download_started') and self.nct_download_started:
+                if hasattr(self, 'nct_kernel'):
+                    file_name = getattr(self.nct_kernel, 'file_name', '')
+                    save_path = getattr(self.nct_kernel, 'save_path', '')
+                    file_size = getattr(self, 'nct_file_size', 0)
+                    file_path = os.path.join(save_path, file_name)
+                    
+                    # 如果文件大小未知或为0，尝试从实际文件获取
+                    if file_size <= 0 and file_name and save_path:
+                        try:
+                            file_path_obj = Path(save_path) / file_name
+                            if file_path_obj.exists():
+                                file_size = file_path_obj.stat().st_size
+                                logging.info(f"从实际文件获取大小: {file_size} 字节")
+                        except Exception as e:
+                            logging.error(f"获取实际文件大小失败: {e}")
         
         # 创建完成数据
         task_data = {
