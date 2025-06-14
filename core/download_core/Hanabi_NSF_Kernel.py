@@ -19,12 +19,21 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Union, Callable, Set
 from urllib.parse import urlparse, parse_qs, unquote
 
-# 使用httpx替代requests，提供更好的性能
+# NEW 
 import httpx
 from PySide6.QtCore import QThread, Signal
 
 from core.download_core.core.config import cfg, download_cfg
 from core.download_core.core.methods import getProxy, getReadableSize, createSparseFile
+
+# 导入NSF增强工具
+try:
+    from core.download_core.NSF_Utils import NSFEnhancer
+    HAS_NSF_ENHANCER = True
+    logging.info("NSF增强器已加载")
+except ImportError:
+    HAS_NSF_ENHANCER = False
+    logging.warning("NSF增强器导入失败，将使用基本功能")
 
 # 设置日志级别
 logging.basicConfig(level=logging.INFO)
@@ -264,41 +273,57 @@ class DownloadEngine(QThread):
     file_name_changed = Signal(str)        # 文件名变更信号
     status_updated = Signal(str)           # 状态更新信号
 
-    def __init__(self, url: str, headers: Dict[str, str] = None, max_concurrent: int = 16, 
+    def __init__(self, url: str, headers: Dict[str, str] = None, max_concurrent: int = 32, 
                  save_path: str = None, file_name: str = None, smart_threading: bool = True, 
                  file_size: int = -1, default_segments: int = 8, parent=None):
-        """
-        初始化下载引擎
+        """初始化下载引擎
         
-        参数:
+        Args:
             url: 下载链接
-            headers: HTTP请求头
+            headers: 请求头
             max_concurrent: 最大并发数
             save_path: 保存路径
             file_name: 文件名
-            smart_threading: 是否使用智能线程分配
-            file_size: 文件大小，-1表示自动获取
-            default_segments: 默认分段数（在智能线程模式关闭时使用）
+            smart_threading: 是否使用智能线程管理
+            file_size: 文件大小(如果已知)
+            default_segments: 默认分段数
             parent: 父对象
         """
         super().__init__(parent)
+        self.url = url
+        self.headers = headers or {}
+        self.thread_count = max_concurrent
+        self.save_path = save_path
+        self.file_name = file_name
+        self.smart_threading = smart_threading
+        self.known_file_size = file_size
+        self.default_segments = default_segments
+        
+        # 检查线程数是否处于疯狂模式范围(64-128)
+        self.crazy_mode = max_concurrent > 32
+        if self.crazy_mode:
+            logging.warning(f"NSF内核启用疯狂模式! 线程数: {max_concurrent}")
+            # 尝试导入并启用疯狂模式
+            try:
+                from core.download_core.NSF_Utils.Crazy_Mode import enable_crazy_mode
+                enable_crazy_mode(max_concurrent, self)
+                self._log_download_debug(f"疯狂模式已启用，线程数: {max_concurrent}")
+            except ImportError:
+                logging.warning("疯狂模式模块导入失败，将使用标准模式")
+                self.crazy_mode = False
+        
+        # 内部状态
+        self._running = False
+        self._paused = False
+        self._stopped = False
+        self._error = None
         
         # 记录开始时间和基本参数
         self.start_time = time.time()
-        self.url = url
-        self.headers = headers or {}
-        self.file_name = file_name
-        self.save_path = save_path
-        self.thread_count = max_concurrent
-        self.smart_threading = smart_threading
-        self.file_size = file_size
-        self.default_segments = default_segments
         
         # 线程同步和状态
         self.thread_lock = threading.Lock()
         self.progress_lock = threading.Lock()
-        self.is_running = False
-        self.is_paused = False
         self.current_progress = 0
         self.avg_speed = 0
         self.last_progress_time = time.time()
@@ -341,6 +366,19 @@ class DownloadEngine(QThread):
         # 创建主客户端
         self.client = self.client_manager.create_client(self.headers)
         
+        # 初始化NSF增强器
+        self.enhancer = None
+        if HAS_NSF_ENHANCER:
+            try:
+                self.enhancer = NSFEnhancer()
+                # 设置下载优化器
+                if self.enhancer.auto_adjust_enabled:
+                    self.enhancer.setup_download_optimizer(self)
+                    logging.info("NSF增强器已初始化")
+            except Exception as e:
+                logging.error(f"初始化NSF增强器失败: {e}")
+                self.enhancer = None
+        
         # 创建日志目录
         logs_dir = Path("logs")
         if not logs_dir.exists():
@@ -357,6 +395,7 @@ class DownloadEngine(QThread):
                 f.write(f"默认分段数: {default_segments}\n")
                 f.write(f"智能线程: {smart_threading}\n")
                 f.write(f"初始文件大小: {file_size if file_size > 0 else '自动获取'}\n")
+                f.write(f"NSF增强器: {'已启用' if self.enhancer else '未启用'}\n")
                 f.write("=====================\n\n")
         except Exception as e:
             logging.warning(f"创建日志文件失败: {e}")
@@ -375,11 +414,29 @@ class DownloadEngine(QThread):
             logging.error(f"写入调试日志失败: {e}")
     
     def _prepare_download(self) -> None:
-        """准备下载，获取文件信息并初始化"""
+        """准备下载任务，包括获取文件信息、创建目录等"""
         try:
-            # 设置状态
+            # 记录开始准备时间
+            prep_start = time.time()
+            
+            # 如果处于疯狂模式，记录警告日志
+            if self.crazy_mode:
+                logging.warning(f"NSF内核疯狂模式已启用! 线程数: {self.thread_count}，可能导致下载不稳定或文件损坏")
+                self.status_updated.emit("疯狂模式已启用，请谨慎操作")
+            
+            # 获取链接信息（文件名、大小等）
+            self._log_download_debug(f"开始获取链接信息: {self.url}")
             self.status_updated.emit("正在获取文件信息...")
-            logging.info(f"开始下载准备 - URL: {self.url}")
+            
+            # 使用增强器优化URL连接（如果可用）
+            if self.enhancer and self.enhancer.dns_cdn_enabled:
+                self._log_download_debug("使用NSF增强器优化URL连接")
+                result = self.enhancer.optimize_url(self.url, self.headers)
+                if result.get('best_ip'):
+                    self._log_download_debug(f"找到最佳IP: {result['best_ip']}，CDN: {result.get('cdn_provider', 'unknown')}")
+                    # 更新请求头
+                    if result.get('headers'):
+                        self.headers.update(result['headers'])
             
             # 获取文件信息
             final_url, file_name, file_size = self._get_link_info(self.url, self.headers, self.file_name)
@@ -390,8 +447,8 @@ class DownloadEngine(QThread):
                 logging.info(f"重定向到: {final_url}")
             
             # 更新文件大小
-            if self.file_size == -1:
-                self.file_size = file_size
+            if self.known_file_size == -1:
+                self.known_file_size = file_size
             
             # 更新文件名
             if not self.file_name or self.file_name != file_name:
@@ -399,7 +456,7 @@ class DownloadEngine(QThread):
                 self.file_name_changed.emit(file_name)
             
             # 判断是否支持多线程
-            self.multi_thread_support = self.file_size > 0 and self.file_size > 1024 * 1024  # 至少1MB才分块
+            self.multi_thread_support = self.known_file_size > 0 and self.known_file_size > 1024 * 1024  # 至少1MB才分块
             
             # 设置保存路径
             if not self.save_path:
@@ -451,10 +508,10 @@ class DownloadEngine(QThread):
                 file_path.touch()
                 
                 # 预分配文件空间
-                if self.file_size > 0:
+                if self.known_file_size > 0:
                     try:
-                        createSparseFile(file_path, self.file_size)
-                        self._log_download_debug(f"预分配文件空间: {getReadableSize(self.file_size)}")
+                        createSparseFile(file_path, self.known_file_size)
+                        self._log_download_debug(f"预分配文件空间: {getReadableSize(self.known_file_size)}")
                     except Exception as e:
                         logging.warning(f"预分配文件空间失败: {e}")
             
@@ -466,14 +523,14 @@ class DownloadEngine(QThread):
                 self.thread_count = 1
             
             # 记录初始化结果
-            self._log_download_debug(f"准备完成 - 文件名: {self.file_name}, 大小: {getReadableSize(self.file_size) if self.file_size > 0 else '未知'}, 多线程: {self.multi_thread_support}")
+            self._log_download_debug(f"准备完成 - 文件名: {self.file_name}, 大小: {getReadableSize(self.known_file_size) if self.known_file_size > 0 else '未知'}, 多线程: {self.multi_thread_support}")
             
         except Exception as e:
             error_msg = f"下载准备失败: {e}"
             logging.error(error_msg)
             self._log_download_debug(error_msg)
-            self.error_occurred.emit(str(e))
-            self.is_running = False
+            self._error = error_msg
+            self._stopped = True
 
     def _get_link_info(self, url: str, headers: Dict[str, str], filename: str = None) -> Tuple[str, str, int]:
         """
@@ -552,7 +609,8 @@ class DownloadEngine(QThread):
                     # 使用stream模式获取头部信息
                     with self.client.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
                         # 只读取头部信息
-                        response.read(10)  # 读取少量数据以触发重定向
+                        for chunk in response.iter_bytes(chunk_size=10):
+                            break  # 只读取少量数据以触发重定向
                 
             except (httpx.RequestError, TimeoutError) as e:
                 # 如果出错，直接使用GET请求
@@ -560,7 +618,8 @@ class DownloadEngine(QThread):
                 # 使用stream模式获取头部信息
                 with self.client.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
                     # 只读取头部信息
-                    response.read(10)  # 读取少量数据以触发重定向
+                    for chunk in response.iter_bytes(chunk_size=10):
+                        break  # 只读取少量数据以触发重定向
             
             # 获取最终URL（处理重定向后）
             final_url = str(response.url)
@@ -690,48 +749,65 @@ class DownloadEngine(QThread):
     def _calculate_blocks(self) -> List[List[int]]:
         """计算下载块的边界，返回块列表 [[起始位置, 结束位置], ...]"""
         # 确保文件大小有效
-        if self.file_size <= 0:
-            self._log_download_debug(f"文件大小无效 ({self.file_size})，无法计算分块")
+        if self.known_file_size <= 0:
+            self._log_download_debug(f"文件大小无效 ({self.known_file_size})，无法计算分块")
+            return []
+            
+        # 疯狂模式下直接返回空列表，让Crazy_Mode模块完全接管分块计算
+        if self.crazy_mode:
+            self._log_download_debug("疯狂模式已启用，将由Crazy_Mode模块计算分块")
             return []
             
         try:
             # 日志记录文件大小信息
-            logging.info(f"开始计算下载分块: 文件大小={getReadableSize(self.file_size)}, 智能线程管理={self.smart_threading}")
+            logging.info(f"开始计算下载分块: 文件大小={getReadableSize(self.known_file_size)}, 智能线程管理={self.smart_threading}")
+            
+            # 使用增强器优化线程数（如果可用）
+            if self.enhancer and self.enhancer.auto_adjust_enabled:
+                # 获取连接速度估计值
+                connection_speed = self.avg_speed if self.avg_speed > 0 else -1
+                # 优化线程数
+                recommended_threads = self.enhancer.optimize_thread_count(self.known_file_size, connection_speed)
+                if recommended_threads > 0 and recommended_threads != self.thread_count:
+                    old_count = self.thread_count
+                    self.thread_count = recommended_threads
+                    self._log_download_debug(f"NSF增强器优化线程数: {old_count} -> {self.thread_count}")
             
             # 智能线程数计算
             if self.smart_threading:
                 # 根据文件大小动态调整线程数/分段数
-                if self.file_size < 1024 * 1024:  # 小于1MB
+                if self.known_file_size < 1024 * 1024:  # 小于1MB
                     segment_count = 2  # 小文件使用较少分段
                     reason = "文件小于1MB，使用2个分段"
-                elif self.file_size < 10 * 1024 * 1024:  # 小于10MB
+                elif self.known_file_size < 10 * 1024 * 1024:  # 小于10MB
                     segment_count = min(4, self.thread_count)
                     reason = f"文件在1-10MB范围，使用{segment_count}个分段(最大4个)"
-                elif self.file_size < 50 * 1024 * 1024:  # 小于50MB
+                elif self.known_file_size < 50 * 1024 * 1024:  # 小于50MB
                     segment_count = min(8, self.thread_count)
                     reason = f"文件在10-50MB范围，使用{segment_count}个分段(最大8个)"
-                elif self.file_size < 200 * 1024 * 1024:  # 小于200MB
-                    segment_count = min(12, self.thread_count)
-                    reason = f"文件在50-200MB范围，使用{segment_count}个分段(最大12个)"
-                else:  # 大文件
+                elif self.known_file_size < 200 * 1024 * 1024:  # 小于200MB
                     segment_count = min(16, self.thread_count)
-                    reason = f"文件大于200MB，使用{segment_count}个分段(最大16个)"
+                    reason = f"文件在50-200MB范围，使用{segment_count}个分段(最大16个)"
+                else:  # 大于200MB
+                    segment_count = min(32, self.thread_count)  # 将最大分段数从16增加到32
+                    reason = f"文件大于200MB，使用{segment_count}个分段(最大32个)"
                 
-                self._log_download_debug(f"智能分段计算: {reason}, 文件大小={getReadableSize(self.file_size)}")
+                self._log_download_debug(f"智能分段计算: {reason}, 文件大小={getReadableSize(self.known_file_size)}")
                 logging.info(f"智能分段计算: {reason}")
             else:
                 # 使用用户指定的默认分段数，但根据文件大小进行合理限制
-                file_size_mb = self.file_size / (1024 * 1024)
+                file_size_mb = self.known_file_size / (1024 * 1024)
                 
                 # 对较小文件限制分段数，避免过度分段
                 if file_size_mb < 50:  # 小于50MB
-                    max_segments = min(8, self.default_segments)
+                    max_segments = min(16, self.default_segments)  # 允许最多16个分段
                     segment_count = max_segments
-                    self._log_download_debug(f"文件较小({getReadableSize(self.file_size)})，限制分段数为{max_segments}(原始设置为{self.default_segments})")
+                    self._log_download_debug(f"文件较小({getReadableSize(self.known_file_size)})，限制分段数为{max_segments}(原始设置为{self.default_segments})")
                 else:
                     # 对于大文件，确保每个块至少8MB，但不超过用户设置的默认分段数
                     min_block_mb = 8  # 每块至少8MB
-                    max_segments = min(16, int(file_size_mb / min_block_mb))
+                    max_segments = min(32, int(file_size_mb / min_block_mb))  # 普通模式下最多32个分段
+                    
                     segment_count = min(max_segments, self.default_segments)
                     if segment_count < self.default_segments:
                         self._log_download_debug(f"限制分段数为{segment_count}(原始设置为{self.default_segments})，确保每块至少{min_block_mb}MB")
@@ -747,12 +823,12 @@ class DownloadEngine(QThread):
             min_block_size = 1024 * 1024  # 至少1MB
             
             # 如果文件太小，不分块
-            if self.file_size <= min_block_size:
-                logging.info(f"文件过小 ({getReadableSize(self.file_size)} < {getReadableSize(min_block_size)})，使用单个分块")
-                return [[0, self.file_size - 1]]
+            if self.known_file_size <= min_block_size:
+                logging.info(f"文件过小 ({getReadableSize(self.known_file_size)} < {getReadableSize(min_block_size)})，使用单个分块")
+                return [[0, self.known_file_size - 1]]
             
             # 计算块大小，优先使用均匀分布
-            basic_block_size = self.file_size // segment_count
+            basic_block_size = self.known_file_size // segment_count
             
             # 创建块边界
             boundaries = []
@@ -761,11 +837,11 @@ class DownloadEngine(QThread):
             for i in range(segment_count):
                 # 最后一个块获取所有剩余大小
                 if i == segment_count - 1:
-                    boundaries.append([start_pos, self.file_size - 1])
+                    boundaries.append([start_pos, self.known_file_size - 1])
                     break
                 
                 # 计算当前块的结束位置
-                end_pos = min(start_pos + basic_block_size - 1, self.file_size - 1)
+                end_pos = min(start_pos + basic_block_size - 1, self.known_file_size - 1)
                 
                 # 确保块至少有1字节
                 if end_pos <= start_pos:
@@ -775,7 +851,7 @@ class DownloadEngine(QThread):
                 start_pos = end_pos + 1
                 
                 # 如果已经没有更多内容，跳出循环
-                if start_pos >= self.file_size:
+                if start_pos >= self.known_file_size:
                     break
             
             # 记录块边界信息
@@ -783,7 +859,7 @@ class DownloadEngine(QThread):
             for i, (start, end) in enumerate(boundaries):
                 block_size = end - start + 1
                 self._log_download_debug(f"块 #{i}: 起始={start}, 结束={end}, 大小={getReadableSize(block_size)}, "
-                                       f"占比={block_size/self.file_size*100:.2f}%")
+                                       f"占比={block_size/self.known_file_size*100:.2f}%")
             
             logging.info(f"最终分块计算结果: 共{len(boundaries)}个块，每块约{getReadableSize(basic_block_size)}")
             return boundaries
@@ -800,7 +876,7 @@ class DownloadEngine(QThread):
             self.status_updated.emit("正在初始化下载任务...")
             
             # 未知大小内容，使用单线程模式
-            if self.file_size <= 0:
+            if self.known_file_size <= 0:
                 logging.info("文件大小未知，使用单线程下载")
                 self._log_download_debug("文件大小未知，使用单线程下载")
                 self.multi_thread_support = False
@@ -820,14 +896,14 @@ class DownloadEngine(QThread):
             # 如果不支持多线程下载，使用单线程模式
             if not self.multi_thread_support:
                 self.blocks.clear()
-                self.blocks.append(DownloadBlock(0, 0, self.file_size - 1, self.client))
-                self._log_download_debug(f"单线程模式: 文件大小={getReadableSize(self.file_size)}")
+                self.blocks.append(DownloadBlock(0, 0, self.known_file_size - 1, self.client))
+                self._log_download_debug(f"单线程模式: 文件大小={getReadableSize(self.known_file_size)}")
                 
                 # 发送初始进度信号
                 self.block_progress_updated.emit([
                     {
                         'start_pos': 0,
-                        'end_pos': self.file_size - 1,
+                        'end_pos': self.known_file_size - 1,
                         'progress': 0
                     }
                 ])
@@ -862,8 +938,8 @@ class DownloadEngine(QThread):
                             self._log_download_debug(f"断点续传URL不匹配：{saved_url} != {self.url}")
                             raise ValueError("断点续传URL不匹配")
                         
-                        if file_size != self.file_size:
-                            self._log_download_debug(f"断点续传文件大小不匹配：{file_size} != {self.file_size}")
+                        if file_size != self.known_file_size:
+                            self._log_download_debug(f"断点续传文件大小不匹配：{file_size} != {self.known_file_size}")
                             raise ValueError("断点续传文件大小不匹配")
                         
                         # 读取块信息
@@ -878,7 +954,7 @@ class DownloadEngine(QThread):
                             start, current, end = struct.unpack("<QQQ", block_data)
                             
                             # 验证块范围
-                            if start > end or end >= self.file_size:
+                            if start > end or end >= self.known_file_size:
                                 raise ValueError(f"块{block_count}范围无效: {start}-{end}")
                             
                             # 创建块对象
@@ -908,7 +984,7 @@ class DownloadEngine(QThread):
             if not self.blocks:
                 logging.warning("无法创建下载块，使用单线程模式")
                 self._log_download_debug("无法创建下载块，使用单线程模式")
-                self.blocks.append(DownloadBlock(0, 0, self.file_size - 1, self.client))
+                self.blocks.append(DownloadBlock(0, 0, self.known_file_size - 1, self.client))
                 self.multi_thread_support = False
             
             # 发送初始进度信号
@@ -949,13 +1025,69 @@ class DownloadEngine(QThread):
     def _create_new_blocks(self) -> None:
         """创建新的下载块"""
         self.blocks.clear()
+        
+        # 如果是疯狂模式，优先使用疯狂模式的分块计算
+        if self.crazy_mode:
+            try:
+                from core.download_core.NSF_Utils.Crazy_Mode import crazy_mode_manager, calculate_boundaries
+                
+                # 确保疯狂模式已启用
+                if not crazy_mode_manager.enabled:
+                    crazy_mode_manager.enable(self.thread_count, self)
+                
+                # 直接使用疯狂模式计算分块
+                boundaries = calculate_boundaries(self.known_file_size)
+                
+                if boundaries:
+                    self._log_download_debug(f"使用疯狂模式直接计算的分块: {len(boundaries)}个")
+                    
+                    # 创建下载块
+                    for i, (start, end) in enumerate(boundaries):
+                        client = self.client_manager.create_client(self.headers)
+                        self.blocks.append(DownloadBlock(start, start, end, client))
+                        self._log_download_debug(f"创建块 #{i}: 范围={start}-{end}, 大小={getReadableSize(end-start+1)}")
+                    
+                    return
+                else:
+                    self._log_download_debug("疯狂模式分块计算返回空，尝试其他方法")
+            except ImportError:
+                self._log_download_debug("导入疯狂模式模块失败，使用标准分块计算")
+            except Exception as e:
+                self._log_download_debug(f"使用疯狂模式计算分块出错: {e}")
+        
+        # 如果不是疯狂模式或疯狂模式分块失败，使用标准方法
         boundaries = self._calculate_blocks()
+        
+        if not boundaries:
+            # 如果在疯狂模式下没有计算出分块，尝试使用Crazy_Mode模块
+            if self.crazy_mode:
+                try:
+                    from core.download_core.NSF_Utils.Crazy_Mode import crazy_mode_manager
+                    if hasattr(crazy_mode_manager, 'download_engine') and crazy_mode_manager.download_engine == self:
+                        # 使用疯狂模式管理器计算分块
+                        self._log_download_debug("尝试使用疯狂模式管理器计算分块")
+                        
+                        # 直接调用疯狂模式的分块计算逻辑
+                        if hasattr(crazy_mode_manager, 'patch_download_engine'):
+                            # 确保疯狂模式已启用
+                            if not crazy_mode_manager.enabled:
+                                crazy_mode_manager.enable(self.thread_count, self)
+                            
+                            # 应用补丁
+                            crazy_mode_manager.patch_download_engine()
+                            
+                            # 重新计算分块
+                            boundaries = self._calculate_blocks()
+                except ImportError:
+                    self._log_download_debug("导入疯狂模式模块失败")
+                except Exception as e:
+                    self._log_download_debug(f"使用疯狂模式计算分块失败: {e}")
         
         if not boundaries:
             self._log_download_debug("计算分块失败，使用单线程模式")
             self.multi_thread_support = False
             client = self.client_manager.create_client(self.headers)
-            self.blocks.append(DownloadBlock(0, 0, self.file_size - 1, client))
+            self.blocks.append(DownloadBlock(0, 0, self.known_file_size - 1, client))
             return
         
         self._log_download_debug(f"创建 {len(boundaries)} 个新下载块")
@@ -979,7 +1111,7 @@ class DownloadEngine(QThread):
                 url_bytes = self.url.encode('utf-8')
                 url_len = len(url_bytes)
                 
-                f.write(struct.pack("<IQI", 1, self.file_size, url_len))
+                f.write(struct.pack("<IQI", 1, self.known_file_size, url_len))
                 f.write(url_bytes)
                 
                 # 写入每个块的状态
@@ -999,17 +1131,17 @@ class DownloadEngine(QThread):
         try:
             # 预分配文件空间（如果有大小信息）
             file_path = Path(self.save_path) / self.file_name
-            if self.file_size > 0:
+            if self.known_file_size > 0:
                 try:
-                    createSparseFile(file_path, self.file_size)
-                    self._log_download_debug(f"预分配文件空间: {getReadableSize(self.file_size)}")
+                    createSparseFile(file_path, self.known_file_size)
+                    self._log_download_debug(f"预分配文件空间: {getReadableSize(self.known_file_size)}")
                 except Exception as e:
                     self._log_download_debug(f"预分配文件空间失败: {e}")
             
             # 初始化文件写入器
             try:
                 # 选择合适的缓冲区大小
-                file_size_mb = self.file_size / (1024 * 1024) if self.file_size > 0 else 50
+                file_size_mb = self.known_file_size / (1024 * 1024) if self.known_file_size > 0 else 50
                 
                 if file_size_mb < 10:  # 小文件
                     buffer_size = 4 * 1024 * 1024  # 4MB
@@ -1020,7 +1152,7 @@ class DownloadEngine(QThread):
                 else:  # 超大文件
                     buffer_size = 32 * 1024 * 1024  # 32MB
                 
-                self.file_writer = OptimizedFileWriter(str(file_path), self.file_size, buffer_size=buffer_size)
+                self.file_writer = OptimizedFileWriter(str(file_path), self.known_file_size, buffer_size=buffer_size)
                 self._log_download_debug(f"创建文件写入器: 缓冲区大小={getReadableSize(buffer_size)}")
             except Exception as e:
                 self._log_download_debug(f"创建文件写入器失败: {e}，将使用直接写入模式")
@@ -1031,10 +1163,34 @@ class DownloadEngine(QThread):
             self.is_paused = False
             self.status_updated.emit("下载中...")
             
-            # 创建线程池 - 优化线程池大小
-            max_workers = min(32, self.thread_count * 2)  # 控制线程池大小，避免资源过度占用
-            self._log_download_debug(f"创建线程池，最大工作线程数: {max_workers}")
-            self.executor = ThreadPoolExecutor(max_workers=max_workers)
+            # 创建线程池
+            if self.crazy_mode:
+                # 疯狂模式下尝试使用疯狂模式管理器的线程池
+                try:
+                    from core.download_core.NSF_Utils.Crazy_Mode import crazy_mode_manager
+                    if crazy_mode_manager.enabled and hasattr(crazy_mode_manager, 'create_executor'):
+                        self.executor = crazy_mode_manager.create_executor()
+                        self._log_download_debug("使用疯狂模式线程池")
+                    else:
+                        # 创建标准线程池作为后备
+                        max_workers = min(128, self.thread_count * 2)
+                        self.executor = ThreadPoolExecutor(max_workers=max_workers)
+                        self._log_download_debug(f"疯狂模式创建标准线程池，最大工作线程数: {max_workers}")
+                except ImportError:
+                    # 创建标准线程池作为后备
+                    max_workers = min(128, self.thread_count * 2)
+                    self.executor = ThreadPoolExecutor(max_workers=max_workers)
+                    self._log_download_debug(f"疯狂模式模块导入失败，创建标准线程池: {max_workers}")
+            else:
+                # 标准模式下创建优化的线程池
+                max_workers = min(32, self.thread_count * 2)  # 控制线程池大小，避免资源过度占用
+                self._log_download_debug(f"创建标准线程池，最大工作线程数: {max_workers}")
+                self.executor = ThreadPoolExecutor(max_workers=max_workers)
+            
+            # 启动NSF增强器（如果可用）
+            if self.enhancer and self.enhancer.auto_adjust_enabled:
+                self.enhancer.start_optimization()
+                self._log_download_debug("NSF增强器已启动")
             
             # 启动监控线程
             monitor_thread = threading.Thread(target=self._monitor_progress, daemon=True)
@@ -1303,14 +1459,14 @@ class DownloadEngine(QThread):
                             active_stalled_count = 0  # 有进度，重置计数器
                     
                     # 文件大小未知且所有块都不活跃，视为下载完成
-                    if (self.file_size <= 0 or self.current_progress == 0) and all_blocks_inactive and not self.is_paused:
+                    if (self.known_file_size <= 0 or self.current_progress == 0) and all_blocks_inactive and not self.is_paused:
                         # 获取已下载文件的实际大小
                         try:
                             file_path = Path(self.save_path) / self.file_name
                             if file_path.exists():
                                 actual_size = file_path.stat().st_size
                                 if actual_size > 0:
-                                    self.file_size = actual_size
+                                    self.known_file_size = actual_size
                                     # 更新块终点位置
                                     for block in self.blocks:
                                         if isinstance(block, DownloadBlock):
@@ -1324,7 +1480,7 @@ class DownloadEngine(QThread):
                             self._log_download_debug(f"获取文件实际大小失败: {e}")
                 
                 # 如果文件大小未知但已有下载进度，检查下载是否已停止一段时间
-                if self.file_size <= 0 and self.current_progress > 0:
+                if self.known_file_size <= 0 and self.current_progress > 0:
                     if self.current_progress == last_progress:
                         # 如果进度停止更新超过3秒，认为下载可能已完成
                         if elapsed_time - self.last_progress_time > 3:
@@ -1337,7 +1493,7 @@ class DownloadEngine(QThread):
                                     if file_path.exists():
                                         actual_size = file_path.stat().st_size
                                         if actual_size > 0:
-                                            self.file_size = actual_size
+                                            self.known_file_size = actual_size
                                             # 更新块终点位置
                                             for block in self.blocks:
                                                 if isinstance(block, DownloadBlock):
@@ -1350,6 +1506,16 @@ class DownloadEngine(QThread):
                     else:
                         last_progress = self.current_progress
                         self.last_progress_time = elapsed_time
+                
+                # 更新NSF增强器状态（如果可用）
+                if self.enhancer and self.enhancer.auto_adjust_enabled:
+                    # 更新块状态
+                    for i, block in enumerate(self.blocks):
+                        if isinstance(block, DownloadBlock):
+                            self.enhancer.update_block_status(
+                                i, block.current_position, block.start_position, 
+                                block.end_position, block.active
+                            )
                 
                 # 更新下载速度
                 if elapsed_time >= 1:
@@ -1368,8 +1534,8 @@ class DownloadEngine(QThread):
                 self.speed_updated.emit(int(self.avg_speed))
                 
                 # 检查是否下载完成（两种情况：1. 明确的文件大小且进度达到 2. 所有块都完成）
-                if (self.file_size > 0 and self.current_progress >= self.file_size) or all_blocks_complete:
-                    self._log_download_debug(f"下载完成: 当前进度={self.current_progress}, 文件大小={self.file_size}, 所有块完成={all_blocks_complete}")
+                if (self.known_file_size > 0 and self.current_progress >= self.known_file_size) or all_blocks_complete:
+                    self._log_download_debug(f"下载完成: 当前进度={self.current_progress}, 文件大小={self.known_file_size}, 所有块完成={all_blocks_complete}")
                     break
                 
                 # 睡眠500毫秒
@@ -1390,8 +1556,8 @@ class DownloadEngine(QThread):
                     self.current_progress += (block.current_position - block.start_position)
             
             # 如果文件大小未知但已下载完成，使用当前进度作为文件大小
-            if self.file_size <= 0 and self.current_progress > 0:
-                self.file_size = self.current_progress
+            if self.known_file_size <= 0 and self.current_progress > 0:
+                self.known_file_size = self.current_progress
                 self._log_download_debug(f"文件大小未知，设置为当前进度: {getReadableSize(self.current_progress)}")
             
             # 更新最终状态
@@ -1424,7 +1590,7 @@ class DownloadEngine(QThread):
                 
                 f.write(f"总耗时: {time_str}\n")
                 f.write(f"文件名: {self.file_name}\n")
-                f.write(f"文件大小: {getReadableSize(self.file_size)}\n")
+                f.write(f"文件大小: {getReadableSize(self.known_file_size)}\n")
                 f.write(f"保存路径: {self.save_path}\n")
                 f.write(f"状态: {'已完成' if not self.is_paused else '已暂停'}\n")
                 f.write(f"多线程: {self.multi_thread_support}\n")
@@ -1488,6 +1654,25 @@ class DownloadEngine(QThread):
         self._log_download_debug("停止下载任务")
         self.status_updated.emit("已停止")
         self.is_running = False
+        
+        # 如果是疯狂模式，恢复下载引擎
+        if self.crazy_mode:
+            try:
+                from core.download_core.NSF_Utils.Crazy_Mode import restore_download_engine
+                restore_download_engine()
+                self._log_download_debug("已恢复疯狂模式补丁")
+            except ImportError:
+                pass
+            except Exception as e:
+                self._log_download_debug(f"恢复疯狂模式补丁失败: {e}")
+        
+        # 停止NSF增强器（如果可用）
+        if self.enhancer:
+            try:
+                self.enhancer.stop_optimization()
+                self._log_download_debug("NSF增强器已停止")
+            except Exception as e:
+                self._log_download_debug(f"停止NSF增强器失败: {e}")
         
         # 关闭文件写入缓冲区，确保所有数据都已写入
         if self.file_writer:
@@ -1599,6 +1784,21 @@ class DownloadEngine(QThread):
                 if self._init_thread.is_alive():
                     self.error_occurred.emit("初始化超时，请检查网络连接")
                     return
+            
+            # 如果是疯狂模式，先修补下载引擎
+            if self.crazy_mode:
+                try:
+                    from core.download_core.NSF_Utils.Crazy_Mode import crazy_mode_manager
+                    # 确保疯狂模式已启用
+                    if not crazy_mode_manager.enabled:
+                        crazy_mode_manager.enable(self.thread_count, self)
+                    # 应用补丁
+                    patch_result = crazy_mode_manager.patch_download_engine()
+                    self._log_download_debug(f"已应用疯狂模式补丁: {'成功' if patch_result else '失败'}")
+                except ImportError:
+                    self._log_download_debug("疯狂模式模块导入失败，将使用标准模式")
+                except Exception as e:
+                    self._log_download_debug(f"应用疯狂模式补丁失败: {e}")
             
             # 初始化下载块
             self._init_blocks()
@@ -1904,7 +2104,7 @@ class DownloadEngine(QThread):
             
             # 创建单线程下载块
             client = self.client_manager.create_client(self.headers)
-            self.blocks.append(DownloadBlock(0, 0, self.file_size - 1 if self.file_size > 0 else 2**63 - 1, client))
+            self.blocks.append(DownloadBlock(0, 0, self.known_file_size - 1 if self.known_file_size > 0 else 2**63 - 1, client))
         
         # 如果仍在运行，启动单线程下载
         if self.is_running and not self.is_paused:
@@ -1930,7 +2130,7 @@ class DownloadEngine(QThread):
         timeout = 30  # 缩短初始超时时间
         
         # 下载过程
-        while (block.current_position < block.end_position or self.file_size <= 0) and self.is_running and not self.is_paused:
+        while (block.current_position < block.end_position or self.known_file_size <= 0) and self.is_running and not self.is_paused:
             try:
                 # 准备请求头
                 headers = self.headers.copy()
@@ -1968,10 +2168,10 @@ class DownloadEngine(QThread):
                     content_length = response.headers.get('Content-Length')
                     if content_length and content_length.isdigit():
                         new_size = int(content_length) + block.current_position
-                        if self.file_size <= 0 or new_size > self.file_size:
-                            old_size = self.file_size
-                            self.file_size = new_size
-                            self._log_download_debug(f"更新文件大小: {getReadableSize(old_size)} -> {getReadableSize(self.file_size)}")
+                        if self.known_file_size <= 0 or new_size > self.known_file_size:
+                            old_size = self.known_file_size
+                            self.known_file_size = new_size
+                            self._log_download_debug(f"更新文件大小: {getReadableSize(old_size)} -> {getReadableSize(self.known_file_size)}")
                             
                             # 更新块结束位置
                             if block.end_position < new_size - 1:
@@ -2330,4 +2530,55 @@ class DownloadEngine(QThread):
             logging.warning(f"速度限制处理出错: {e}")
             # 出错时不进行限速
 
-    # 移除动态缓冲区大小调整方法
+    def _reset_block(self, block_id):
+        """重置下载块（供NSF增强器调用）
+        
+        Args:
+            block_id: 块ID
+        """
+        try:
+            if 0 <= block_id < len(self.blocks):
+                block = self.blocks[block_id]
+                # 重置块处理逻辑
+                if block.active and block.current_position < block.end_position:
+                    block.active = False
+                    self._log_download_debug(f"重置块 #{block_id}")
+                    # 重新提交块到线程池
+                    if self.executor and not self.executor._shutdown:
+                        self.executor.submit(self._process_block, block)
+        except Exception as e:
+            self._log_download_debug(f"重置块失败: {e}")
+    
+    def _split_block(self, block_id, split_point):
+        """分割下载块（供NSF增强器调用）
+        
+        Args:
+            block_id: 块ID
+            split_point: 分割点
+            
+        Returns:
+            int: 新块ID，失败返回None
+        """
+        try:
+            if 0 <= block_id < len(self.blocks):
+                block = self.blocks[block_id]
+                # 确保分割点在有效范围内
+                if block.current_position < split_point < block.end_position:
+                    # 创建新块
+                    new_block = DownloadBlock(
+                        split_point, split_point, block.end_position,
+                        self.client_manager.create_client(self.headers)
+                    )
+                    # 更新原块结束位置
+                    block.end_position = split_point - 1
+                    # 添加新块到列表
+                    self.blocks.append(new_block)
+                    new_block_id = len(self.blocks) - 1
+                    self._log_download_debug(f"分割块 #{block_id} 在位置 {split_point}，生成新块 #{new_block_id}")
+                    # 提交新块到线程池
+                    if self.executor and not self.executor._shutdown:
+                        self.executor.submit(self._process_block, new_block)
+                    return new_block_id
+        except Exception as e:
+            self._log_download_debug(f"分割块失败: {e}")
+        return None
