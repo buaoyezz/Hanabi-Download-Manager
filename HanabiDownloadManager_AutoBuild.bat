@@ -105,7 +105,6 @@ python -m nuitka ^
   --python-flag=no_site ^
   --python-flag=no_warnings ^
   --python-flag=no_asserts ^
-  --disable-console ^
   main.py
 
 echo.
